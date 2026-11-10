@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest"
-import { getCustomCompatibleHeaders, getProviderConfig, modelSupportsReasoningControl, parseGoogleLine, parseOpenAiSseError, withCustomOriginHeader } from "./llm-providers"
+import { getCustomCompatibleHeaders, getProviderConfig, modelAlwaysThinks, modelSupportsReasoningControl, parseGoogleLine, parseOpenAiSseError, reasoningOutputFloor, withCustomOriginHeader } from "./llm-providers"
 import type { ChatMessage } from "./llm-providers"
 import { filterDeAiOutput } from "./novel/de-ai-output"
-import type { LlmConfig, ReasoningMode } from "@/stores/wiki-store"
+import type { LlmConfig, ReasoningConfig, ReasoningMode } from "@/stores/wiki-store"
 
 function customConfig(overrides: Partial<LlmConfig> = {}): LlmConfig {
   return {
@@ -331,6 +331,141 @@ describe("llm provider reasoning options", () => {
     }))
 
     expect(body.reasoning).toEqual({ effort: "high" })
+  })
+})
+
+describe("Kimi Code（k2.8 / k3 / k3.1-pro）不发 temperature", () => {
+  function kimiCode(overrides: Partial<LlmConfig> = {}): LlmConfig {
+    return customConfig({
+      model: "k3.1-pro",
+      customEndpoint: "https://api.kimi.com/coding/v1",
+      ...overrides,
+    })
+  }
+
+  it("OpenAI 兼容线上删掉 temperature，max_tokens 原样保留", () => {
+    const body = getProviderConfig(kimiCode()).buildBody(
+      [{ role: "user", content: "hi" }],
+      { temperature: 0, max_tokens: 4096 },
+    ) as Record<string, unknown>
+
+    expect(body.temperature).toBeUndefined()
+    expect(body.max_tokens).toBe(4096)
+  })
+
+  it("Responses 线上同样删掉 temperature（此前完全没有适配）", () => {
+    const body = getProviderConfig(kimiCode({ apiMode: "responses" })).buildBody(
+      [{ role: "user", content: "hi" }],
+      { temperature: 0, max_tokens: 4096 },
+    ) as Record<string, unknown>
+
+    expect(body.temperature).toBeUndefined()
+    expect(body.max_output_tokens).toBe(4096)
+  })
+
+  it("模型 id 经中转端点也命中（端点不是 kimi.com/moonshot 时）", () => {
+    for (const model of ["k3", "k2.8", "k3.1-pro"]) {
+      const body = getProviderConfig(customConfig({
+        model,
+        customEndpoint: "https://relay.example.com/v1",
+      })).buildBody(
+        [{ role: "user", content: "hi" }],
+        { temperature: 0.1 },
+      ) as Record<string, unknown>
+
+      expect(body.temperature, model).toBeUndefined()
+    }
+  })
+
+  it("不改动非 Kimi 型号：智谱 glm-5.3-flash 仍按调用方给的 temperature 发送", () => {
+    const body = getProviderConfig(customConfig({
+      model: "glm-5.3-flash",
+      customEndpoint: "https://open.bigmodel.cn/api/paas/v4",
+      reasoning: { mode: "auto" },
+    })).buildBody(
+      [{ role: "user", content: "hi" }],
+      { temperature: 0 },
+    ) as Record<string, unknown>
+
+    expect(body.temperature).toBe(0)
+  })
+})
+
+describe("智谱 GLM-5.3：始终思考的型号不发 thinking.disabled", () => {
+  function glm53(reasoning: ReasoningConfig, overrides: Partial<LlmConfig> = {}): LlmConfig {
+    return customConfig({
+      model: "glm-5.3-flash",
+      customEndpoint: "https://open.bigmodel.cn/api/paas/v4",
+      reasoning,
+      ...overrides,
+    })
+  }
+
+  it("关闭档整个不发 thinking（发 disabled 会被 400 / code 1210 拒）", () => {
+    const body = requestBody(glm53({ mode: "off" }))
+
+    expect(body).not.toHaveProperty("thinking")
+    expect(body).not.toHaveProperty("reasoning_effort")
+  })
+
+  it("低档发 enabled + low", () => {
+    const body = requestBody(glm53({ mode: "low" }))
+
+    expect(body.thinking).toEqual({ type: "enabled" })
+    expect(body.reasoning_effort).toBe("low")
+  })
+
+  it("中档只发 enabled，不发 medium（该型号只接受 low/high/max）", () => {
+    const body = requestBody(glm53({ mode: "medium" }))
+
+    expect(body.thinking).toEqual({ type: "enabled" })
+    expect(body).not.toHaveProperty("reasoning_effort")
+  })
+
+  it("最高档发 max", () => {
+    const body = requestBody(glm53({ mode: "max" }))
+
+    expect(body.thinking).toEqual({ type: "enabled" })
+    expect(body.reasoning_effort).toBe("max")
+  })
+
+  it("输出预算装不下思考时整个不发，而不是降级成 disabled", () => {
+    const body = getProviderConfig(glm53({ mode: "high" })).buildBody(
+      [{ role: "user", content: "hi" }],
+      { max_tokens: 2048 },
+    ) as Record<string, unknown>
+
+    expect(body.max_tokens).toBe(2048)
+    expect(body).not.toHaveProperty("thinking")
+    expect(body).not.toHaveProperty("reasoning_effort")
+  })
+
+  it("Responses 线同样只发 low/high/max", () => {
+    const medium = requestBody(glm53({ mode: "medium" }, { apiMode: "responses" }))
+    const high = requestBody(glm53({ mode: "high" }, { apiMode: "responses" }))
+
+    expect(medium).not.toHaveProperty("reasoning")
+    expect(high.reasoning).toEqual({ effort: "high" })
+  })
+
+  it("modelAlwaysThinks / reasoningOutputFloor 只对官方端点的 5.3 生效", () => {
+    expect(modelAlwaysThinks(glm53({ mode: "off" }))).toBe(true)
+    expect(modelAlwaysThinks(customConfig({
+      model: "glm-5.3-flash",
+      customEndpoint: "https://api.atlascloud.ai/v1",
+    }))).toBe(false)
+    expect(modelAlwaysThinks(customConfig({
+      model: "glm-4.7",
+      customEndpoint: "https://open.bigmodel.cn/api/paas/v4",
+    }))).toBe(false)
+
+    expect(reasoningOutputFloor(glm53({ mode: "off" }))).toBe(4096)
+    expect(reasoningOutputFloor(glm53({ mode: "high" }))).toBe(16384)
+    expect(reasoningOutputFloor(customConfig({
+      model: "glm-4.7",
+      customEndpoint: "https://open.bigmodel.cn/api/paas/v4",
+      reasoning: { mode: "off" },
+    }))).toBe(0)
   })
 })
 

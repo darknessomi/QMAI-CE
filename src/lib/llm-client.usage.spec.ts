@@ -306,6 +306,124 @@ describe("streamChat usage", () => {
     expect(onError).not.toHaveBeenCalled()
   })
 
+  it("服务端拒收 temperature 时去掉该参数重发一次", async () => {
+    const encoder = new TextEncoder()
+    mocks.fetch
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({ error: { message: "invalid temperature: only 1 is allowed for this model" } }),
+        { status: 400 },
+      ))
+      .mockResolvedValueOnce(new Response(new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(encoder.encode([
+            'data: {"choices":[{"delta":{"content":"正文"}}]}',
+            "data: [DONE]",
+            "",
+          ].join("\n")))
+          controller.close()
+        },
+      }), { status: 200 }))
+
+    const strictConfig: LlmConfig = {
+      ...config,
+      provider: "custom",
+      model: "strict-temp-model",
+      customEndpoint: "https://relay.example.com/v1",
+    }
+    const onToken = vi.fn()
+    const onError = vi.fn()
+
+    await streamChat(
+      strictConfig,
+      [{ role: "user", content: "写一句" }],
+      { onToken, onDone: vi.fn(), onError },
+      undefined,
+      { temperature: 0.1 },
+    )
+
+    expect(mocks.fetch).toHaveBeenCalledTimes(2)
+    const firstBody = JSON.parse(String((mocks.fetch.mock.calls[0][1] as RequestInit).body)) as {
+      temperature?: number
+    }
+    const retryBody = JSON.parse(String((mocks.fetch.mock.calls[1][1] as RequestInit).body)) as {
+      temperature?: number
+    }
+    expect(firstBody.temperature).toBe(0.1)
+    expect(retryBody.temperature).toBeUndefined()
+    expect(onToken).toHaveBeenCalledWith("正文")
+    expect(onError).not.toHaveBeenCalled()
+  })
+
+  it("服务端说该型号始终思考时，回退到不发 thinking 重发一次（智谱 code 1210）", async () => {
+    const encoder = new TextEncoder()
+    mocks.fetch
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({
+          error: { code: "1210", message: "该模型始终思考，不支持关闭思考；请使用 low、high 或 max。" },
+        }),
+        { status: 400 },
+      ))
+      .mockResolvedValueOnce(new Response(new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(encoder.encode([
+            'data: {"choices":[{"delta":{"content":"已经回答"}}]}',
+            "data: [DONE]",
+            "",
+          ].join("\n")))
+          controller.close()
+        },
+      }), { status: 200 }))
+
+    // glm-5.1 不在"始终思考"静态名单里，用来验证兜底重试本身。
+    const zhipuConfig: LlmConfig = {
+      ...config,
+      provider: "custom",
+      model: "glm-5.1",
+      customEndpoint: "https://open.bigmodel.cn/api/paas/v4",
+      reasoning: { mode: "off" },
+    }
+    const onToken = vi.fn()
+    const onError = vi.fn()
+
+    await streamChat(zhipuConfig, [{ role: "user", content: "写一句" }], {
+      onToken,
+      onDone: vi.fn(),
+      onError,
+    })
+
+    expect(mocks.fetch).toHaveBeenCalledTimes(2)
+    const firstBody = JSON.parse(String((mocks.fetch.mock.calls[0][1] as RequestInit).body)) as {
+      thinking?: { type: string }
+    }
+    const retryBody = JSON.parse(String((mocks.fetch.mock.calls[1][1] as RequestInit).body)) as {
+      thinking?: unknown
+      reasoning_effort?: unknown
+    }
+    expect(firstBody.thinking).toEqual({ type: "disabled" })
+    expect(retryBody).not.toHaveProperty("thinking")
+    expect(retryBody).not.toHaveProperty("reasoning_effort")
+    expect(onToken).toHaveBeenCalledWith("已经回答")
+    expect(onError).not.toHaveBeenCalled()
+  })
+
+  it("无关的 400 不触发兜底重试，错误原样上报", async () => {
+    mocks.fetch.mockResolvedValueOnce(new Response(
+      JSON.stringify({ error: { message: "model not found" } }),
+      { status: 400 },
+    ))
+    const onError = vi.fn()
+
+    await streamChat(config, [{ role: "user", content: "写一句" }], {
+      onToken: vi.fn(),
+      onDone: vi.fn(),
+      onError,
+    })
+
+    expect(mocks.fetch).toHaveBeenCalledTimes(1)
+    expect(onError).toHaveBeenCalledOnce()
+    expect(String(onError.mock.calls[0]?.[0]?.message)).toContain("model not found")
+  })
+
   it("发送前按 token 预算裁剪并保持系统与当前请求非空", async () => {
     mocks.fetch.mockResolvedValue(new Response([
       'data: {"choices":[{"delta":{"content":"完成"}}]}',

@@ -5,8 +5,8 @@ import {
   getEffectiveMaxOutputTokens,
   isTruncationFinishReason,
   parseOpenAiSseError,
+  reasoningOutputFloor,
   resolveProviderConfig,
-  thinkingMinMaxTokens,
   type ChatMessage,
   type RequestOverrides,
 } from "./llm-providers"
@@ -36,9 +36,14 @@ import { RESPONSE_RESERVE_FRAC, planLlmRequestBudget } from "./context-budget"
 import { mergeLlmUsageSnapshot, type LlmUsage } from "./llm-usage"
 import {
   hasUnreplayableToolAssistantReasoning,
+  isAlwaysThinkingRejection,
+  isReasoningAuto,
   isReasoningDisabled,
+  isTemperatureRejected,
   stripEmptyReasoningContent,
+  withReasoningAuto,
   withReasoningDisabled,
+  withTemperatureStripped,
 } from "./reasoning-retry"
 import { applyGlobalUserMemoryToMessages } from "./user-memory/request-integration"
 import { preparePromptCacheRouting } from "./prompt-cache-routing"
@@ -564,7 +569,7 @@ async function streamChatHeld(
   const configuredWindow = getEffectiveMaxContextSize(runtimeConfig)
   const toolScaffoldTokens = estimateRequestScaffoldTokens(baseOverrides?.tools)
   const outputCap = getEffectiveMaxOutputTokens(runtimeConfig)
-  const thinkingFloorTokens = thinkingMinMaxTokens(runtimeConfig.reasoning ?? { mode: "auto" })
+  const thinkingFloorTokens = reasoningOutputFloor(runtimeConfig)
   const runtimeBudget = planLlmRequestBudget({
     maxContextSize: configuredWindow,
     desiredOutputTokens: baseOverrides?.max_tokens
@@ -950,6 +955,34 @@ async function streamChatHeld(
         errorDetail += `\n${formatReasoningReplayRiskForError(risk)}`
       }
       let httpRetrySucceeded = false
+      // 参数被拒类 400/422 的兜底重试：只重发一次改写后的报文，绝不循环。
+      // 返回 null 表示重发成功（httpRetrySucceeded 已置位），否则是第二次的错误详情。
+      const retryOnceWith = async (nextOverrides: RequestOverrides): Promise<string | null> => {
+        effectiveRequestOverrides = await preparePromptCacheRouting(runtimeConfig, budgetedMessages, nextOverrides)
+        prefixDescriptor = await buildLlmRequestPrefixDescriptor(
+          runtimeConfig,
+          budgetedMessages,
+          effectiveRequestOverrides,
+        )
+        requestInit = await buildRequestInit(budgetedMessages, effectiveRequestOverrides)
+        try {
+          response = await sendRequest(requestInit)
+        } catch (err) {
+          return err instanceof Error ? err.message : String(err)
+        }
+        if (response.ok) {
+          httpRetrySucceeded = true
+          return null
+        }
+        let retryErrorDetail = `HTTP ${response.status}: ${response.statusText}`
+        try {
+          const retryBody = await response.text()
+          if (retryBody) retryErrorDetail += ` — ${retryBody}`
+        } catch {
+          // ignore body read failure
+        }
+        return retryErrorDetail
+      }
       const inputLimit = parseInputLengthLimit(errorDetail)
       if (inputLimit) {
         const currentInputTokens = estimateChatMessagesTokens(budgetedMessages)
@@ -1057,6 +1090,31 @@ async function streamChatHeld(
         }
         if (response.ok) {
           httpRetrySucceeded = true
+        }
+      }
+      // 服务商明确拒收 temperature（Kimi 要求只能为 1，以及同类严格校验的型号）：
+      // 去掉该参数重发一次，比把 "invalid temperature" 直接甩给用户可用得多。
+      // 静态识别（isKimiEndpoint）已覆盖已知型号，这里兜住未列出的 id 与中转网关。
+      const parameterRejected = response.status === 400 || response.status === 422
+      if (!httpRetrySucceeded && parameterRejected && isTemperatureRejected(errorDetail)) {
+        const failure = await retryOnceWith(withTemperatureStripped(effectiveRequestOverrides))
+        if (!httpRetrySucceeded) {
+          onError(new Error(failure ?? errorDetail))
+          return
+        }
+      }
+      // 服务商明确表示「该型号始终思考、关不掉」（智谱 code 1210）：回到 auto 重发一次，
+      // 请求体不再携带 thinking / reasoning_effort，避免静态识别漏掉的新型号直接失败。
+      if (
+        !httpRetrySucceeded &&
+        parameterRejected &&
+        isAlwaysThinkingRejection(errorDetail) &&
+        !isReasoningAuto(runtimeConfig, effectiveRequestOverrides)
+      ) {
+        const failure = await retryOnceWith(withReasoningAuto(effectiveRequestOverrides))
+        if (!httpRetrySucceeded) {
+          onError(new Error(failure ?? errorDetail))
+          return
         }
       }
       if (
