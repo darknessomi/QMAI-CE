@@ -21,6 +21,25 @@ vi.mock("@/lib/builtin-models/provider-bridge", async () => {
 
 vi.mock("@/lib/project-store", () => projectStore)
 
+/*
+ * 默认让 HTTP 立即失败，把「网络请求」从测试里彻底摘掉。
+ *
+ * 有一条用例（「没有网关卡时先尝试补签，补签失败才返回 false」）本意是
+ * 验证「补签失败 → 返回 false」这条分支。原来的写法依赖「测试机连不上
+ * 账号服务」这个环境事实：断网时快速失败，网络抖动时一路挂到 5 秒超时，
+ * 于是同一个用例在不同机器 / 不同时间表现不一致，变成随机红。
+ *
+ * 失败路径不需要真实网络 —— 给一个立刻抛错的 fetch 就能确定地表达意图。
+ * 需要成功路径的用例自己用 vi.doMock + resetModules 覆盖（见「补签网关卡时
+ * 上报 deviceHash」那条）。
+ */
+vi.mock("@/lib/tauri-fetch", () => ({
+  getHttpFetch: async () => {
+    throw new Error("test: network disabled")
+  },
+  isFetchNetworkError: () => true,
+}))
+
 const { syncBuiltinModels, refreshBuiltinModels, resetBuiltinSyncState } = await import("@/lib/builtin-models/auto-sync")
 const { useWikiStore } = await import("@/stores/wiki-store")
 const { BUILTIN_PROVIDER_ID } = await import("@/lib/builtin-models/provider-bridge")

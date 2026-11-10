@@ -25,6 +25,9 @@ import { readUiTestWorkspacePreference as readPreference, uiTestWorkspaceKey as 
 import { availablePrimaryNav, movePrimaryNav, normalizePrimaryNav, PRIMARY_NAV_LONG_PRESS_MS, readPrimaryNav, writePrimaryNav, type PrimaryNavItem, type PrimaryNavView } from "@/lib/ui-test-primary-nav"
 import { isBuiltinViewEnabled } from "@/lib/plugins/builtin-state"
 import { useBuiltinPluginsState } from "@/lib/plugins/use-builtin-plugins"
+import { MemberBadge } from "@/components/membership/member-badge"
+import { MEMBER_FEATURE_VIEWS } from "@/lib/membership/access"
+import { useMembership } from "@/lib/membership/use-membership"
 import { normalizePath } from "@/lib/path-utils"
 import { getUiTestDocumentPath, UI_TEST_AI_DEFAULT_WIDTH } from "@/lib/ui-test-layout"
 import { isFullWindowView } from "@/lib/full-window-views"
@@ -32,10 +35,13 @@ import type { WikiProject } from "@/types/wiki"
 import { UiTestShelf } from "./ui-test-shelf"
 import { ContactSupportSection } from "@/components/settings/sections/contact-support-section"
 import { useCloudSyncAutoSync } from "@/hooks/use-cloud-sync-auto-sync"
+import { useMemberCloudAutoSync } from "@/hooks/use-member-cloud-auto-sync"
 import { CloudSyncIndicator } from "@/components/layout/cloud-sync-indicator"
+import { MemberCloudIndicator } from "@/components/membership/member-cloud-indicator"
 import { CloudSyncDetailDialog } from "@/components/layout/cloud-sync-detail-dialog"
 import { CLOUD_SYNC_OPEN_SETTINGS_EVENT } from "@/lib/cloud-sync/client"
 import { useCloudSyncStore } from "@/stores/cloud-sync-store"
+import { MemberPurchaseDialog } from "@/components/membership/member-purchase-dialog"
 import { AccountDialog } from "@/components/account/account-dialog"
 import { useAccountStore } from "@/stores/account-store"
 import { confirmModelDraftLeave } from "./models/model-draft-guard"
@@ -54,6 +60,7 @@ import { createDirectory, fileExists, readFile, writeFile } from "@/commands/fs"
 import { toast } from "@/lib/toast"
 import type { FileNode } from "@/types/wiki"
 import "./ui-test.css"
+import "./ui-test-skins.css"
 
 const UiTestWorkspace = lazy(async () => ({ default: (await import("./ui-test-workspace")).UiTestWorkspace }))
 type NavView = WikiState["activeView"]
@@ -108,7 +115,7 @@ function menuKeyboard(event: KeyboardEvent<HTMLDivElement>) {
 
 /**
  * 顶栏「AI 对话」专用图标：圆角对话气泡内嵌 AI 字样。
- * 全部笔画使用 currentColor，跟随按钮文字色，因此会自动适配静水/纸间/星夜三种皮肤。
+ * 全部笔画使用 currentColor，跟随按钮文字色，因此会自动适配青瓷/宣纸/石墨三种皮肤。
  */
 function AiChatIcon() {
   return (
@@ -164,6 +171,12 @@ export function UiTestShell({ project, onOpenProject, onSelectProject, onSwitchP
    */
   const builtinState = useBuiltinPluginsState()
   const visibleGroups = useMemo(() => visibleToolGroups(isBuiltinViewEnabled), [builtinState])
+  /*
+   * 会员标记：与内容区用的是同一套判定（`lib/membership`），
+   * 所以「菜单里有标记」与「点进去看到引导页」不会打架。
+   */
+  const { isLockedView } = useMembership()
+  const loggedIn = useAccountStore((state) => Boolean(state.session))
   /*
    * 一级导航只**渲染时**隐藏被关闭的视图，**不删存储值**。
    * 为什么：`primaryNav` 的顺序是用户自己排的（长按 → 移动/替换/删除），
@@ -458,6 +471,9 @@ export function UiTestShell({ project, onOpenProject, onSelectProject, onSwitchP
   // 自动同步（落盘后 / 重新聚焦 / 刚连上）：判定在 lib/cloud-sync/scheduler.ts。
   useCloudSyncAutoSync()
 
+  // 会员云空间自动同步：落盘后防抖 8 秒传一次（与云同步同一触发点）。
+  useMemberCloudAutoSync()
+
   // 云图标/气泡里点「去登录」「查看详情」时，由外壳负责真正打开设置页：
   // showGlobalSettings 属于外壳，组件自己改会在无项目时掉回书架。
   const navigateRef = useRef(navigate)
@@ -597,7 +613,7 @@ export function UiTestShell({ project, onOpenProject, onSelectProject, onSwitchP
             */}
             <button type="button" className={`ui-test-nav-shelf${showShelf ? " is-active" : ""}`} data-guide="shell.shelf" aria-label="返回书架" aria-current={showShelf ? "page" : undefined} title="返回书架" onClick={() => void returnToShelf()}>书架</button>
             {visiblePrimaryNav.map((item) => <div className="ui-test-nav-slot" key={item.view} onPointerDown={(event) => pressNav(event, item.view)} onPointerMove={moveNavPress} onPointerUp={releaseNavPress} onPointerCancel={releaseNavPress} onContextMenu={(event) => openNavMenu(event, item.view)}>
-              <button type="button" disabled={!project} data-guide={item.view === "wiki" ? "shell.nav.wiki" : item.view === "soul" ? "shell.tool.soul" : item.view === "skillLibrary" ? "shell.tool.skillLibrary" : undefined} aria-current={project && activeView === item.view ? "page" : undefined} aria-haspopup="menu" className={`ui-test-nav-item${project && activeView === item.view ? " is-active" : ""}`} onClick={() => navigate(item.view)}>{item.label}</button>
+              <button type="button" disabled={!project} data-guide={item.view === "wiki" ? "shell.nav.wiki" : item.view === "soul" ? "shell.tool.soul" : item.view === "skillLibrary" ? "shell.tool.skillLibrary" : undefined} aria-current={project && activeView === item.view ? "page" : undefined} aria-haspopup="menu" className={`ui-test-nav-item${project && activeView === item.view ? " is-active" : ""}`} onClick={() => navigate(item.view)}>{item.label}{MEMBER_FEATURE_VIEWS[item.view] ? <span className="ui-test-entitlement-mark" title="会员专属功能" aria-label="会员专属功能" /> : null}</button>
               {navMenu === item.view && <div ref={navMenuRef} className={`ui-test-menu-pop ui-test-nav-menu${navMenuAlign === "right" ? " is-right" : ""}`} role="menu" aria-label={`${item.label}功能菜单`} data-tauri-drag-region="false" onKeyDown={menuKeyboard} onMouseLeave={hideNavSectionSoon}>
                 <button type="button" role="menuitem" className="ui-test-menu-item" aria-expanded={navMenuSection === "move"} aria-haspopup="menu" onMouseEnter={() => showNavSection("move")} onFocus={() => showNavSection("move")}>移动</button>
                 <button type="button" role="menuitem" className="ui-test-menu-item" aria-expanded={navMenuSection === "replace"} aria-haspopup="menu" onMouseEnter={() => showNavSection("replace")} onFocus={() => showNavSection("replace")}>替换为</button>
@@ -638,7 +654,20 @@ export function UiTestShell({ project, onOpenProject, onSelectProject, onSwitchP
               {toolOpen && <div className="ui-test-menu-pop" role="menu" aria-label="创作工具" data-tauri-drag-region="false" onKeyDown={menuKeyboard}>
                 <div className="ui-test-menu-title">创作工具 · {project?.name ?? "未选择小说"}</div>
                 {visibleGroups.map((group, index) => <div className="ui-test-menu-group" key={index}>
-                  {group.map(({ view, label, icon: Icon }) => <button key={view} type="button" role="menuitem" className="ui-test-menu-item" disabled={!project} onClick={() => navigate(view)}><Icon /><span>{label}</span></button>)}
+                  {group.map(({ view, label, icon: Icon }) => {
+                    /*
+                     * 会员标记（2026-11-06）：入口**保留**，只在未开通的会员功能后面
+                     * 加一枚小标记。未登录时一律不加 —— 那时候全员都是非会员，
+                     * 全员标一遍等于没有信息量；点进去后由引导页说清怎么开通。
+                     */
+                    const memberLocked = loggedIn && Boolean(MEMBER_FEATURE_VIEWS[view]) && isLockedView(view)
+                    return (
+                      <button key={view} type="button" role="menuitem" className="ui-test-menu-item" disabled={!project} onClick={() => navigate(view)}>
+                        <Icon /><span>{label}</span>
+                        {memberLocked ? <MemberBadge className="ml-1.5" withIcon={false} /> : null}
+                      </button>
+                    )
+                  })}
                 </div>)}
               </div>}
             </div>
@@ -646,6 +675,12 @@ export function UiTestShell({ project, onOpenProject, onSelectProject, onSwitchP
               <TooltipTrigger render={<button type="button" className="ui-test-icon-btn ui-test-activity-entry" aria-label="后台活动" onClick={() => setShowActivity(true)}><History /></button>} />
               <TooltipContent>后台活动</TooltipContent>
             </Tooltip>
+            {/*
+              会员云同步（2026-11-08 用户要求）。与右边那个 CloudSyncIndicator 是两件事：
+              那个同步到用户自己的网盘，这个备份到青幕服务器、走会员空间配额。
+              未登录或云同步插件被关闭时组件自己返回 null。
+            */}
+            <MemberCloudIndicator />
             <CloudSyncIndicator />
             <Tooltip>
               <TooltipTrigger render={<button type="button" className="ui-test-icon-btn ui-test-activity-entry" aria-label="联系与支持" aria-haspopup="dialog" onClick={() => setShowContact(true)}><HeartHandshake /></button>} />
@@ -675,6 +710,7 @@ export function UiTestShell({ project, onOpenProject, onSelectProject, onSwitchP
       <CloudSyncDetailDialog />
       {/* 账号弹窗挂根上：侧栏面板有五套，挂在面板里会出现多层遮罩。 */}
       <AccountDialog />
+      <MemberPurchaseDialog />
       <Dialog open={showContact} onOpenChange={setShowContact}><DialogContent className="ui-test-contact-dialog" aria-label="联系与支持"><DialogTitle className="sr-only">联系与支持</DialogTitle><div className="ui-test-contact-body"><ContactSupportSection /></div><DialogFooter><button type="button" className="ui-test-btn primary" onClick={() => setShowContact(false)}>关闭</button></DialogFooter></DialogContent></Dialog>
       <GuideOverlay onDirective={runGuideDirective} />
     </div>

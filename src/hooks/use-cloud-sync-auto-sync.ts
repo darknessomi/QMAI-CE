@@ -17,10 +17,24 @@ import { isTauri } from "@/lib/platform"
 import { SAVE_DEBOUNCE_MS, decideAutoRun, type AutoTrigger } from "@/lib/cloud-sync/scheduler"
 import { subscribeProjectSaved } from "@/lib/cloud-sync/save-signal"
 import { useCloudSyncStore } from "@/stores/cloud-sync-store"
+import { useBuiltinPluginEnabled } from "@/lib/plugins/use-builtin-plugins"
 
 export function useCloudSyncAutoSync(): void {
+  /*
+   * 「云同步」被做成内置插件（2026-11-08 用户要求）。
+   *
+   * 关掉后**完全不订阅**任何触发源 —— 不是订阅了再 return，
+   * 而是连监听都不挂。用户已经明确表示不要这个功能了。
+   *
+   * ⚠️ 管的是「同步到用户自己的网盘」，与「会员云空间」无关。
+   *
+   * 依赖里带 `enabled`：插件状态一变，effect 自动清理重挂。
+   */
+  const [enabled] = useBuiltinPluginEnabled("cloud-sync")
+
   useEffect(() => {
     if (!isTauri()) return
+    if (!enabled) return
 
     let timer: ReturnType<typeof setTimeout> | null = null
     let prevConnected = useCloudSyncStore.getState().config.connected
@@ -94,5 +108,5 @@ export function useCloudSyncAutoSync(): void {
       window.removeEventListener("focus", onFocus)
       document.removeEventListener("visibilitychange", onVisibility)
     }
-  }, [])
+  }, [enabled])
 }

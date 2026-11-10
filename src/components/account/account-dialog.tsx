@@ -88,6 +88,15 @@ export function AccountDialog() {
   const [localError, setLocalError] = useState<string | null>(null)
   const [fieldError, setFieldError] = useState<AuthField | null>(null)
   const [devCode, setDevCode] = useState<string | null>(null)
+  /**
+   * 「验证码已发送到哪个邮箱」——**只有服务端确认发出后才有值**（2026-11-07）。
+   *
+   * 存在的理由：早先界面用 `cooldown > 0` 来表达「已发送」。
+   * 断网时服务端根本没收到请求，界面却可能因为别的原因进入冷却/显示提示，
+   * 让用户一直等一封不存在的邮件。现在这条提示只由**成功的响应**驱动，
+   * 失败时立刻清空（见 requestCode 的 catch）。
+   */
+  const [codeSentTo, setCodeSentTo] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [sendingCode, setSendingCode] = useState(false)
   const [cooldown, setCooldown] = useState(0)
@@ -327,16 +336,28 @@ export function AccountDialog() {
     try {
       const result = await sendCode(normalizedEmail, authMode === "reset" ? "reset" : "register")
       if (requestEpochRef.current !== epoch) return
+      /*
+       * 走到这里 = 服务端**确认已发出**（`account-worker` 在发信失败时会删掉
+       * 刚写的码并回 EMAIL_SEND_FAILED，`fs` 层再把它抛成错误）。
+       * 所以只有这条分支才可以进入冷却并显示「已发送」。
+       *
+       * 断网时抛的是 NETWORK，落到 catch —— 那里**不设冷却、不显示提示成功的文案**，
+       * 用户可以直接再点一次。这是「没有交换成功就不能显示成功」的落点。
+       */
       const seconds = Number.isFinite(result.cooldownSeconds) && result.cooldownSeconds > 0
         ? Math.floor(result.cooldownSeconds)
         : DEFAULT_COOLDOWN_SECONDS
       setCooldown(seconds)
       setDevCode(import.meta.env.DEV ? result.devCode?.trim() || null : null)
+      setCodeSentTo(normalizedEmail)
     } catch (error) {
       if (requestEpochRef.current !== epoch) return
       setFieldError(null)
       setLocalError(accountErrorMessage(error))
       setDevCode(null)
+      // 失败必须清掉「已发送给 xxx」的印象：它会让用户一直等一封不存在的邮件。
+      setCodeSentTo(null)
+      setCooldown(0)
     } finally {
       if (requestEpochRef.current === epoch) setSendingCode(false)
     }
@@ -665,9 +686,15 @@ export function AccountDialog() {
                     </Button>
                   </div>
                   {devCode ? <p className="account-dev-code">开发模式验证码：{devCode}</p> : null}
-                  {cooldown > 0 ? (
+                  {codeSentTo ? (
+                    <p className="account-code-hint" role="status" data-ui="code-sent">
+                      验证码已发送到 {codeSentTo}，没收到请检查垃圾箱。
+                      {cooldown > 0 ? `（${cooldown} 秒后可重新获取）` : ""}
+                    </p>
+                  ) : null}
+                  {!codeSentTo && cooldown > 0 ? (
                     <p className="account-code-hint" role="status">
-                      没收到？请检查垃圾箱，或在 {cooldown} 秒后重新获取。
+                      请在 {cooldown} 秒后重新获取。
                     </p>
                   ) : null}
                 </div>

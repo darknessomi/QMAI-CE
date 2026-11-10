@@ -27,6 +27,7 @@ export type BuiltinPluginId =
   | "story-simulation"
   | "review-center"
   | "plot-search"
+  | "cloud-sync"
 
 export interface BuiltinPlugin {
   id: BuiltinPluginId
@@ -152,6 +153,25 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
     kind: "view",
     view: "search",
     offEffect: "关闭后「剧情搜索」入口从创作工具中消失；AI 对话里的本地检索不受影响。",
+    defaultEnabled: true,
+  },
+  {
+    /*
+     * 云同步（2026-11-08 用户要求做成插件）。
+     *
+     * 它是 `capability` 而不是 `view`：没有独立的一级视图，关闭后是
+     * 「不再发生同步这件事」—— 自动同步停摆、手动备份按钮消失、
+     * 右上角云图标消失、设置里的「会员云空间」入口也一并隐藏。
+     *
+     * 云端已备份的数据不动：用户是用自己的账号备的，随时可以从别处取回。
+     * 所以 offEffect 里不写「会清理」，避免吓到用户。
+     */
+    id: "cloud-sync",
+    name: "云同步",
+    description: "把当前作品备份到青幕服务器，换电脑或误删后可以恢复回来。",
+    kind: "capability",
+    offEffect:
+      "关闭后不再自动备份，也无法手动备份；右上角的云同步图标与设置里的「会员云空间」入口都会隐藏。已备份到云端的数据不会被删除，重新打开即可继续使用。",
     defaultEnabled: true,
   },
 ]

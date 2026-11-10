@@ -10,7 +10,8 @@ import {
   Archive,
   Brain,
   Search,
-  Plug,  Cloud,
+  Plug,
+  Cloud,
   UserRound,
 } from "lucide-react"
 import { useTranslation } from "react-i18next"
@@ -45,6 +46,7 @@ import { ExportCenterSection } from "./sections/export-center-section"
 import { UserMemorySection } from "./sections/user-memory-section"
 import { ModelTutorialLink } from "./model-tutorial-link"
 import { CloudSyncSection } from "./sections/cloud-sync-section"
+import { useBuiltinPluginEnabled } from "@/lib/plugins/use-builtin-plugins"
 import { AccountSection } from "./sections/account-section"
 
 type CategoryId =
@@ -84,6 +86,7 @@ const CATEGORIES: Category[] = [
   { id: "model", labelKey: "settings.categories.model", icon: Brain },
   /* 云同步：紧跟在「模型设置」下面，与需求位置一致。 */
   { id: "cloudSync", labelKey: "settings.categories.cloudSync", icon: Cloud, defaultLabel: "云同步" },
+  /* 会员云空间：备份到我们自己的服务器（与「云同步」是两回事）。 */
   /*
    * 「新手引导」不再单独占一个分类：它现在只是写作设置里的一个开关
    * （打开后旁边出现「播放」）。按阶段重播的入口已按用户要求去掉 ——
@@ -102,6 +105,23 @@ const CATEGORIES: Category[] = [
 ]
 
 /** Settings tabs that edit the shared draft and need the global Save footer. */
+/**
+ * 按插件开关过滤设置分类。
+ *
+ * 抽成纯函数是为了能直接测 —— 「关掉云同步插件后，设置里那一栏到底有没有
+ * 消失」这条逻辑埋在组件里时只能靠手动点，而它恰好是上一轮改错的地方
+ * （第一次误把 memberCloud 也过滤掉了）。
+ *
+ * ⚠️ 只过滤 `cloudSync`（同步到用户自己的网盘）。
+ * `memberCloud`（会员云空间，备份到青幕服务器）**永远保留** ——
+ * 两者没有任何关系，会员云空间不该被任何插件隐藏。
+ */
+export function visibleSettingsCategories(
+  cloudSyncEnabled: boolean,
+): Category[] {
+  return cloudSyncEnabled ? CATEGORIES : CATEGORIES.filter((c) => c.id !== "cloudSync")
+}
+
 const CATEGORIES_WITH_SAVE_FOOTER: CategoryId[] = [
   "model",
   "network",
@@ -317,6 +337,35 @@ export function SettingsView() {
   const setSidebarNavConfig = useWikiStore((s) => s.setSidebarNavConfig)
 
   const [active, setActive] = useState<CategoryId>("model")
+
+  /*
+   * 「云同步」做成插件（2026-11-08 用户要求）。
+   *
+   * ⚠️ 这里藏的是 **cloudSync**（同步到用户自己的网盘：GitHub / WebDAV…），
+   * **不是 memberCloud**（会员云空间，备份到青幕服务器）。
+   *
+   * 两者是互不相干的功能，插件只管前者。会员云空间永远可见 ——
+   * 第一版我错把 memberCloud 也藏了，用户明确纠正过。
+   *
+   * 注意不能直接改 CATEGORIES 常量：它同时被 <select> 下拉、
+   * 保存页脚判断、以及 `activeSettingsCategory` 的恢复逻辑用到，
+   * 到处加条件迟早漏一个。统一走 visibleCategories。
+   */
+  const [cloudSyncEnabled] = useBuiltinPluginEnabled("cloud-sync")
+  const visibleCategories = useMemo(
+    () => visibleSettingsCategories(cloudSyncEnabled),
+    [cloudSyncEnabled],
+  )
+
+  /*
+   * 用户正停在「云同步」时把插件关掉，这一栏就消失了 ——
+   * 不处理的话右侧会停在 `case "cloudSync"` 上继续渲染，
+   * 而左侧导航里已经没有对应项，看起来像「页面卡住了」。
+   * 退回「模型设置」（设置页的默认分类）。
+   */
+  useEffect(() => {
+    if (!cloudSyncEnabled && active === "cloudSync") setActive("model")
+  }, [cloudSyncEnabled, active])
   const [saved, setSaved] = useState(false)
   const [draft, setDraftState] = useState<SettingsDraft>(() =>
     initialDraft(
@@ -624,7 +673,8 @@ export function SettingsView() {
       case "web-search":
         return <WebSearchSection />
       case "mcp":
-        return <AgentMcpSection />      case "interface":
+        return <AgentMcpSection />
+      case "interface":
         return <InterfaceSection draft={draft} setDraft={setDraft} />
       case "novel":
         return <NovelSection draft={draft} setDraft={setDraft} />
@@ -662,7 +712,7 @@ export function SettingsView() {
           />
         </div>
         <nav aria-label="设置分类" data-ui="settings-navigation" className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
-          {CATEGORIES.map((c) => {
+          {visibleCategories.map((c) => {
             const Icon = c.icon
             const isActive = c.id === active
             
@@ -714,7 +764,7 @@ export function SettingsView() {
         <div data-ui="settings-mobile-navigation">
             <label htmlFor="ui-test-settings-category">设置分类</label>
             <select id="ui-test-settings-category" aria-label="设置分类" value={active} onChange={(event) => changeCategory(event.target.value as CategoryId)}>
-              {CATEGORIES.map((category) => <option key={category.id} value={category.id}>{t(category.labelKey, { defaultValue: category.defaultLabel })}</option>)}
+              {visibleCategories.map((category) => <option key={category.id} value={category.id}>{t(category.labelKey, { defaultValue: category.defaultLabel })}</option>)}
             </select>
           </div>
         {/* overflow-x-hidden：任何子元素横向溢出都别变成整页的横向滚动条。 */}

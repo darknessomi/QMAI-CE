@@ -41,6 +41,27 @@ export function isChapterPath(path: string): boolean {
 }
 
 /**
+ * True for the outline directory (`wiki/outlines`) regardless of project root.
+ *
+ * 与 `isChapterPath` 同样的取舍：只看路径形状。
+ * 大纲保存时手头有绝对路径，没必要为此再传一次 projectPath。
+ */
+export function isOutlinePath(path: string): boolean {
+  return normalizePath(path).includes("/wiki/outlines/")
+}
+
+/**
+ * True for files that participate in version history.
+ *
+ * 目前只有章节正文与大纲。设定 / 世界观 / 人物卡这些也在 `wiki/` 下，
+ * 但改动频率低、回退需求弱，先不纳入 —— 每多一类就多一份磁盘占用，
+ * 而用户真正会去翻历史的场景基本只有「这章改坏了」和「大纲被我删乱了」。
+ */
+export function isVersionedWikiPath(path: string): boolean {
+  return isChapterPath(path) || isOutlinePath(path)
+}
+
+/**
  * Join path segments with forward slashes.
  */
 export function joinPath(...segments: string[]): string {

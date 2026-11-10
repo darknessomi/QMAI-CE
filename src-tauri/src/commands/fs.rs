@@ -23,6 +23,7 @@ const LEGACY_DOC_EXTS: &[&str] = &["pdf", "doc", "xls", "ppt", "pages", "numbers
 const KNOWLEDGE_DIR: &str = "QM";
 const LEGACY_KNOWLEDGE_DIR: &str = "wiki";
 const META_DIR: &str = ".qmai";
+/// 旧版项目元数据目录名：仅用于历史项目的兼容迁移，任何情况下都不要修改此值。
 const LEGACY_META_DIR: &str = ".llm-wiki";
 
 /// Bundled resource directory, set by the Tauri setup() callback once the
@@ -65,7 +66,7 @@ fn replace_all_path_segments(path: &str, from: &str, to: &str) -> Option<String>
 pub(crate) fn resolve_project_storage_path(path: &str) -> String {
     let normalized = path.replace('\\', "/");
 
-    // 先尝试替换所有 .llm-wiki → .qmai（可能有多个嵌套）
+    // 先尝试把旧版元数据目录名替换为 .qmai（可能有多个嵌套）
     if let Some(candidate) = replace_all_path_segments(&normalized, LEGACY_META_DIR, META_DIR) {
         if Path::new(&candidate).exists() || !Path::new(&normalized).exists() {
             return candidate;
@@ -1081,7 +1082,7 @@ pub fn do_write_file_atomic(path: &str, contents: &str) -> Result<(), String> {
         let file_name = p
             .file_name()
             .map(|name| name.to_string_lossy().to_string())
-            .unwrap_or_else(|| "llm-wiki-file".to_string());
+            .unwrap_or_else(|| "qmai-file".to_string());
         let tmp_path = p.with_file_name(format!(
             ".{file_name}.{}.tmp",
             chrono::Utc::now()
@@ -1797,7 +1798,7 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         ));
-        let path = root.join("wiki").join(".llm-wiki").join("export.docx");
+        let path = root.join("wiki").join(LEGACY_META_DIR).join("export.docx");
         fs::create_dir_all(path.parent().unwrap()).unwrap();
 
         do_write_export_file(&path.to_string_lossy(), b"exact-path").unwrap();

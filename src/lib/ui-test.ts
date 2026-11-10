@@ -13,9 +13,9 @@ export const UI_TEST_SKINS: Array<{
   name: string
   hint: string
 }> = [
-  { id: "jing", name: "静水", hint: "浅鼠尾草绿 · 留白开阔" },
-  { id: "zhi", name: "纸间", hint: "暖纸底色 · 界面退后" },
-  { id: "xing", name: "星夜", hint: "低对比夜间 · 看见故事" },
+  { id: "jing", name: "青瓷", hint: "青绿主色 · 清晰沉静" },
+  { id: "zhi", name: "宣纸", hint: "暖纸底色 · 温润专注" },
+  { id: "xing", name: "石墨", hint: "深灰底色 · 柔和夜读" },
 ]
 
 export function readUiTestSkin(): UiTestSkin {

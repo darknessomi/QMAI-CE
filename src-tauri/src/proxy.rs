@@ -639,7 +639,7 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let dir = std::env::temp_dir().join(format!("llm-wiki-proxy-test-{stamp}"));
+        let dir = std::env::temp_dir().join(format!("qmai-proxy-test-{stamp}"));
         std::fs::create_dir_all(&dir).unwrap();
         dir
     }

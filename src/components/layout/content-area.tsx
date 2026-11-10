@@ -1,6 +1,9 @@
 import { Suspense, lazy } from "react";
 import { useWikiStore } from "@/stores/wiki-store";
 import { isBuiltinViewEnabled } from "@/lib/plugins/builtin-state";
+import { MemberGateNotice } from "@/components/membership/member-gate-notice";
+import { MEMBER_FEATURE_VIEWS } from "@/lib/membership/access";
+import { useMembership } from "@/lib/membership/use-membership";
 import { BuiltinViewDisabledNotice } from "./builtin-view-disabled-notice";
 import { WritingWorkspace } from "./writing-workspace";
 
@@ -106,9 +109,26 @@ export function ContentArea() {
   const novelMode = useWikiStore((s) => s.novelMode);
   const showWritingWorkspace = activeView === "wiki" || activeView === "trash";
 
+  /*
+   * 会员闸门。
+   *
+   * 这里只拦**会员功能**（灵魂库 / 拆书库 / 剧情推演室），章节与大纲不受影响。
+   * 与内置插件开关是「与」关系：插件被关掉时，会员也看不到（开关优先），
+   * 因为「关闭」是用户自己的选择，不该被会员状态覆盖。
+   *
+   * 为什么拦在路由层而不是各页面里：用户可能通过上一会话恢复的 activeView、
+   * 或别处的 setActiveView 直接落到这些视图。拦在路由层才没有漏网的入口。
+   * 拦住的形态是**引导页**而不是空白 —— 空白会被当成「软件坏了」。
+   */
+  const { isLockedView } = useMembership();
+  const memberFeature = MEMBER_FEATURE_VIEWS[activeView ?? ""];
+  const memberLocked = Boolean(memberFeature) && isLockedView(activeView);
+
   let content = null;
   if (showWritingWorkspace) {
     content = <WritingWorkspace />;
+  } else if (memberLocked && memberFeature) {
+    content = <MemberGateNotice feature={memberFeature} />;
   } else {
     switch (activeView) {
       case "settings":

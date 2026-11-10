@@ -1131,7 +1131,7 @@ mod tests_v2 {
             .unwrap()
             .as_nanos();
         let id = COUNTER.fetch_add(1, Ordering::SeqCst);
-        let p = std::env::temp_dir().join(format!("llm-wiki-vtest-{}-{}", ts, id));
+        let p = std::env::temp_dir().join(format!("qmai-vtest-{}-{}", ts, id));
         std::fs::create_dir_all(&p).unwrap();
         p
     }

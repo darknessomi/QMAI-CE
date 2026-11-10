@@ -20,6 +20,8 @@ use crate::panic_guard::run_guarded;
 
 const SNAPSHOT_FILE: &str = ".qmai/file-snapshot.json";
 const QUEUE_FILE: &str = ".qmai/file-change-queue.json";
+/// 旧版项目元数据目录名：仅用于历史项目的监听过滤，任何情况下都不要修改此值。
+const LEGACY_META_DIR: &str = ".llm-wiki";
 const EVENT_QUEUE_UPDATED: &str = "file-sync://queue-updated";
 const EVENT_CHANGED: &str = "file-sync://changed";
 const MAX_HASH_BYTES: u64 = 32 * 1024 * 1024;
@@ -798,10 +800,12 @@ fn should_watch_rel(rel: &str, rules: &SourceWatchRules) -> bool {
         return false;
     }
     let lower = rel.to_lowercase();
+    let legacy_meta_dir_slash = format!("/{LEGACY_META_DIR}/");
+    let legacy_meta_dir_prefix = format!("{LEGACY_META_DIR}/");
     if lower.contains("/.qmai/")
         || lower.starts_with(".qmai/")
-        || lower.contains("/.llm-wiki/")
-        || lower.starts_with(".llm-wiki/")
+        || lower.contains(&legacy_meta_dir_slash)
+        || lower.starts_with(&legacy_meta_dir_prefix)
         // App-managed generated media is intentionally ignored here. The
         // source markdown references drive graph/index refresh; media bytes
         // themselves are not analyzed by the wiki pipeline.
@@ -1116,7 +1120,7 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let root = std::env::temp_dir().join(format!("llm-wiki-file-sync-{name}-{stamp}"));
+        let root = std::env::temp_dir().join(format!("qmai-file-sync-{name}-{stamp}"));
         fs::create_dir_all(root.join("raw/sources")).unwrap();
         root
     }
@@ -1311,7 +1315,10 @@ mod tests {
         let rules = SourceWatchRules::new(&config);
         assert!(should_watch_rel("raw/sources/document.docx", &rules));
         assert!(should_watch_rel("wiki/concepts/topic.md", &rules));
-        assert!(!should_watch_rel(".llm-wiki/file-change-queue.json", &rules));
+        assert!(!should_watch_rel(
+            &format!("{LEGACY_META_DIR}/file-change-queue.json"),
+            &rules
+        ));
         assert!(!should_watch_rel("raw/sources/~$Document.docx", &rules));
         assert!(!should_watch_rel("raw/sources/.~lock.Document.odt#", &rules));
         assert!(!should_watch_rel("raw/sources/Thumbs.db", &rules));

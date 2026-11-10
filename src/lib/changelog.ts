@@ -49,6 +49,54 @@ const FOUR_POINT_FOUR_TWO_ZH: string[] = [
   "写作对话异常中断后残留的「进行中」状态会自动清理，不再一直拦着新的对话。",
 ];
 
+const FOUR_POINT_SIX_ZERO_ZH: string[] = [
+  "新增会员中心：点头像即可看到会员状态、剩余天数与 4 项进阶功能，未开通时可直接兑换激活码。",
+  "会员标识统一改为金色 VIP 徽标，头像、菜单与侧栏功能项一眼可辨。",
+  "云空间支持从云端恢复：换电脑或误删后可以把作品拉回来，本地较新的文件不会被覆盖。",
+  "新增历史版本：章节与大纲每次保存前自动留一份，右键可查看、对比与回退，保留最近 5 个版本。",
+  "内置模型可查看今日额度：剩余多少 token 一目了然，额度用完会提示何时恢复。",
+  "新增「会员云空间」：把作品备份到青幕服务器，会员 5GB 空间，只上传文本文件不挤占额度。",
+  "云空间支持自动同步：保存后约 8 秒自动备份，只上传改动过的文件，不会反复重传整个工程。",
+  "头像菜单改版：会员身份、剩余天数与云同步空间合并成一张卡片，一眼看完；快满时自动变色提醒。",
+  "备份遇到网络抖动会自动重试，不再因为一次连接中断就漏传文件；没传上去的文件会单独列出并可一键重试。",
+  "云空间只备份正文、大纲、设定等文本文件，图片与依赖目录不会上传，不会挤占额度。",
+  "同步过程会写本地日志，遇到问题可在设置 › 账号 › 查看同步日志里核对每一步。",
+  "「会员云空间」并入「账号」页，设置里不再单独占一个分类；会员与空间并排显示，一眼看完。",
+  "会员云空间改为会员专属：非会员不再显示用不了的额度数字，直接说明需开通会员。",
+  "修复开通会员后云空间仍显示 100MB 的问题：开通后会自动换发网关卡，额度立即变成 5GB。",
+  "内置模型新增备用通道：主通道不可用时自动切换，写作过程不再因单点故障中断。",
+  "内置模型新增设备绑定校验，一个账号同一时间只能在一台设备使用，换设备请重新登录。",
+  "优化快速档模型，同样内容消耗的额度降低约 4 倍，日常写作更耐用。",
+  "生成过程中关闭软件会立即停止请求，不再空跑消耗额度。",
+];
+
+const FOUR_POINT_FIVE_ZERO_ZH: string[] = [
+  "新增会员系统：拆书库、剧情推演室、灵魂库、模型同步为会员功能，章节与大纲永久免费。",
+  "开通会员：设置 › 账号里可以直接兑换激活码，引导页会说明去哪购买、有哪些卡种。",
+  "兑换成功后会员功能立即生效，内置模型凭证自动补齐，不需要重新登录。",
+  "账号同一时间只能在一台设备登录，换设备登录会自动退出其它设备。",
+  "内置模型仅限会员使用，为内测功能，不单独收费。",
+  "为会员用户提供更好的使用体验和额度管理能力。",
+];
+
+const FOUR_POINT_SIX_ZERO_CHANGELOG: ChangelogEntry = {
+  version: "4.6.0",
+  date: "2026-11-08",
+  highlights: {
+    en: FOUR_POINT_SIX_ZERO_ZH,
+    zh: FOUR_POINT_SIX_ZERO_ZH,
+  },
+};
+
+const FOUR_POINT_FIVE_ZERO_CHANGELOG: ChangelogEntry = {
+  version: "4.5.0",
+  date: "2026-11-07",
+  highlights: {
+    en: FOUR_POINT_FIVE_ZERO_ZH,
+    zh: FOUR_POINT_FIVE_ZERO_ZH,
+  },
+};
+
 const FOUR_POINT_FOUR_TWO_CHANGELOG: ChangelogEntry = {
   version: "4.4.2",
   date: "2026-11-03",
@@ -2147,6 +2195,17 @@ const CHANGELOG: ChangelogEntry[] = [
 ];
 
 export function currentVersionChangelog(version: string): ChangelogEntry[] {
+  /*
+   * ⚠️ 新增版本时这里必须同步加一条 if。
+   *
+   * allChangelog() 只影响「历史列表」，而 currentVersionChangelog()
+   * 才是「当前版本发布说明」的取数口 —— 漏了这里，发布说明会退化成
+   * 一行「QMAI x.y.z 发布版本」，scripts/release-notes.spec.mjs 会拦下来。
+   */
+  if (version === FOUR_POINT_SIX_ZERO_CHANGELOG.version)
+    return [FOUR_POINT_SIX_ZERO_CHANGELOG];
+  if (version === FOUR_POINT_FIVE_ZERO_CHANGELOG.version)
+    return [FOUR_POINT_FIVE_ZERO_CHANGELOG];
   if (version === FOUR_POINT_FOUR_TWO_CHANGELOG.version)
     return [FOUR_POINT_FOUR_TWO_CHANGELOG];
   if (version === FOUR_POINT_FOUR_ONE_CHANGELOG.version)
@@ -2338,6 +2397,8 @@ export function currentVersionChangelog(version: string): ChangelogEntry[] {
 
 export function allChangelog(): ChangelogEntry[] {
   return [
+     FOUR_POINT_SIX_ZERO_CHANGELOG,
+    FOUR_POINT_FIVE_ZERO_CHANGELOG,
     FOUR_POINT_FOUR_TWO_CHANGELOG,
     FOUR_POINT_FOUR_ONE_CHANGELOG,
     FOUR_POINT_FOUR_ZERO_CHANGELOG,

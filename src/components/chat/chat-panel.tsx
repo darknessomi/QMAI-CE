@@ -2,7 +2,7 @@ import { ScrollToLatestButton } from "./scroll-to-latest-button"
 import { useRef, useEffect, useCallback, useState, useMemo, useDeferredValue, type CSSProperties } from "react"
 import { createPortal } from "react-dom"
 import { useTranslation } from "react-i18next"
-import { BookOpen, Plus, Trash2, ListChecks, ChevronDown, Check, History, X } from "lucide-react"
+import { BookOpen, Plus, Trash2, ListChecks, ChevronDown, Check, History, X, Info } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { UiTestAiIdentity, UiTestAiAuthor, UiTestAiEmpty, UiTestAiModel, getUiTestAiMenuStyle, useUiTestAiMenuFocus } from "@/components/uitest/ui-test-ai-parts"
 import "@/components/uitest/ui-test-ai.css"
@@ -3561,6 +3561,16 @@ export function ChatPanel() {
               onAtTrigger={() => setReferencePickerOpen(true)}
               placeholder={"写下你的想法，或 @ 引用资料..."}
             />
+            {/* AI 生成内容合规提示：《人工智能生成合成内容标识办法》要求对生成内容显著提示。文案精简为一句「内容由 AI 生成，仅供参考」，细节见《服务条款》第六条。 */}
+            <p
+              data-ui="ai-content-notice"
+              className="mt-1.5 flex items-start gap-1 text-[0.6875rem] leading-4 text-muted-foreground/80"
+            >
+              <Info className="mt-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
+              <span>
+                内容由 AI 生成，仅供参考
+              </span>
+            </p>
           </div>
           <ReferencePickerDialog
             open={referencePickerOpen}

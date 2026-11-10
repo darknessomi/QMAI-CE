@@ -21,9 +21,12 @@ import { useWikiStore, type SettingsCategoryId } from "@/stores/wiki-store"
 import { UI_TEST_SKINS } from "@/lib/ui-test"
 import { useAppearanceSkin } from "@/components/layout/appearance-context"
 import { useAccountStore } from "@/stores/account-store"
+import { useMembership } from "@/lib/membership/use-membership"
 import { AnnouncementBell } from "@/components/layout/announcement-bell"
 import { AccountAvatar } from "@/components/account/account-avatar"
 import { accountDisplayName } from "@/components/account/account-display"
+import { MembershipCard } from "@/components/membership/membership-card"
+import { useMembershipPurchaseStore } from "@/stores/membership-purchase-store"
 
 // 与 .ui-test-skin-menu 的设计宽度一致（窄了会让「名称 + 说明」换行、看着不像完整菜单）
 const MENU_WIDTH = 290
@@ -43,6 +46,10 @@ export function SidebarBottomActions() {
   const accountTitle = accountUser ? `${accountDisplayNameText} · ${accountUser.email}` : "未登录 · 点击登录"
 
   const [menuOpen, setMenuOpen] = useState(false)
+  /** 会员弹窗开关（从头像菜单的会员卡片进入）。 */
+  const openMembership = useMembershipPurchaseStore(s => s.show)
+  /** 会员状态：头像角标只在真正有效时显示。 */
+  const { active: isMember } = useMembership()
   /** 鼠标是否停在外观子菜单区域上（悬停展开/收起）。 */
   const [appearanceHovered, setAppearanceHovered] = useState(false)
   /** 用户用点击打开/收起的外观子菜单（鼠标移开后再定位）。 */
@@ -54,8 +61,6 @@ export function SidebarBottomActions() {
     left: number
     bottom: number
   } | null>(null)
-
-
 
   useEffect(() => {
     if (!menuOpen) {
@@ -190,10 +195,22 @@ export function SidebarBottomActions() {
    * 中间留白把两者分开，头像因此稳定贴左，不会再被拉宽推到中间。
    */
   return (
-    <div
-      data-ui="sidebar-bottom-actions"
-      className="flex shrink-0 items-center gap-1 border-t py-1 pr-1.5 pl-2.5"
-    >
+    <>
+      {/*
+       * 云同步额度**不在这里**。
+       *
+       * 2026-11-08 用户反馈：「云同步空间已用放在这里是不合适的，应该放在
+       * 打开的这个页面（点头像弹出的菜单）的下面」。
+       *
+       * 原因是信息割裂：侧栏底部一条额度条，会员状态却在头像菜单里，
+       * 用户看得到空间却不知道自己是会员，反之亦然。
+       * 现在额度并入 `MembershipCard`（方案 A1），这里只保留账号块与菜单。
+       */}
+
+      <div
+        data-ui="sidebar-bottom-actions"
+        className="flex shrink-0 items-center gap-1 border-t py-1 pr-1.5 pl-2.5"
+      >
       {/*
        * 左侧账号块：**头像在最左，用户名在头像右侧**（用户 2026-10-28 最终确认的顺序）。
        *
@@ -222,14 +239,51 @@ export function SidebarBottomActions() {
         }`}
       >
         {accountUser ? (
-          <span className="sidebar-account-avatar flex size-7 shrink-0 items-center justify-center overflow-hidden rounded-full">
-            <AccountAvatar user={accountUser} baseUrl={accountSession?.baseUrl ?? null} />
-          </span>
+          /*
+           * 会员头像：外层 28px 金框 + 内层 24px 头像。
+           *
+           * 为什么外层仍锁 size-7：金框用 padding 画出来，如果外层跟着变大
+           * （28+2×2=32px），底栏里头像会比非会员时更靠下、名字跟着错位。
+           * 把内层收到 24px，总尺寸刚好还是 28px —— 会员和非会员占地一致。
+           *
+           * 金框取 2px：1.5px 在 28px 的头像上只剩一条发丝，几乎看不出金色；
+           * 同时**不再给内层加 ring** —— 两层描边会互相挤压，实际可见的金色
+           * 只剩 0.5px。现在金框直接贴着头像，颜色是满的。
+           */
+          isMember ? (
+            <span className="member-avatar-ring flex size-7 shrink-0 items-center justify-center rounded-full p-[2px]">
+              <span className="sidebar-account-avatar flex size-6 items-center justify-center overflow-hidden rounded-full">
+                <AccountAvatar user={accountUser} baseUrl={accountSession?.baseUrl ?? null} />
+              </span>
+            </span>
+          ) : (
+            <span className="sidebar-account-avatar flex size-7 shrink-0 items-center justify-center overflow-hidden rounded-full">
+              <AccountAvatar user={accountUser} baseUrl={accountSession?.baseUrl ?? null} />
+            </span>
+          )
         ) : (
           <span className="sidebar-account-avatar flex size-7 shrink-0 items-center justify-center overflow-hidden rounded-full bg-muted text-muted-foreground">
             <UserRound className="h-4 w-4" />
           </span>
         )}
+        {/*
+         * VIP 标识放在**名字前面**（2026-11-08 用户指定）。
+         *
+         * 之前是压在头像右下角的绝对定位角标，字号只有 7px、还越出圆圈，
+         * 看起来像贴歪的标签。移到名字前面后有完整的横向空间，字号可以
+         * 做到 8px 且不压任何元素。
+         *
+         * 会员身份由 useMembership 判断（每分钟重算本地到期），
+         * 而不是读 user.membership 快照 —— 否则跨过到期时刻后标签不会消失。
+         */}
+        {accountUser && isMember ? (
+          <span
+            className="shrink-0 rounded-[3px] bg-gradient-to-b from-amber-200 to-amber-500 px-1 text-[0.5rem] font-black leading-[13px] tracking-[0.03em] text-amber-950 shadow-[0_1px_2px_rgba(176,125,24,0.28)]"
+            aria-label="VIP 会员"
+          >
+            VIP
+          </span>
+        ) : null}
         <span className="ui-test-account-name min-w-0 flex-1 truncate text-xs font-medium text-foreground">
           {accountDisplayNameText}
         </span>
@@ -268,7 +322,20 @@ export function SidebarBottomActions() {
               onClick={openAccount}
             >
               {accountUser ? (
-                <AccountAvatar user={accountUser} baseUrl={accountSession?.baseUrl ?? null} size="lg" />
+                /*
+                 * 弹层里的头像也加金框，与底栏保持一致 ——
+                 * 同一张头像在两个地方长得不一样，用户会觉得是两套东西。
+                 * 外层锁 size-9（36px），内层 32px，总尺寸不变。
+                 */
+                isMember ? (
+                  <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-amber-200 via-amber-300 to-amber-500 p-[2px]">
+                    <span className="flex size-8 items-center justify-center overflow-hidden rounded-full">
+                      <AccountAvatar user={accountUser} baseUrl={accountSession?.baseUrl ?? null} size="lg" />
+                    </span>
+                  </span>
+                ) : (
+                  <AccountAvatar user={accountUser} baseUrl={accountSession?.baseUrl ?? null} size="lg" />
+                )
               ) : (
                 <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-muted">
                   <UserRound className="h-4 w-4 text-muted-foreground" />
@@ -279,6 +346,22 @@ export function SidebarBottomActions() {
                 <small className="truncate">{accountUser ? accountUser.email : "点击登录账号"}</small>
               </span>
             </button>
+
+            {/*
+             * 会员卡片：放在账号块下方、其它菜单项上方。
+             *
+             * 位置是刻意的 —— 这是整个菜单里唯一一块「带背景的卡片」，
+             * 视觉上必须紧贴账号（同一个「我」的语境），而不是夹在
+             * 「外观 / 设置 / 维护工具」这些工具项中间，否则会显得突兀。
+             *
+             * 未登录时 MembershipCard 自己返回 null（没有账号就没有会员状态）。
+             */}
+            <MembershipCard
+              onOpen={() => {
+                setMenuOpen(false)
+                openMembership()
+              }}
+            />
 
             {/*
              * 外观：**鼠标移上去就在它右侧弹出**三个皮肤主题，点击也仍然可以展开/收起。
@@ -386,6 +469,8 @@ export function SidebarBottomActions() {
           </div>,
           document.body,
         )}
-    </div>
+
+      </div>
+    </>
   )
 }

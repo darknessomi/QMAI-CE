@@ -27,6 +27,9 @@ export const ACCOUNT_ERROR_MESSAGES: Record<AccountErrorCode, string> = {
   CONFLICT: "云端配置已被其它设备更新，请先拉取最新版本。",
   NAME_LOCKED: "昵称每个月只能修改一次。",
   NETWORK: "网络不可用，请检查连接后重试。",
+  // 与服务端同一句：三种失败（不存在 / 已兑换 / 已作废）刻意不区分。
+  CODE_NOT_FOUND: "激活码无效或已被使用，请核对后重试。",
+  MEMBERSHIP_UNAVAILABLE: "会员服务暂时不可用，请稍后再试或联系客服。",
 }
 
 export const ACCOUNT_ERROR_FALLBACK_MESSAGE = "操作失败，请稍后重试。"

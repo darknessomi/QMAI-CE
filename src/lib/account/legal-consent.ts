@@ -13,7 +13,7 @@
  */
 
 /** 与 cloudflare/legal-site 发布的条款版本保持一致；改条款必须同时改这里。 */
-export const LEGAL_TERMS_VERSION = "v1.1"
+export const LEGAL_TERMS_VERSION = "v1.2"
 
 const STORAGE_KEY = "qmai.legalConsent"
 

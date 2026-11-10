@@ -25,6 +25,8 @@ import type {
   AvatarUpload,
   ChangePasswordInput,
   LoginInput,
+  MembershipInfo,
+  RedeemCodeResult,
   RegisterInput,
   ResetPasswordInput,
   SendCodeResult,
@@ -48,14 +50,14 @@ export const LEGACY_ACCOUNT_BASE_URL = "https://qmai-account.qmai.workers.dev"
 /** 单次账号请求（含读响应体）的上限；超时统一映射为 NETWORK。 */
 export const ACCOUNT_REQUEST_TIMEOUT_MS = 20_000
 
-type FetchImpl = typeof fetch
+export type FetchImpl = typeof fetch
 type HttpMethod = "GET" | "POST" | "PUT" | "DELETE"
 
 /**
  * 默认请求函数。本身不发起网络请求，只把参数转交给 Tauri 提供的 fetch，
  * 因此模块加载时不会访问 `window` / Tauri 全局。
  */
-const lazyAccountFetch: FetchImpl = async (input, init) => {
+export const lazyAccountFetch: FetchImpl = async (input, init) => {
   const fetcher = await getHttpFetch()
   return fetcher(input, init)
 }
@@ -184,7 +186,57 @@ function expectUser(raw: unknown, status: number): AccountUser {
       ? rawAvatarToken
       : null
 
-  return { id, email, displayName, createdAt, avatarUpdatedAt, avatarToken, displayNameUpdatedAt }
+  const user: AccountUser = {
+    id,
+    email,
+    displayName,
+    createdAt,
+    avatarUpdatedAt,
+    avatarToken,
+    displayNameUpdatedAt,
+  }
+  /*
+   * 会员字段**只在服务端真的返回时才挂上去**。
+   *
+   * 为什么不做成恒有的 `membership: null`：老服务端（以及大量既有测试夹具）
+   * 都不带这个字段，恒有字段会让它们的深比较整片失败，也容易让人误读成
+   * 「响应里有会员信息，只是为空」。缺失 = 老服务端不支持 = 按非会员处理，
+   * 这条语义在 `lib/membership/access` 的 `membershipOf` 里统一兜底。
+   */
+  const membership = parseMembershipInfo(record.membership)
+  if (membership) user.membership = membership
+  return user
+}
+
+/**
+ * 会员信息的宽容解析（与 `session.ts` 的同类函数保持同一口径）。
+ *
+ * 缺失或形状不对返回 null，由调用方按「字段缺失」处理：
+ * 宁可让界面按非会员显示，也不能因为服务端多/少一个字段就把用户登出。
+ */
+function parseMembershipInfo(raw: unknown): MembershipInfo | null {
+  // `null` 是服务端明确表示「没有会员信息」，与缺失同样处理。
+  const record = asRecord(raw)
+  if (!record) return null
+  const expiresAt = typeof record.expiresAt === "number" && Number.isFinite(record.expiresAt)
+    ? record.expiresAt
+    : null
+  const forever = record.forever === true
+  return {
+    active: record.active === true && expiresAt !== null,
+    expiresAt,
+    // 永久卡的剩余天数是 null（服务端已明确），老服务端则根本不返回该字段：
+    // 两者都统一成「非数字」，界面据此显示「永不过期」或不显示天数。
+    remainingDays:
+      forever
+        ? null
+        : typeof record.remainingDays === "number" && Number.isFinite(record.remainingDays)
+          ? Math.max(0, Math.floor(record.remainingDays))
+          : 0,
+    planLabel: typeof record.planLabel === "string" && record.planLabel ? record.planLabel : null,
+    // 老服务端不返回 forever：按 false 处理，界面退回按天数显示。
+    forever,
+  }
 }
 
 function expectAuthPayload(raw: unknown, status: number): AccountAuthPayload {
@@ -242,7 +294,7 @@ interface AccountResponse {
   data: unknown
 }
 
-async function requestAccount(
+export async function requestAccount(
   baseUrl: string,
   options: AccountRequestOptions,
 ): Promise<AccountResponse> {
@@ -480,6 +532,66 @@ export async function updateAccountProfile(
   const record = asRecord(data)
   if (!record) throw invalidStructure(status)
   return expectUser(record.user, status)
+}
+
+/**
+ * GET /v1/membership —— 拉一次最新会员状态。
+ *
+ * 存在的意义：登录态里的会员信息是**登录那一刻**的快照。用户在后台开通、
+ * 或者刚在另一台设备兑换了激活码时，本机需要一条不重登也能刷新的路径。
+ */
+export async function fetchMembership(
+  baseUrl: string,
+  accessToken: string,
+  fetchImpl: FetchImpl = lazyAccountFetch,
+): Promise<MembershipInfo> {
+  const { status, data } = await requestAccount(baseUrl, {
+    method: "GET",
+    path: "/v1/membership",
+    accessToken,
+    unauthorizedCode: "TOKEN_EXPIRED",
+    fetchImpl,
+  })
+
+  const record = asRecord(data)
+  if (!record) throw invalidStructure(status)
+  const membership = parseMembershipInfo(record.membership)
+  if (!membership) throw invalidStructure(status)
+  return membership
+}
+
+/**
+ * POST /v1/membership/redeem —— 兑换激活码。
+ *
+ * **唯一的开通路径**：本地不做任何「码是否有效」的判断，
+ * 一切以服务端返回的会员状态为准。码无效/已用/已作废都返回 `CODE_NOT_FOUND`，
+ * 所以提示文案也只能是同一句（服务端有意不区分，见 account-worker 的注释）。
+ */
+export async function redeemActivationCode(
+  baseUrl: string,
+  accessToken: string,
+  code: string,
+  fetchImpl: FetchImpl = lazyAccountFetch,
+): Promise<RedeemCodeResult> {
+  const { status, data } = await requestAccount(baseUrl, {
+    method: "POST",
+    path: "/v1/membership/redeem",
+    accessToken,
+    unauthorizedCode: "TOKEN_EXPIRED",
+    fetchImpl,
+    body: { code },
+  })
+
+  const record = asRecord(data)
+  if (!record) throw invalidStructure(status)
+  const membership = parseMembershipInfo(record.membership)
+  if (!membership) throw invalidStructure(status)
+  return {
+    membership,
+    addedDays:
+      typeof record.addedDays === "number" && Number.isFinite(record.addedDays) ? record.addedDays : 0,
+    planLabel: typeof record.planLabel === "string" && record.planLabel ? record.planLabel : null,
+  }
 }
 
 export async function resetAccountPassword(
@@ -762,11 +874,13 @@ export async function putModelConfig(
 export async function deleteModelConfig(
   baseUrl: string,
   accessToken: string,
+  baseVersion: number,
   fetchImpl: FetchImpl = lazyAccountFetch,
 ): Promise<void> {
   await requestAccount(baseUrl, {
     method: "DELETE",
     path: "/v1/model-config",
+    body: { baseVersion },
     accessToken,
     unauthorizedCode: "TOKEN_EXPIRED",
     fetchImpl,

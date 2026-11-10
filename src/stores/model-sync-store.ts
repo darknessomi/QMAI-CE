@@ -13,6 +13,7 @@ import { isTauri } from "@/lib/platform"
 import { getStore } from "@/lib/web-store"
 import { deleteModelConfig, fetchModelConfig, putModelConfig } from "@/lib/account/api"
 import { isAccessTokenFresh } from "@/lib/account/session"
+import { AccountApiError } from "@/lib/account/errors"
 import {
   loadEmbeddingConfig,
   loadProviderConfigs,
@@ -353,6 +354,7 @@ export const useModelSyncStore = create<ModelSyncStore>((set, get) => ({
       // 云端可能已经被别的设备写过（baseVersion 为空会撞 409）：先合并再推，别直接覆盖。
       const pulled = await withNetworkRetry(() => pullAndMerge(io, password))
       const result = await withNetworkRetry(() => pushLocal(io, password))
+      if (result.status === "conflict") throw new AccountApiError("CONFLICT")
       await saveEnabledFlag(true)
       /*
        * 首次开启同步同样要登记归属：这一轮把本机全部配置推上了该账号的云端，
@@ -411,9 +413,12 @@ export const useModelSyncStore = create<ModelSyncStore>((set, get) => ({
     try {
       if (options.clearCloud) {
         const session = await requireSession()
-        await withNetworkRetry(() =>
-          deleteModelConfig(session.baseUrl, session.accessToken),
-        )
+        const remote = await withNetworkRetry(() => fetchModelConfig(session.baseUrl, session.accessToken))
+        if (remote.kind === "config") {
+          const baseVersion = remote.record.version
+          // 重试必须保留原版本，不能重新取新版本后清空别处刚写入的内容。
+          await withNetworkRetry(() => deleteModelConfig(session.baseUrl, session.accessToken, baseVersion))
+        }
       }
       await clearSecret(PASSWORD_SECRET)
       await saveEnabledFlag(false)
@@ -453,6 +458,7 @@ export const useModelSyncStore = create<ModelSyncStore>((set, get) => ({
         await withNetworkRetry(() => pullAndMerge(io, password))
         pushed = await withNetworkRetry(() => pushLocal(io, password))
       }
+      if (pushed.status === "conflict") throw new AccountApiError("CONFLICT")
       /*
        * 同步成功后**无条件**登记归属（不只是 saveConfigs 里那次）。
        *
@@ -556,6 +562,7 @@ export const useModelSyncStore = create<ModelSyncStore>((set, get) => ({
         return
       }
       const pushed = await pushLocal(io, password)
+      if (pushed.status === "conflict") { await get().syncNow(); return }
       if (pushed.status === "pushed") {
         set({ version: pushed.version, lastSyncAt: Date.now() })
         /*
@@ -579,10 +586,11 @@ export const useModelSyncStore = create<ModelSyncStore>((set, get) => ({
     try {
       const session = await requireSession()
       const io = createIo(session)
-      // 先用旧密码验证能解开云端，再写新密码并覆盖上传。
+      // 先用旧密码验证云端；确认新密文上传成功后，才替换本地密码。
       await withNetworkRetry(() => pullAndMerge(io, currentPassword))
+      const result = await withNetworkRetry(() => pushLocal(io, nextPassword, { force: true }))
+      if (result.status === "conflict") throw new AccountApiError("CONFLICT")
       await writeSecret(PASSWORD_SECRET, nextPassword)
-      const result = await withNetworkRetry(() => pushLocal(io, nextPassword))
       set({
         busy: false,
         status: "idle",
@@ -617,6 +625,7 @@ export const useModelSyncStore = create<ModelSyncStore>((set, get) => ({
       const session = password ? await requireSession().catch(() => null) : null
       if (password && session) {
         const pushed = await withNetworkRetry(() => pushLocal(createIo(session), password))
+        if (pushed.status === "conflict") throw new AccountApiError("CONFLICT")
         set({ version: pushed.version, lastSyncAt: Date.now() })
       }
 

@@ -13,12 +13,16 @@
 
 import { create } from "zustand"
 
+import { netcardTierOf } from "@/lib/builtin-models/netcard"
+
 import {
   changeAccountPassword,
   deleteAccount,
   deleteAccountAvatar,
+  fetchMembership,
   loginAccount,
   logoutAccount,
+  redeemActivationCode,
   refreshAccountSession,
   registerAccount,
   resetAccountPassword,
@@ -44,6 +48,7 @@ import type {
   AvatarUpload,
   ChangePasswordInput,
   LoginInput,
+  RedeemCodeResult,
   RegisterInput,
   ResetPasswordInput,
   SendCodeResult,
@@ -209,6 +214,19 @@ export interface AccountStoreState {
   replaceSession: (session: StoredAccountSession) => void
   /** 规格动作名：续期并吞掉错误，供「重试/下次打开账号页」使用。 */
   refresh: () => Promise<void>
+  /**
+   * 拉一次最新会员状态并写回登录态。
+   *
+   * 返回 `true` 仅当**真的从服务端读到了**；断网/401/5xx 返回 `false`。
+   * 调用方必须据此决定提示文案 —— 不允许「await 完就报成功」。
+   */
+  refreshMembership: () => Promise<boolean>
+  /**
+   * 兑换激活码；成功后把服务端返回的会员状态写回登录态并返回结果。
+   *
+   * 失败必须抛出：界面要按错误码给具体提示（码无效 / 服务不可用 / 未登录）。
+   */
+  redeemCode: (code: string) => Promise<RedeemCodeResult>
 
   openDialog: (mode?: AccountAuthMode) => void
   /** 打开弹窗并直接进入修改密码面板（已登录时使用）。 */
@@ -331,6 +349,17 @@ export const useAccountStore = create<AccountStoreState>()((set, get) => ({
         // （登记内置 provider、恢复该账号归档）。没有归档时恢复是空操作，
         // 不会重复塞东西；否则「开机就显示着列表、退出再登录才少一批」。
         void runLoginModelSetup(next)
+        /*
+         * 顺手把会员状态刷一次（2026-11-07）。
+         *
+         * 为什么启动时要刷：会员时长记在**账号**上，本机会话里的那片是
+         * 「上次登录那一刻」的快照。用户可能在另一台设备兑换过、可能隔了几天
+         * 才打开，也可能已经是「续费后还剩 300 天」而本机还记着「只剩 3 天」。
+         * 不刷就会出现「换设备后显示的天数不对」。
+         *
+         * 不 await：启动不该为一次附加查询卡住；失败时保留原快照（上面已经设好）。
+         */
+        void get().refreshMembership()
       } catch (error) {
         if (!stillOwnsSession()) {
           set({ bootstrapped: true })
@@ -339,11 +368,17 @@ export const useAccountStore = create<AccountStoreState>()((set, get) => ({
 
         if (isSessionRejected(error)) {
           clearAccountSession()
+          /*
+           * 被服务端判失效的两大类原因：改密/封号，以及**在别的设备登录了**
+           * （2026-11-07 起一个账号只允许一台设备在线，登录会吊销其它会话）。
+           * 后者必须让用户知道"为什么突然掉线"，否则他会以为软件坏了、
+           * 反复重登 —— 而每重登一次，又把刚登录的那台设备踢下去，来回拉锯。
+           */
           set({
             status: "anonymous",
             user: null,
             session: null,
-            error: null,
+            error: "这台设备已退出登录：账号只允许在一台设备上使用，可能已在其它设备登录。",
             sessionUnverified: false,
             bootstrapped: true,
           })
@@ -701,6 +736,127 @@ export const useAccountStore = create<AccountStoreState>()((set, get) => ({
     } catch {
       // 规格动作 `refresh()` 不向 UI 抛错；要处理错误用 refreshSession。
     }
+  },
+
+  /**
+   * 拉一次最新会员状态。
+   *
+   * 返回值说明（2026-11-07 改）：**成功从服务端读到**才返回 `true`。
+   *   早先这里是 `Promise<void>` 且网络失败被静默吞掉，导致调用方
+   *   `await refreshMembership(); toast.success(...)` 在**断网时也报成功** ——
+   *   用户要求「没有交换成功就不能显示成功」，所以失败必须能被调用方看见。
+   *   断网、401、服务端 5xx 一律返回 `false`（不抛：这不是用户的操作失败，
+   *   调用方按「没读到」处理并给出自己的提示即可）。
+   */
+  refreshMembership: async (): Promise<boolean> => {
+    const session = get().session
+    if (!session) return false
+    try {
+      const membership = await fetchMembership(session.baseUrl, session.accessToken)
+      /*
+       * 只改 user（以及会话里那份 user）。**不动 token**：
+       * 这是一个只读查询，顺手换 token 会让其它在途请求拿到旧会话。
+       * 写回磁盘也要做，否则重启后界面又回到登录那天的旧状态。
+       *
+       * ⚠️ 必须用 `get().session` 而不是函数开头那份 `session`：
+       * 上面 await 期间可能有一次续期把会话替换了，写旧会话会把新 token 覆盖掉。
+       */
+      const current = get().session
+      const user = get().user
+      if (!current || !user || current.user.id !== session.user.id || current.baseUrl !== session.baseUrl) return false
+      /*
+       * 会员状态与网卡不一致时，必须重签网卡。
+       *
+       * ## 为什么（2026-11-09 线上 bug）
+       *
+       * 网卡（netcard JWT）里**烘死了一份 `tier` / `tierExp`**，网关据此
+       * 决定额度：`free` = 100 MB，`member` = 5 GB。网卡只在登录和
+       * `repairNetcardAfterMembershipChange` 时签发。
+       *
+       * 原来只有**激活码兑换**后会补签（见下方 redeemCode），**在线支付
+       * 成功后没有**。于是用户付完钱：
+       *   · 数据库里 membership_expires_at 已经顺延 ✅
+       *   · 界面会员标识也亮了 ✅
+       *   · 但网卡还是 tier:"free" → 网关按 100 MB 算 ❌
+       *
+       * ## 为什么按「网卡 tier」判而不是按「状态变化」判
+       *
+       * 第一版写的是 `!wasActive && nowActive`（看会员状态有没有翻转）。
+       * 那样**修不了已经踩坑的用户** —— 他的 `user.membership.active`
+       * 早就已经是 true 了，永远等不到那一次翻转，网卡就一直旧着。
+       *
+       * 改成直接读卡里的 tier：账号说「你是会员」但卡说「free」，
+       * 就是不一致，补签。新开通和存量旧卡都能修。
+       *
+       * 老卡没有 tier 字段（返回 null）也补一次，让它带上 tier。
+       */
+      const nowActive = membership.active === true
+      const cardTier = netcardTierOf(get().session)
+      const needsRepair = nowActive && cardTier !== "member"
+
+      const nextUser: AccountUser = { ...user, membership }
+      const nextSession: StoredAccountSession = { ...current, user: nextUser }
+      saveAccountSession(nextSession)
+      set({ user: nextUser, session: nextSession })
+
+      if (needsRepair) {
+        /*
+         * 不 await：会员状态已经写回，界面该立刻更新。
+         * 补签失败也不抛 —— 下次登录会自动带上新 tier，
+         * 抛错只会让「已开通」这个事实看起来像失败。
+         */
+        void import("@/lib/builtin-models/auto-sync")
+          .then(({ repairNetcardAfterMembershipChange }) =>
+            repairNetcardAfterMembershipChange(get().session),
+          )
+          .catch((error: unknown) => {
+            console.warn("[membership] 开通后补签网卡失败:", error)
+          })
+      }
+
+      return true
+    } catch {
+      // 断网 / 401 / 5xx：不写状态，也不谎报成功。
+      return false
+    }
+  },
+
+  redeemCode: async (code: string) => {
+    const session = get().session
+    if (!session) {
+      throw new AccountApiError("TOKEN_EXPIRED", "请先登录后再兑换激活码。")
+    }
+    const result = await redeemActivationCode(session.baseUrl, session.accessToken, code)
+    const user = get().user
+    if (user) {
+      const nextUser: AccountUser = { ...user, membership: result.membership }
+      const nextSession: StoredAccountSession = { ...session, user: nextUser }
+      saveAccountSession(nextSession)
+      set({ user: nextUser, session: nextSession })
+    }
+    /*
+     * 兑换成功后就地补签网关卡并登记内置模型（2026-11-06，用户要求）。
+     *
+     * 不补的话，内置模型要等到**下一次登录**才会出现 —— 用户刚付完钱却看到
+     * 「内置模型还得重登才有」，体验上等于兑换没生效。这里当场换卡，
+     * 让「兑换 → 模型出现在下拉框里」是连续的。
+     *
+     * 三个刻意的选择：
+     *   1. **用 `get().session` 在那一刻读**（不是闭包里捕获的旧值）：
+     *      补签会写回一份**带新卡**的会话，读旧值会把刚写进去的卡覆盖掉。
+     *   2. **不 await**：兑换的成败不该被一次网络补签拖住，界面要立刻给出
+     *      「兑换成功」。补签在后台跑完自己会刷新 provider 配置。
+     *   3. **失败不抛**：卡补不上只是内置模型暂时不可用（下次登录/续期会补上），
+     *      抛错会让用户以为兑换本身失败，进而重复兑换 —— 那是更坏的后果。
+     */
+    void import("@/lib/builtin-models/auto-sync")
+      .then(({ repairNetcardAfterMembershipChange }) =>
+        repairNetcardAfterMembershipChange(get().session),
+      )
+      .catch((error: unknown) => {
+        console.warn("[membership] 兑换后补签内置模型失败:", error)
+      })
+    return result
   },
 
   openDialog: (mode = "login") => {

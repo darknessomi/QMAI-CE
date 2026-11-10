@@ -63,6 +63,24 @@ describe("isBuiltinRelayEndpoint", () => {
     expect(isBuiltinRelayEndpoint("")).toBe(false)
     expect(isBuiltinRelayEndpoint(undefined)).toBe(false)
   })
+
+  /*
+   * 2026-11-08：加了家庭网关通道后，这一条是**必须**的。
+   *
+   * 原来只比对 relay.qmai.work 一个前缀，指向 relay-home.qmai.work
+   * 的配置会被判成「不是内置中转」→ 网卡不注入 → 内置模型直接 401。
+   * 这个 bug 不会在单通道测试里暴露，只有把两个通道都列出来才能钉住。
+   */
+  it("家庭网关通道也认作内置中转", () => {
+    expect(isBuiltinRelayEndpoint("https://relay-home.qmai.work")).toBe(true)
+    expect(isBuiltinRelayEndpoint("https://relay-home.qmai.work/v1")).toBe(true)
+  })
+
+  it("前缀相同但域名不同的地址不算（防误判）", () => {
+    // 老实现用 startsWith，这几种会被误判成内置中转
+    expect(isBuiltinRelayEndpoint("https://relay.qmai.work.evil.com/v1")).toBe(false)
+    expect(isBuiltinRelayEndpoint("https://relay-home.qmai.work.evil.com")).toBe(false)
+  })
 })
 
 describe("withBuiltinAuth", () => {

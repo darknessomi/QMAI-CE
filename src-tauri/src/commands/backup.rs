@@ -1458,7 +1458,7 @@ pub fn do_import_backup<F: Fn(&BackupProgressPayload)>(
 
             match extract_dir_from_zip(&mut archive, &zip_prefix, target) {
                 Ok(_count) => {
-                    // 导入后自动迁移目录（wiki -> QM，.llm-wiki -> .qmai 等）
+                    // 导入后自动迁移目录（旧知识目录 -> QM，旧元数据目录 -> .qmai 等）
                     if let Err(e) = crate::commands::project::migrate_project_dirs(target) {
                         warnings.push(format!("项目 {} 目录迁移失败: {}", project_name, e));
                     }

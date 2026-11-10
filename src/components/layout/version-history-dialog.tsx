@@ -104,7 +104,7 @@ export function VersionHistoryDialog({
         <div className="version-history-head">
           <div>
             <h3>{`${title} · 历史版本`}</h3>
-            <p>每次保存前自动留一份，保留最近 50 个 / 90 天。</p>
+            <p>每次保存前自动留一份，保留最近 5 个 / 90 天。</p>
           </div>
           <button type="button" className="version-history-close" onClick={onClose} aria-label="关闭">
             ×

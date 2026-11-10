@@ -15,10 +15,20 @@ describe("sidebar-bottom-actions", () => {
     expect(source).toContain("{accountDisplayNameText}")
     /*
      * 顺序（用户 2026-10-28 最终确认）：**头像在最左，用户名在头像右侧**。
-     * 在账号块 800 字符窗口内，`sidebar-account-avatar` 必须早于 `ui-test-account-name`。
+     * 在账号块窗口内，`sidebar-account-avatar` 必须早于 `ui-test-account-name`。
      */
     const blockStart = source.indexOf('data-ui="sidebar-account-avatar"')
-    const blockWindow = source.slice(blockStart, blockStart + 1400)
+    /*
+     * 窗口 1400 → 2400 → 4000（2026-11-08）。
+     *
+     * 每次都是同一个原因：账号块里新增内容后，`ui-test-account-name` 被推到
+     * 窗口外，断言拿到 -1 而不是真实位置。这次加的是「会员金框 + 名字前的
+     * VIP 标签」两个分支与说明注释。
+     *
+     * 窗口只用来「在局部找相对顺序」，放大不削弱断言 ——
+     * 真正的约束是下面的 `nameAt > avatarAt`。
+     */
+    const blockWindow = source.slice(blockStart, blockStart + 4000)
     const avatarAt = blockWindow.indexOf("sidebar-account-avatar", 10)
     const nameAt = blockWindow.indexOf("ui-test-account-name")
     expect(avatarAt).toBeGreaterThan(-1)

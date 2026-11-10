@@ -24,8 +24,9 @@
  *    失败时清掉旧配置（避免显示过期清单），并记一条日志。
  */
 
-import { gatewayListModelCatalog, normalizeGatewayBaseUrl, DEFAULT_RELAY_URL } from "./gateway-api"
-import { NETCARD_ISSUE_PATH, netcardOf } from "./netcard"
+import { gatewayListModelCatalog } from "./gateway-api"
+import { invalidateRelayCache, resolveRelayBaseUrl } from "./relay-endpoints"
+import { NETCARD_ISSUE_PATH, NETCARD_REFRESH_PATH, netcardOf } from "./netcard"
 import { BUILTIN_PROVIDER_ID, applyBuiltinModels } from "./provider-bridge"
 import type { StoredAccountSession } from "@/lib/account/types"
 import { getHttpFetch } from "@/lib/tauri-fetch"
@@ -111,6 +112,94 @@ async function repairMissingNetcard(session: StoredAccountSession): Promise<stri
 }
 
 /**
+ * 会员状态变化后补签网关卡（2026-11-06）。
+ *
+ * ## 为什么需要它
+ *
+ * 网关卡是**登录时**签发的。用户在设置里兑换激活码那一刻，手上还没有卡
+ * （会员是兑换后才生效的），而内置模型的每次调用都要带卡 —— 如果不补签，
+ * 唯一的出路就是「请重新登录」，那等于每开一次会员就重登一次。
+ * 用户明确否了这条体验，所以这里在兑换成功后当场换一张。
+ *
+ * ## 为什么走 `/v1/netcard/refresh` 而不是 `/v1/netcard`
+ *
+ * 后者是老会话补票入口，语义相同但**请求体只需要 refreshToken**；
+ * 分一个端点是为了让服务端日志与限流能区分「升级补票」与「会员补签」，
+ * 排查「为什么这个人没有卡」时一眼能看出走的是哪条路。
+ *
+ * ## 失败不抛
+ *
+ * 兑换本身已经成功（会员时长已写进账号）。补签失败只是「内置模型暂时不可用」，
+ * 下一次登录/续期会自然补上；把它抛出去会让用户以为兑换失败，进而重复兑换。
+ * 返回 false 让界面给出「可稍后在设置里重新读取」这类可执行提示。
+ */
+export async function repairNetcardAfterMembershipChange(
+  session: StoredAccountSession | null,
+): Promise<boolean> {
+  if (!session) return false
+  try {
+    const fetcher = await getHttpFetch()
+
+    // 设备字段与登录路径同源：漏掉它们签出来的就是「换台机器照样能用」的弱卡。
+    const body: Record<string, unknown> = { refreshToken: session.refreshToken }
+    try {
+      const { getDeviceFingerprint } = await import("@/lib/account/device")
+      const deviceHash = await getDeviceFingerprint()
+      if (deviceHash) body.deviceHash = deviceHash
+    } catch {
+      // 取不到指纹：不上报，服务端按缺字段处理。
+    }
+    try {
+      const { ensureDeviceKey } = await import("@/lib/account/request-sign")
+      const deviceKey = await ensureDeviceKey()
+      if (deviceKey?.publicKey) body.devicePublicKey = deviceKey.publicKey
+    } catch {
+      // 环境不支持 Ed25519：同上。
+    }
+
+    const response = await fetcher(
+      `${session.baseUrl.replace(/\/+$/, "")}${NETCARD_REFRESH_PATH}`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.accessToken}`,
+        },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(15_000),
+      },
+    )
+    const payload = (await response.json().catch(() => null)) as
+      | { success?: boolean; data?: { netcard?: string } }
+      | null
+    const card = payload?.data?.netcard
+    if (!response.ok || typeof card !== "string" || card.length === 0) {
+      console.warn("[builtin] 会员补签网关卡失败", { status: response.status })
+      return false
+    }
+
+    // 写卡的同时**顺手重新登记内置模型**：用户兑换完最想看到的，
+    // 就是模型下拉框里立刻出现内置模型，而不是「再点一次同步」。
+    const { useAccountStore } = await import("@/stores/account-store")
+    const { saveAccountSession } = await import("@/lib/account/session")
+    const next = { ...session, netcard: card }
+    saveAccountSession(next)
+    useAccountStore.getState().replaceSession(next)
+    console.info("[builtin] 会员已补签网关卡")
+  } catch (error) {
+    console.warn("[builtin] 会员补签网关卡异常", error)
+    return false
+  }
+
+  // 卡已经在会话里了，这里再走一次同步把清单登记进 provider 配置。
+  // 失败也不算失败：卡有效，用户下次打开模型下拉（refreshBuiltinModels）会重试。
+  const { useAccountStore } = await import("@/stores/account-store")
+  const withCard = useAccountStore.getState().session
+  await syncBuiltinModels(withCard)
+  return true
+}
+
+/**
  * 移除已登记的内置模型配置。
  *
  * **只在「确认没有会话」时调用**（用户退出登录 / 注销账号）。
@@ -178,7 +267,13 @@ export async function syncBuiltinModels(session: StoredAccountSession | null): P
   const usableCard = card
   inFlight = (async () => {
     try {
-      const relay = normalizeGatewayBaseUrl(DEFAULT_RELAY_URL) || DEFAULT_RELAY_URL
+      /*
+       * 双通道选路（2026-11-08）：
+       * 优先家庭网关（relay-home），探测不通再退回 Cloudflare（relay）。
+       * 这一处解析同时决定了「清单从哪拉」和「LLM 请求打到哪」——
+       * 因为下面 applyBuiltinModels 用的 serverUrl 就是它。
+       */
+      const relay = await resolveRelayBaseUrl()
       console.info("[builtin] 开始拉取模型清单", { relay, cardTail: usableCard.slice(-8) })
       const catalog = await gatewayListModelCatalog(relay, usableCard)
       const modelIds = catalog.map((item) => item.id)
@@ -215,6 +310,12 @@ export async function syncBuiltinModels(session: StoredAccountSession | null): P
       return true
     } catch (error) {
       console.error("[builtin] 自动登记内置模型失败：", error)
+      /*
+       * 作废选路缓存：这次请求失败说明当前端点可能已经不通，
+       * 下次应该重新探测（比如家庭网关刚断网，该切回 Cloudflare）。
+       * 不作废的话，5 分钟缓存期内会一直往一个死地址打。
+       */
+      invalidateRelayCache()
       // 卡在但拉不到清单：不清配置（可能只是网关抖动），下次刷新会再试
       return false
     } finally {

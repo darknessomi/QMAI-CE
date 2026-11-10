@@ -83,9 +83,12 @@ describe("左下角账号菜单", () => {
     const entries = [...document.querySelectorAll<HTMLElement>(".ui-test-avatar-menu [data-ui]")]
       .map((item) => item.dataset.ui)
       .filter((id): id is string => !!id && !id.startsWith("sidebar-skin-"))
-    // 顺序：账号 → 外观 → 设置 → 维护工具 → 退出账号
+      // vip-badge 是会员卡片里的装饰徽标，不是菜单入口
+      .filter((id) => id !== "vip-badge" && id !== "membership-card-free-space")
+    // 顺序：账号 → 会员卡片 → 外观 → 设置 → 维护工具 → 退出账号
     expect(entries).toEqual([
       "sidebar-avatar-account-entry",
+      "membership-card",
       "sidebar-appearance-entry",
       "sidebar-settings-entry",
       "sidebar-maintenance-entry",

@@ -39,7 +39,18 @@ const state = vi.hoisted(() => ({
   resolveConflict: vi.fn(async () => undefined),
 }))
 
-const account = vi.hoisted(() => ({ session: null as null | { baseUrl: string } }))
+/**
+ * 账号状态夹具。
+ *
+ * 2026-11-06 起「模型同步」是**会员功能**，所以这里必须同时给出登录态与会员状态：
+ * 只给 session 的话面板会渲染成「未开通」形态，开关是锁的。
+ * 会员判定走真实实现（`@/lib/membership/access`），不在这里 mock ——
+ * 否则「判定改坏了」这件事在本 spec 里看不出来。
+ */
+const account = vi.hoisted(() => ({
+  session: null as null | { baseUrl: string; user?: unknown },
+  user: null as unknown,
+}))
 
 vi.mock("@/stores/model-sync-store", () => ({
   useModelSyncStore: (selector: (value: typeof state) => unknown) => selector(state),
@@ -80,6 +91,22 @@ function switchButton(): HTMLButtonElement {
 }
 
 const LOGGED_IN = { baseUrl: "https://qmai-account.qmai.workers.dev" }
+/** 会员在有效期内的账号：绝大多数用例要测的是「会员能正常用同步」。 */
+const MEMBER_USER = {
+  id: 1,
+  email: "author@example.com",
+  displayName: "作者",
+  createdAt: 1_793_000_000,
+  avatarUpdatedAt: null,
+  displayNameUpdatedAt: null,
+  membership: {
+    active: true,
+    expiresAt: Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60,
+    remainingDays: 30,
+    planLabel: "月卡",
+  },
+}
+const LOGGED_IN_MEMBER = { ...LOGGED_IN, user: MEMBER_USER }
 
 beforeEach(() => {
   host = document.createElement("div")
@@ -95,6 +122,7 @@ beforeEach(() => {
     lastSyncAt: null,
   })
   account.session = null
+  account.user = null
 })
 
 afterEach(() => {
@@ -111,23 +139,66 @@ describe("模型同步面板", () => {
   })
 
   it("标题已从「账号同步」改为「模型同步」：它同步的是模型配置，不是账号", () => {
-    account.session = LOGGED_IN
+    account.session = LOGGED_IN_MEMBER
+    account.user = MEMBER_USER
     render()
     expect(host.textContent).toContain("模型同步")
     expect(host.textContent).not.toContain("账号同步")
-    const toggle = toggleButton()
-    expect(toggle.getAttribute("title")).toContain("模型同步")
+    /*
+     * 2026-11-09：标题不再是折叠按钮，改成卡头文字 + 右侧开关。
+     * 所以「标题带 title」这条改成断言开关的 title —— 它才是有提示的那个。
+     */
+    expect(switchButton().getAttribute("title")).toContain("同步")
   })
 
-  it("登录后：标题 + 开关都显示，开关可用", () => {
-    account.session = LOGGED_IN
+  it("会员：标题 + 开关都显示，开关可用", () => {
+    account.session = LOGGED_IN_MEMBER
+    account.user = MEMBER_USER
     render()
     expect(host.querySelector('[data-ui="model-sync-panel"]')).toBeTruthy()
     expect(switchButton().disabled).toBe(false)
   })
 
-  it("默认折叠：只有标题 + 开关，没有「修改同步密码」", () => {
+  /*
+   * 会员闸门（2026-11-06）。
+   *
+   * 「模型同步」是会员功能：未开通时**面板保留**（它是这个功能在界面上唯一的存在），
+   * 但开关锁死、给兑换入口。整块消失会让用户永远不知道该功能存在，也就无从开通。
+   */
+  it("已登录但未开通会员：面板保留、开关锁死，展开后给兑换入口", () => {
     account.session = LOGGED_IN
+    account.user = null
+    render()
+    const panel = host.querySelector('[data-ui="model-sync-panel"]')
+    expect(panel).toBeTruthy()
+    expect(panel!.getAttribute("data-member-locked")).toBe("true")
+    expect(switchButton().disabled).toBe(true)
+    expect(host.textContent).toContain("模型同步是会员功能")
+    expect(button("开通会员")).toBeTruthy()
+
+    act(() => toggleButton().click())
+    expect(host.querySelector('[data-ui="activation-code-form"]')).toBeTruthy()
+  })
+
+  it("会员到期（expiresAt 已过）按未开通处理，即使服务端快照写着 active", () => {
+    account.session = LOGGED_IN
+    account.user = {
+      ...MEMBER_USER,
+      membership: {
+        active: true,
+        expiresAt: Math.floor(Date.now() / 1000) - 60,
+        remainingDays: 1,
+        planLabel: "月卡",
+      },
+    }
+    render()
+    expect(switchButton().disabled).toBe(true)
+    expect(host.querySelector('[data-ui="model-sync-panel"]')!.getAttribute("data-member-locked")).toBe("true")
+  })
+
+  it("默认折叠：只有标题 + 开关，没有「修改同步密码」", () => {
+    account.session = LOGGED_IN_MEMBER
+    account.user = MEMBER_USER
     Object.assign(state, { enabled: true, lastSyncAt: Date.now() })
     render()
     expect(toggleButton().getAttribute("aria-expanded")).toBe("false")
@@ -138,17 +209,32 @@ describe("模型同步面板", () => {
   })
 
   it("展开后才出现「修改同步密码」与清空云端配置入口", () => {
-    account.session = LOGGED_IN
+    account.session = LOGGED_IN_MEMBER
+    account.user = MEMBER_USER
     Object.assign(state, { enabled: true, lastSyncAt: Date.now() })
     render()
+
+    /*
+     * 2026-11-09 结构调整后，这两项分别收敛成：
+     *   · 「修改同步密码」→ 操作条上的「密码」图标方块
+     *   · 「关闭同步并清空云端配置」→ 说明区展开后出现（销毁式操作不跟日常操作并排）
+     *
+     * 折叠状态下两者都不该出现。
+     */
+    expect(host.querySelector('[data-ui="model-sync-password-form"]')).toBeNull()
+    expect(host.textContent).not.toContain("关闭同步并清空云端配置（不可恢复）")
+
+    act(() => button("密码")!.click())
+    expect(host.querySelector('[data-ui="model-sync-password-form"]')).toBeTruthy()
+
     act(() => toggleButton().click())
     expect(toggleButton().getAttribute("aria-expanded")).toBe("true")
-    expect(button("修改同步密码")).toBeTruthy()
     expect(host.textContent).toContain("关闭同步并清空云端配置（不可恢复）")
   })
 
   it("开关即同步开关：点一下关闭只调 setEnabled(false)，不碰 disable（不清云端）", () => {
-    account.session = LOGGED_IN
+    account.session = LOGGED_IN_MEMBER
+    account.user = MEMBER_USER
     Object.assign(state, { enabled: true, passwordReady: true })
     render()
     act(() => switchButton().click())
@@ -157,7 +243,8 @@ describe("模型同步面板", () => {
   })
 
   it("已关闭且本机有密码：再点开关直接恢复同步，不再要求输密码", () => {
-    account.session = LOGGED_IN
+    account.session = LOGGED_IN_MEMBER
+    account.user = MEMBER_USER
     Object.assign(state, { enabled: false, passwordReady: true })
     render()
     act(() => switchButton().click())
@@ -166,7 +253,8 @@ describe("模型同步面板", () => {
   })
 
   it("本机没有密码时打开开关：就地展开密码表单（一次性引导）", () => {
-    account.session = LOGGED_IN
+    account.session = LOGGED_IN_MEMBER
+    account.user = MEMBER_USER
     Object.assign(state, { enabled: false, passwordReady: false })
     render()
     act(() => switchButton().click())
@@ -176,12 +264,13 @@ describe("模型同步面板", () => {
   })
 
   it("「从云端下载」：确认后调用 restoreFromCloud（取消则不动）", async () => {
-    account.session = LOGGED_IN
+    account.session = LOGGED_IN_MEMBER
+    account.user = MEMBER_USER
     Object.assign(state, { enabled: true, passwordReady: true, lastSyncAt: Date.now() })
     render()
-    act(() => toggleButton().click())
 
-    const download = button("从云端下载")
+    // 2026-11-09：「从云端下载」收成了操作条上的「下载」图标方块
+    const download = host.querySelector<HTMLButtonElement>('[data-ui="model-sync-download"]')
     expect(download).toBeTruthy()
 
     confirmMock.confirmModelAction.mockResolvedValueOnce(false)
@@ -194,7 +283,8 @@ describe("模型同步面板", () => {
   })
 
   it("冲突时逐条给出两份可选，点击即按选中的那份解决", () => {
-    account.session = LOGGED_IN
+    account.session = LOGGED_IN_MEMBER
+    account.user = MEMBER_USER
     Object.assign(state, {
       enabled: true,
       pendingConflicts: [{ key: "deepseek", localValue: { m: 1 }, cloudValue: { m: 2 }, chosen: "cloud" }],
@@ -211,7 +301,8 @@ describe("模型同步面板", () => {
   })
 
   it("折叠时同步失败仍要看得到报错（否则点「立即同步」像没反应）", () => {
-    account.session = LOGGED_IN
+    account.session = LOGGED_IN_MEMBER
+    account.user = MEMBER_USER
     Object.assign(state, { enabled: true, status: "error", message: "网络不可用" })
     render()
     expect(host.textContent).toContain("网络不可用")

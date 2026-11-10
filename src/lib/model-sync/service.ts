@@ -301,8 +301,8 @@ export async function pullAndMerge(io: ModelSyncIo, password: string): Promise<P
   const remote = await io.fetchCloud(state.version > 0 ? String(state.version) : undefined)
 
   if (remote.kind === "none") {
-    await io.saveState({ ...state, lastPullAt: now })
-    return { status: "none", pushed: false, version: state.version }
+    await io.saveState({ ...state, version: 0, lastPullAt: now })
+    return { status: "none", pushed: false, version: 0 }
   }
   if (remote.kind === "unchanged") {
     await io.saveState({ ...state, lastPullAt: now })
@@ -380,7 +380,7 @@ export interface PushResult {
  * 推送本地改动。云端版本已经变过（409）时返回 `conflict`，
  * 由上层触发一次 pullAndMerge，让用户在合并结果里看到两侧差异。
  */
-export async function pushLocal(io: ModelSyncIo, password: string): Promise<PushResult> {
+export async function pushLocal(io: ModelSyncIo, password: string, options: { force?: boolean } = {}): Promise<PushResult> {
   const now = io.now()
   const state = await io.loadState()
   const configs = await io.loadConfigs()
@@ -391,9 +391,12 @@ export async function pushLocal(io: ModelSyncIo, password: string): Promise<Push
 
   const payload = buildPayload(entries, unprefixEntries(settingsEntries))
   const changedKeys = Object.keys(allEntries).filter(
-    (key) => state.snapshot[key] !== canonicalJson(allEntries[key].value),
+    (key) => {
+      const canonical = canonicalJson(allEntries[key].value)
+      return state.snapshot[key] !== canonical && state.snapshot[key] !== fingerprint(canonical)
+    },
   )
-  if (changedKeys.length === 0 && state.version > 0) {
+  if (!options.force && changedKeys.length === 0 && state.version > 0) {
     return { status: "unchanged", version: state.version }
   }
 

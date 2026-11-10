@@ -13,6 +13,7 @@ use crate::types::wiki::WikiProject;
 const KNOWLEDGE_DIR: &str = "QM";
 const LEGACY_KNOWLEDGE_DIR: &str = "wiki";
 const META_DIR: &str = ".qmai";
+/// 旧版项目元数据目录名：仅用于历史项目的兼容迁移，任何情况下都不要修改此值。
 const LEGACY_META_DIR: &str = ".llm-wiki";
 
 #[tauri::command]

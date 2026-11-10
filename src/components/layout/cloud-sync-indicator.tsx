@@ -31,6 +31,7 @@ import { providerLabel } from "@/lib/cloud-sync/providers"
 import { deriveCloudSyncView, type CloudSyncIconName, type CloudSyncView } from "@/lib/cloud-sync/status"
 import { totalSyncedCount, type CloudSyncNotice, type SyncEntry } from "@/lib/cloud-sync/types"
 import { useCloudSyncStore } from "@/stores/cloud-sync-store"
+import { useBuiltinPluginEnabled } from "@/lib/plugins/use-builtin-plugins"
 
 const ICONS: Record<CloudSyncIconName, LucideIcon> = {
   Cloud,
@@ -141,6 +142,16 @@ function SyncFailureList({
 
 export function CloudSyncIndicator() {
   const config = useCloudSyncStore((state) => state.config)
+  /*
+   * 「云同步」被做成内置插件（2026-11-08 用户要求）。
+   *
+   * 插件关掉时这个图标一起消失 —— 它代表的功能已经隐藏了，
+   * 还留个图标在右上角只会让用户反复点它。
+   *
+   * ⚠️ 这里说的是「同步到用户自己的网盘」，与「会员云空间」无关。
+   * 后者由 MemberCloudIndicator 表示，不受这个插件影响。
+   */
+  const [pluginEnabled] = useBuiltinPluginEnabled("cloud-sync")
   const runtime = useCloudSyncStore((state) => state.runtime)
   const notice = useCloudSyncStore((state) => state.notice)
   const openDetail = useCloudSyncStore((state) => state.openDetail)
@@ -219,6 +230,7 @@ export function CloudSyncIndicator() {
     }
   }, [failuresOpen])
 
+  if (!pluginEnabled) return null
   if (!config.enabled) return null
 
   return (

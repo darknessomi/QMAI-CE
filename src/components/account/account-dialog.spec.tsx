@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { resetAccountStoreForTests, useAccountStore, type AccountStoreState } from "@/stores/account-store"
+import { AccountApiError } from "@/lib/account/errors"
 import { clearLegalConsent } from "@/lib/account/legal-consent"
 import { AccountDialog } from "./account-dialog"
 
@@ -239,10 +240,57 @@ describe("AccountDialog", () => {
     expect(hint!.textContent).toContain("60")
   })
 
+  /*
+   * 「没有交换成功就不能显示成功」（2026-11-07 用户要求）。
+   *
+   * 验证码这条链路的真实性由**服务端**保证：`account-worker` 在发信失败时
+   * 会删掉刚写的码并回 `EMAIL_SEND_FAILED`。但客户端必须保证：
+   *   · 失败时不进入倒计时（进入倒计时 = 暗示已发送，用户会干等）；
+   *   · 失败时不显示「已发送到 xxx」；
+   *   · 断网（NETWORK）也走同一条失败分支，而不是被当成已发送。
+   */
+  it("发码失败（断网）：提示网络错误、不进入倒计时、不显示「已发送」", async () => {
+    sendCode.mockRejectedValueOnce(new AccountApiError("NETWORK", undefined, 0))
+    render()
+    await click(buttonByText("注册"))
+    await setInput("account-email", "writer@example.com")
+
+    await click(buttonByText("获取验证码"))
+
+    // 按钮必须仍是可点的「获取验证码」：没有倒计时，用户可以立刻重试
+    expect(buttonByText("获取验证码")).not.toBeUndefined()
+    expect(document.querySelector('[data-ui="code-sent"]')).toBeNull()
+    expect(document.body.textContent).not.toContain("垃圾箱")
+    expect(document.body.textContent).toContain("网络不可用")
+  })
+
+  it("发码失败（服务端回 EMAIL_SEND_FAILED）：同样不进入倒计时", async () => {
+    sendCode.mockRejectedValueOnce(new AccountApiError("EMAIL_SEND_FAILED", undefined, 502))
+    render()
+    await click(buttonByText("注册"))
+    await setInput("account-email", "writer@example.com")
+
+    await click(buttonByText("获取验证码"))
+
+    expect(buttonByText("获取验证码")).not.toBeUndefined()
+    expect(document.querySelector('[data-ui="code-sent"]')).toBeNull()
+  })
+
+  it("发码成功：才出现「已发送到 xxx」", async () => {
+    render()
+    await click(buttonByText("注册"))
+    await setInput("account-email", "writer@example.com")
+
+    await click(buttonByText("获取验证码"))
+
+    const sent = document.querySelector('[data-ui="code-sent"]')
+    expect(sent, "code sent hint").not.toBeNull()
+    expect(sent!.textContent).toContain("writer@example.com")
+  })
+
   it("登录模式不渲染验证码与垃圾箱提示", async () => {
     render()
     await setInput("account-email", "writer@example.com")
-
     expect(document.querySelector(".account-code-hint")).toBeNull()
     expect(document.body.textContent).not.toContain("垃圾箱")
   })

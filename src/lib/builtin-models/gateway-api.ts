@@ -15,11 +15,27 @@
  */
 
 import { getHttpFetch } from "@/lib/tauri-fetch"
+import { reportRelayFailure } from "./relay-endpoints"
 
 /** 中转站地址：独立域名，与账号服务分开部署。 */
 export const DEFAULT_RELAY_URL = "https://relay.qmai.work"
 
 type FetchLike = (url: string, init: RequestInit) => Promise<Response>
+
+/**
+ * 从完整 URL 里取出 `scheme://host[:port]`。
+ *
+ * 用于把「某个具体接口失败」折算成「这个网关地址失败」，
+ * 再交给选路模块比对。解析不出来就返回空串（上报函数会忽略空值）。
+ */
+function originOf(url: string): string {
+  try {
+    const u = new URL(url)
+    return `${u.protocol}//${u.host}`
+  } catch {
+    return ""
+  }
+}
 
 export class GatewayError extends Error {
   readonly code: string
@@ -68,6 +84,19 @@ export function toGatewayError(payload: unknown, status: number): GatewayError {
   if (status === 401) {
     return new GatewayError(rawMessage || "登录状态已失效，请重新登录后再使用内置模型。", "unauthorized", status)
   }
+  /*
+   * 402 = 会员到期 / 未开通（网关 2026-11-07 起用 402 把它与 401 区分开）。
+   *
+   * 必须单独判型：并进 401 会让用户看到「请重新登录」，而他重登之后照样没有
+   * 权限 —— 真正该做的是去开通或续费。界面据此打开会员引导，不是登录弹窗。
+   */
+  if (status === 402 || rawCode === "membership_required") {
+    return new GatewayError(
+      rawMessage || "内置模型属于会员功能，会员已到期或尚未开通，续费后即可继续使用。",
+      "membership_required",
+      status,
+    )
+  }
   if (status === 403) {
     return new GatewayError(
       rawMessage || "当前账号没有使用内置模型的权限，请联系管理员开通。",
@@ -103,6 +132,14 @@ async function httpJson(
   try {
     response = await fetcher(url, { ...init, signal: controller.signal })
   } catch (error) {
+    /*
+     * 网络层失败（连不上 / 超时 / TLS 错误）：说明这个端点大概率已经不可用。
+     * 上报给选路模块，让它作废缓存 —— 否则 5 分钟缓存期内会一直往死地址打。
+     *
+     * 只上报 origin：reportRelayFailure 内部会比对当前选中的地址，
+     * 不匹配就忽略，所以并发请求里老请求的失败不会冲掉新选择。
+     */
+    reportRelayFailure(originOf(url))
     const detail = error instanceof Error ? error.message : String(error)
     throw new GatewayError(`无法连接到内置模型服务（${url}）：${detail}`, "network_error")
   } finally {
@@ -117,6 +154,14 @@ async function httpJson(
     } catch {
       payload = null
     }
+  }
+
+  /*
+   * 5xx 说明是网关自己出了问题（进程挂了、上游全失败），换通道有意义；
+   * 4xx 是请求本身的问题（卡无效、参数错），换通道只会重复失败，不上报。
+   */
+  if (response.status >= 500) {
+    reportRelayFailure(originOf(url))
   }
 
   if (!response.ok) throw toGatewayError(payload, response.status)
@@ -142,7 +187,7 @@ function jsonHeaders(extra?: Record<string, string>): Record<string, string> {
  * 网关对无指纹的卡按补绑处理；取不到签名密钥时网关也可能放行。
  * 拿不到的东西就不发对应头，不编造。
  */
-async function gatewayAuthHeaders(
+export async function gatewayAuthHeaders(
   netcard: string,
   method: string,
   path: string,
@@ -166,6 +211,67 @@ async function gatewayAuthHeaders(
     // 没有签名密钥（环境不支持 Ed25519）时也不阻断，交给网关判断。
   }
   return headers
+}
+
+/**
+ * 网关返回的今日额度（`GET /v1/quota`）。
+ *
+ * 字段与家庭网关的 /v1/quota 对齐。老网关（Cloudflare Worker）没有这个端点，
+ * 调用方拿到 null 时应当隐藏额度条，而不是显示 0 —— 显示 0 会让用户以为
+ * 额度用完了，比不显示更糟。
+ */
+export interface GatewayQuota {
+  tier: "free" | "member"
+  tokensUsed: number
+  tokensLimit: number
+  tokensRemaining: number
+  requestsUsed: number
+  requestsLimit: number
+  /** 额度重置时间（ISO 8601，北京时间次日 0 点） */
+  resetAt: string
+}
+
+/**
+ * 查询今日额度。
+ *
+ * ## 为什么失败一律返回 null 而不是抛错
+ *
+ * 额度显示是**锦上添花**的功能：查不到就当没有，会员页照常显示。
+ * 如果这里抛错，一个可选功能会让整页报错 —— 而用户真正关心的
+ * （我是会员吗、能用哪些功能）反而看不到了。
+ *
+ * 同理，老网关 404、网络抖动、返回格式不对，全部静默返回 null。
+ */
+export async function gatewayFetchQuota(
+  relayBaseUrl: string,
+  netcard: string,
+  fetchImpl?: FetchLike,
+): Promise<GatewayQuota | null> {
+  const f = fetchImpl ?? fetch
+  const base = relayBaseUrl.replace(/\/+$/, "")
+  const path = "/v1/quota"
+  try {
+    const headers = await gatewayAuthHeaders(netcard, "GET", path, "")
+    const res = await f(`${base}${path}`, { method: "GET", headers })
+    if (!res.ok) return null
+    const data = (await res.json()) as Partial<GatewayQuota>
+    // 关键字段缺失就当作没有（老网关或格式变更）
+    if (typeof data.tokensLimit !== "number" || typeof data.tokensUsed !== "number") return null
+    return {
+      tier: data.tier === "member" ? "member" : "free",
+      tokensUsed: data.tokensUsed,
+      tokensLimit: data.tokensLimit,
+      tokensRemaining:
+        typeof data.tokensRemaining === "number"
+          ? data.tokensRemaining
+          : Math.max(0, data.tokensLimit - data.tokensUsed),
+      requestsUsed: typeof data.requestsUsed === "number" ? data.requestsUsed : 0,
+      requestsLimit: typeof data.requestsLimit === "number" ? data.requestsLimit : 0,
+      resetAt: typeof data.resetAt === "string" ? data.resetAt : "",
+    }
+  } catch {
+    return null
+  }
 }
 
 /** 拉取当前网关卡能用的模型清单（对外名，不含上游信息）。 */

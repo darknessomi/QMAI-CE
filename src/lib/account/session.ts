@@ -41,6 +41,7 @@ import {
 import type {
   AccountAuthPayload,
   AccountUser,
+  MembershipInfo,
   StoredAccountSession,
 } from "./types"
 
@@ -81,7 +82,45 @@ function toAccountUser(value: unknown): AccountUser | null {
       ? record.avatarToken
       : null
 
-  return { id, email, displayName, createdAt, avatarUpdatedAt, avatarToken, displayNameUpdatedAt }
+  const user: AccountUser = {
+    id,
+    email,
+    displayName,
+    createdAt,
+    avatarUpdatedAt,
+    avatarToken,
+    displayNameUpdatedAt,
+  }
+  // 与 `api.ts` 同一口径：老会话没有会员字段时**不挂**这个键，
+  // 由 `membershipOf()` 统一按非会员兜底，而不是在这里造一个空对象。
+  const membership = toMembershipInfo(record.membership)
+  if (membership) user.membership = membership
+  return user
+}
+
+/**
+ * 会员快照的宽容解析。
+ *
+ * 老版本会话没有这个字段，老服务端也不会返回 —— 返回 null（= 字段缺失），
+ * **不判整份会话为坏数据**：那会让升级后的老用户突然被登出。
+ */
+function toMembershipInfo(value: unknown): MembershipInfo | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null
+  const record = value as Record<string, unknown>
+  const expiresAt = isFiniteNumber(record.expiresAt) ? record.expiresAt : null
+  const forever = record.forever === true
+  return {
+    active: record.active === true && expiresAt !== null,
+    expiresAt,
+    forever,
+    // 永久卡剩余天数为 null（服务端明确）；老会话没有该字段时按 0 处理。
+    remainingDays: forever
+      ? null
+      : isFiniteNumber(record.remainingDays)
+        ? Math.max(0, Math.floor(record.remainingDays))
+        : 0,
+    planLabel: typeof record.planLabel === "string" && record.planLabel ? record.planLabel : null,
+  }
 }
 
 function toStoredSession(value: unknown): StoredAccountSession | null {

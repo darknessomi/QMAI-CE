@@ -7,7 +7,7 @@ import { usePluginSlotIndex } from "@/lib/plugins/declarative/api"
 import { resolveDefaultModel, resolveNovelModel, formatResolvedModelLabel } from "@/lib/novel/model-resolver"
 import type { FinalChapterSavePhase } from "@/stores/wiki-store"
 import { deleteFile, fileExists, readFile, writeFileAtomic, writeFileIfAbsent, listDirectory } from "@/commands/fs"
-import { isChapterPath, normalizePath } from "@/lib/path-utils"
+import { isChapterPath, isVersionedWikiPath, normalizePath } from "@/lib/path-utils"
 import { getFileCategory, isBinary } from "@/lib/file-types"
 import { WikiEditor, type WikiEditorHandle } from "@/components/editor/wiki-editor"
 import { WikiReader } from "@/components/editor/wiki-reader"
@@ -101,7 +101,7 @@ import { UiTestEditor, type UiTestEditorSaveState } from "@/components/uitest/ui
 import { FrontmatterPanel } from "@/components/editor/frontmatter-panel"
 import { UiTestOutlineTools } from "@/components/uitest/ui-test-outline-tools"
 import { createDebouncedPersist } from "@/lib/debounced-persist"
-import { snapshotChapterBeforeSave } from "./chapter-save-version"
+import { snapshotVersionBeforeSave } from "./chapter-save-version"
 import { BodyTypographyFields, type BodyTypographyValue } from "@/components/settings/sections/body-typography-fields"
 /*
  * ⚠ 这个 CSS 必须**静态** import 在渲染浮层的这个模块里，不能挪走。
@@ -1096,12 +1096,12 @@ export function PreviewPanel() {
         return
       }
 
-      // 覆盖前把即将被换掉的旧正文留成历史版本（只有章节 md 留）。
+      // 覆盖前把即将被换掉的旧正文留成历史版本（章节与大纲都留）。
       // `diskContent` 就是上面读到的旧内容，可直接复用，无需二次读盘；
       // 冲突分支在上面已经 return，那条路径是磁盘覆盖，不该留版本。
       // 函数内部已兜住异常，绝不会挡住下面的写入。
-      if (isChapterPath(pathAtSave) && project) {
-        await snapshotChapterBeforeSave({
+      if (isVersionedWikiPath(pathAtSave) && project) {
+        await snapshotVersionBeforeSave({
           projectPath: project.path,
           path: pathAtSave,
           previousContent: diskContent,

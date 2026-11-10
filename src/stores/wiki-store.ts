@@ -90,6 +90,8 @@ export type SettingsCategoryId =
   | "account"
   | "model"
   | "cloudSync"
+  /** 会员云空间（备份到青幕服务器）。与 cloudSync 是两套独立功能。 */
+  | "memberCloud"
   | "network"
   | "interface"
   | "novel"

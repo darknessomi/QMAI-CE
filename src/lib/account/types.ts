@@ -27,6 +27,10 @@ export type AccountErrorCode =
   | "CONFLICT"
   | "NAME_LOCKED"
   | "NETWORK"
+  /** 激活码无效或已被使用（服务端不区分「不存在 / 已兑换 / 已作废」）。 */
+  | "CODE_NOT_FOUND"
+  /** 会员服务不可用（服务端未配置密钥、或内置模型需要会员）。 */
+  | "MEMBERSHIP_UNAVAILABLE"
 
 export interface AccountUser {
   id: number
@@ -44,6 +48,34 @@ export interface AccountUser {
   avatarToken?: string | null
   /** 上次修改昵称的时间（Unix 秒）；从未改过为 null。 */
   displayNameUpdatedAt: number | null
+  /**
+   * 会员状态（服务端按**当前时间**算好的快照）。
+   *
+   * 老会话里没有这个字段：缺失一律按「非会员」处理，下一次刷新登录态就会补上。
+   * 注意它是**快照**——本地跨过到期时间后，`expiresAt` 已经不可信，
+   * 所以客户端判定必须同时看 `expiresAt > now`（见 `lib/membership/access.ts`）。
+   */
+  membership?: MembershipInfo | null
+}
+
+/** 会员信息的对外形状，与服务端 `PublicUser.membership` 保持一致。 */
+export interface MembershipInfo {
+  /** 服务端判定此刻是否有效。 */
+  active: boolean
+  /** 到期时间（Unix 秒）；从未开通为 null。永久卡是一个极远的固定值。 */
+  expiresAt: number | null
+  /** 剩余天数（向上取整）；非会员为 0，永久卡为 null。 */
+  remainingDays: number | null
+  /** 卡种标签（如「年卡」）；非会员为 null。 */
+  planLabel: string | null
+  /**
+   * 是否永久会员（2026-11-07）。
+   *
+   * 界面必须看这个字段显示「永不过期」，不要拿 `expiresAt` 自己算 ——
+   * 否则会显示成「剩余 27000 天」，看起来像 bug。
+   * 老服务端不返回这个字段时按 false 处理（`parseMembershipInfo` 兜底）。
+   */
+  forever: boolean
 }
 
 export interface AccountAuthPayload {
@@ -113,4 +145,13 @@ export interface ChangePasswordInput {
 export interface AvatarUpload {
   data: ArrayBuffer
   mime: string
+}
+
+/** 兑换激活码的结果。 */
+export interface RedeemCodeResult {
+  membership: MembershipInfo
+  /** 这张码加了多少天。 */
+  addedDays: number
+  /** 卡种标签（如「月卡」）；服务端认不出时为 null。 */
+  planLabel: string | null
 }

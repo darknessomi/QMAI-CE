@@ -6,7 +6,7 @@ describe("changelog", () => {
     const entries = allChangelog()
     const versions = entries.map((entry) => entry.version)
 
-    expect(versions.slice(0, 9)).toEqual(["4.4.2", "4.4.1", "4.4.0", "4.3.10", "4.3.9", "4.3.8", "4.3.7", "4.3.6", "4.3.5"])
+    expect(versions.slice(0, 11)).toEqual(["4.6.0", "4.5.0", "4.4.2", "4.4.1", "4.4.0", "4.3.10", "4.3.9", "4.3.8", "4.3.7", "4.3.6", "4.3.5"])
     /*
      * 4.4.2：章节右键刷新目录一项新功能，其余为章节保存/提取、MCP、Cursor CLI、反重力 CLI、写作对话状态等修复。
      */

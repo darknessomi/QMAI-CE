@@ -23,6 +23,9 @@ import { useTranslation } from "react-i18next"
 import { BrandLogo } from "@/components/brand-logo"
 import type { WikiState } from "@/stores/wiki-store"
 import { isChapterPathInProject } from "@/lib/path-utils"
+import { MEMBER_FEATURE_VIEWS } from "@/lib/membership/access"
+import { useMembership } from "@/lib/membership/use-membership"
+import { VipBadge } from "@/components/membership/vip-badge"
 import {
   isNavItemActive,
   isSidebarNavItemId,
@@ -90,6 +93,13 @@ function SortableNavButton({ item, activeView, pendingCount, label, onClick }: S
    * 否则点开人物 Skill 页时侧边栏会没有任何图标高亮。
    */
   const isActive = isNavItemActive(item.view, activeView)
+  /*
+   * 会员标记（2026-11-06）：只给「还没开通」的会员功能挂角标。
+   * 已开通的会员不在侧栏里被反复提醒「这是会员功能」—— 那是噪音。
+   * 判定集中在 `lib/membership/access`，与路由闸门用的是同一份逻辑。
+   */
+  const { isLockedView } = useMembership()
+  const isMemberLocked = Boolean(MEMBER_FEATURE_VIEWS[item.view]) && isLockedView(item.view)
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
@@ -121,11 +131,24 @@ function SortableNavButton({ item, activeView, pendingCount, label, onClick }: S
             BETA
           </span>
         )}
+        {isMemberLocked && (
+          /*
+           * 会员标记：2026-11-08 从皇冠图标改成 VIP 胶囊。
+           *
+           * 侧栏图标只有 15px，皇冠缩到 10px 后三个尖会糊成一团 ——
+           * 用户根本认不出那是什么。而「VIP」三个字母在这个尺寸下仍然可读。
+           * 视觉与头像菜单里的会员卡片保持同一套语言（同一个 VipBadge 组件）。
+           */
+          <span className="pointer-events-none absolute -right-1 -bottom-1">
+            <VipBadge size="sm" muted />
+          </span>
+        )}
       </TooltipTrigger>
       <TooltipContent side="right">
         {label}
         {item.view === "reviewCenter" && pendingCount > 0 && ` (${pendingCount})`}
         {item.view === "storySimulation" && " (测试版)"}
+        {isMemberLocked && " · 会员功能"}
       </TooltipContent>
     </Tooltip>
   )
