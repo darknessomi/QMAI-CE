@@ -650,7 +650,8 @@
           "max": "最大",
           "custom": "自定义",
           "budgetTokens": "thinking token 预算",
-          "hint": "不同服务商对 reasoning 参数支持不同；不支持时会自动降级为普通请求。"
+          "hint": "不同服务商对 reasoning 参数支持不同；不支持时会自动降级为普通请求。",
+          "alwaysThinks": "该模型始终思考：无法关闭思考，只能调节思考强度（低 / 高 / 最大）；选「关闭」时不会发送关闭参数。"
         },
         "deploymentName": "部署名称",
         "testingConnection": "正在测试连接...",

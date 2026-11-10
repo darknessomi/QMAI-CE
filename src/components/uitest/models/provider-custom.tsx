@@ -9,6 +9,7 @@ import { resolveConfig } from "@/components/settings/preset-resolver"
 import { fetchLlmModelList } from "@/lib/settings-model-list"
 import { testLlmConnection, testLlmFunction } from "@/lib/connection-tests"
 import { FunctionCallingControls, ReasoningControls, withOutputRoomForReasoning } from "@/components/settings/sections/llm-provider-section"
+import { modelAlwaysThinks } from "@/lib/llm-providers"
 import { ModelSecretInput } from "./model-secret-input"
 import { mergeProviderModels, removeProviderModel, validateProviderDraft } from "./provider-data"
 import { useProviderDraft } from "./provider-draft"
@@ -147,7 +148,7 @@ export function UiTestProviderCard({ id, expanded, isNew, onToggle, onRemoved }:
             />
           </div>
         </div>
-        <details className="model-advanced"><summary>高级选项 · 工具调用与推理</summary><FunctionCallingControls enabled={draft.functionCallingEnabled !== false} onChange={functionCallingEnabled => void saveSwitch({ functionCallingEnabled })} /><ReasoningControls value={draft.reasoning ?? { mode: "medium" }} onChange={reasoning => change(withOutputRoomForReasoning(reasoning, draft.maxOutputTokens))} onModeChange={mode => void saveSwitch(withOutputRoomForReasoning({ ...saved?.reasoning, mode }, saved?.maxOutputTokens ?? CUSTOM_DEFAULTS.maxOutputTokens))} /></details>
+        <details className="model-advanced"><summary>高级选项 · 工具调用与推理</summary><FunctionCallingControls enabled={draft.functionCallingEnabled !== false} onChange={functionCallingEnabled => void saveSwitch({ functionCallingEnabled })} /><ReasoningControls value={draft.reasoning ?? { mode: "medium" }} onChange={reasoning => change(withOutputRoomForReasoning(reasoning, draft.maxOutputTokens))} onModeChange={mode => void saveSwitch(withOutputRoomForReasoning({ ...saved?.reasoning, mode }, saved?.maxOutputTokens ?? CUSTOM_DEFAULTS.maxOutputTokens))} alwaysThinks={modelAlwaysThinks(config)} /></details>
       </fieldset>
       <footer className="model-save-footer"><div><p role="status" aria-live="polite" className={status?.error ? "model-feedback error" : "model-feedback"}>{manual.trim() ? "还有未加入列表的模型 ID，请先点击“添加”，再保存配置。" : status?.text ?? (dirty ? "有未保存修改，保存后才会进入模型选择器。" : "当前配置已保存。")}</p><small>测试和保存是两种独立操作。</small></div><div className="model-actions"><button type="button" className="model-icon-button danger" title="删除配置" aria-label="删除配置" disabled={saving || deleting} onClick={() => void remove()}><Trash2 /></button>{(dirty || manual.trim()) && saved && <button type="button" className="model-button ghost" disabled={saving || deleting} onClick={async () => { if ((await confirmModelAction("放弃本项未保存的修改，恢复已保存配置？"))) { reset(); setManual(""); retainFailed(useWikiStore.getState().providerConfigs[id]?.savedModels) } }}>放弃修改</button>}<button type="button" className="model-button primary" disabled={!canSave} onClick={() => void saveConfig()}>{saving ? "正在保存…" : "保存配置"}</button></div></footer>
     </div>

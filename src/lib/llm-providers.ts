@@ -707,8 +707,14 @@ function buildResponsesBody(
   const reasoning = effectiveReasoning(config, overrides)
   const effort = reasoningEffort(reasoning)
   if (effort) {
-    body.reasoning = { effort }
+    // 始终思考的智谱型号只认 low / high / max（medium 会被拒）；拿不到合法档位就不发。
+    const wireEffort = modelAlwaysThinks(config) ? zhipuAlwaysThinkingEffort(reasoning) : effort
+    if (wireEffort) body.reasoning = { effort: wireEffort }
   }
+
+  // Kimi 系（含 Kimi Code 的 k2.8/k3/k3.1-pro）在 Responses 线上同样只接受
+  // temperature=1，与 chat_completions 共用同一个适配器。
+  adaptKimiBody(config, body)
 
   return body
 }
@@ -874,10 +880,77 @@ function isZhipuEndpoint(config: LlmConfig): boolean {
     || /(^|[/:.])zhipu([/:.]|$)/i.test(config.customEndpoint)
 }
 
+/**
+ * GLM-5.3 系列在官方端点上是"始终思考"型号：发 `thinking:{type:"disabled"}`
+ * 会直接 400（code 1210「该模型始终思考，不支持关闭思考；请使用 low、high 或 max」）。
+ * 这类型号只能调强度，不能关。
+ */
+function isZhipuAlwaysThinkingModel(model: string): boolean {
+  return /glm[-_.]?5[.\-_]?3/i.test(model)
+}
+
+/** 始终思考的智谱型号只接受 low / high / max 三档强度。 */
+function zhipuAlwaysThinkingEffort(reasoning: ReasoningConfig): "low" | "high" | "max" | null {
+  switch (reasoning.mode) {
+    case "low":
+      return "low"
+    case "high":
+      return "high"
+    case "max":
+      return "max"
+    case "custom":
+      return "high"
+    default:
+      // auto / off / medium：medium 不在该型号接受的档位里，不发等于用服务端默认。
+      return null
+  }
+}
+
+/**
+ * 该模型是否会"始终思考"（关不掉）。
+ *
+ * 两个消费方：设置页据此说明"关闭档对它无效"，请求规划据此保证输出预算至少
+ * 放得下最低档思考，避免用户只收到思考、没有正文。
+ */
+export function modelAlwaysThinks(config: LlmConfig): boolean {
+  return isZhipuAlwaysThinkingModel(config.model) && isZhipuEndpoint(config)
+}
+
+/**
+ * 规划请求时的思考预算地板。
+ *
+ * 普通型号直接取当前档位；始终思考的型号在 auto/off 档也仍会思考，因此至少按
+ * 最低档（low）留空间 —— 否则关闭档会把 `max_tokens` 压到 512，模型把预算全花在
+ * 思考上、正文为空，用户看到的是"模型连上了但没有返回可用内容"。
+ */
+export function reasoningOutputFloor(config: LlmConfig): number {
+  const reasoning = config.reasoning ?? { mode: "auto" as const }
+  if (modelAlwaysThinks(config) && (reasoning.mode === "auto" || reasoning.mode === "off")) {
+    return thinkingMinMaxTokens({ mode: "low" })
+  }
+  return thinkingMinMaxTokens(reasoning)
+}
+
+/**
+ * Kimi Code（`api.kimi.com/coding` 订阅服务）返回的模型 id **不带** `kimi` 前缀：
+ * `k2.8` / `k3` / `k3.1-pro` …。这些型号和 Moonshot 开放平台一样只接受
+ * temperature=1，显式传温度会直接 400
+ * （"invalid temperature: only 1 is allowed for this model"）。
+ */
+function isKimiCodeModelId(model: string): boolean {
+  const normalized = model.trim().toLowerCase()
+  const tail = normalized.includes("/")
+    ? normalized.slice(normalized.lastIndexOf("/") + 1)
+    : normalized
+  return /^k\d+(?:[.\-]\d+)*(?:-[a-z0-9]+)*$/.test(tail)
+}
+
 function isKimiEndpoint(config: LlmConfig): boolean {
   return /(^|[/:.-])kimi([/:.-]|$)/i.test(config.model)
     || /moonshot/i.test(config.model)
+    || isKimiCodeModelId(config.model)
     || /api\.moonshot\.(ai|cn)/i.test(config.customEndpoint)
+    || /(^|[/:.])kimi\.(com|ai)([/:.]|$)/i.test(config.customEndpoint)
 }
 
 function isOpenAiStrictCompletionModel(config: LlmConfig): boolean {
@@ -990,6 +1063,9 @@ function adaptKimiBody(config: LlmConfig, body: Record<string, unknown>): void {
   // temperature values for several current models ("only 1 is allowed").
   // Structured ingest/dedup pass temperature=0.1 for determinism, so
   // omit it and let the endpoint use its required default.
+  //
+  // 同一个适配器同时服务 chat_completions 与 responses 两条线（见
+  // buildResponsesBody）：Kimi Code 的 k3 / k3.1-pro 在两条线上都只接受 1。
   delete body.temperature
 }
 
@@ -999,6 +1075,8 @@ function buildOpenAiCompatibleBody(
   overrides?: RequestOverrides,
 ): Record<string, unknown> {
   const reasoning = effectiveReasoning(config, overrides)
+  // 智谱 GLM-5.3 系列是"始终思考"型号：发 thinking.disabled 会被 400（code 1210）。
+  const zhipuAlwaysThinks = modelAlwaysThinks(config)
   const wiredMessages = needsStrictLeadingSystemTemplate(config.model)
     ? coalesceSystemMessages(messages)
     : messages
@@ -1054,7 +1132,17 @@ function buildOpenAiCompatibleBody(
 
   // GLM-5+ 模型（智谱BigModel官方端点）使用顶层 thinking 对象控制思考
   if (isGLMThinkingModel(config.model) && isZhipuEndpoint(config)) {
-    if (reasoning.mode === "off") {
+    if (zhipuAlwaysThinks) {
+      // 始终思考的型号关不掉：发 `disabled` 会 400（code 1210）。装得下就显式开启，
+      // 装不下就整个不发，交给服务端默认 —— 但绝不降级成 `disabled`。
+      if (reasoning.mode !== "auto" && reasoning.mode !== "off") {
+        if (thinkingFitsInOutputBudget(body, reasoning)) {
+          body.thinking = { type: "enabled" }
+        } else {
+          thinkingSuppressed = true
+        }
+      }
+    } else if (reasoning.mode === "off") {
       body.thinking = { type: "disabled" }
     } else if (reasoning.mode !== "auto") {
       const fits = thinkingFitsInOutputBudget(body, reasoning)
@@ -1069,7 +1157,9 @@ function buildOpenAiCompatibleBody(
     && (config.provider === "openai" || config.provider === "azure" || config.provider === "custom")
     && effort
   ) {
-    body.reasoning_effort = effort
+    // 始终思考的智谱型号只认 low / high / max；medium 不发（不等价于关闭思考）。
+    const wireEffort = zhipuAlwaysThinks ? zhipuAlwaysThinkingEffort(reasoning) : effort
+    if (wireEffort) body.reasoning_effort = wireEffort
   }
 
   return body

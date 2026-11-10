@@ -32,7 +32,7 @@ import {
   MIN_USER_LLM_CONTEXT_SIZE,
   normalizeUserLlmMaxOutputTokens,
 } from "@/lib/llm-context-size"
-import { thinkingMinMaxTokens } from "@/lib/llm-providers"
+import { modelAlwaysThinks, thinkingMinMaxTokens } from "@/lib/llm-providers"
 import { resolveCodexCliTimeoutMinutes } from "@/lib/codex-cli-timeout"
 import { resolveCodexSpeedMode } from "@/lib/codex-cli-speed"
 import { getPluginProviderViews, subscribePluginProviderViews, syncPluginProviders } from "@/lib/plugins/provider-sync"
@@ -736,6 +736,7 @@ function PresetRow({
               value={reasoning}
               onChange={(next) => onChange(withOutputRoomForReasoning(next, maxOutputTokens))}
               onModeChange={onReasoningModeChange}
+              alwaysThinks={modelAlwaysThinks(resolvedConfig)}
             />
           )}
 
@@ -813,10 +814,13 @@ export function ReasoningControls({
   value,
   onChange,
   onModeChange,
+  alwaysThinks = false,
 }: {
   value: ReasoningConfig
   onChange: (value: ReasoningConfig) => void
   onModeChange: (mode: ReasoningMode) => void
+  /** 该模型始终思考（如智谱 GLM-5.3）：关闭档对它无效，界面上必须说清楚。 */
+  alwaysThinks?: boolean
 }) {
   const { t } = useTranslation()
   const modes: { value: ReasoningMode; label: string }[] = [
@@ -876,6 +880,11 @@ export function ReasoningControls({
       <p className="text-xs text-muted-foreground">
         {t("settings.sections.llm.reasoning.hint")}
       </p>
+      {alwaysThinks && (
+        <p className="text-xs text-amber-700 dark:text-amber-400">
+          {t("settings.sections.llm.reasoning.alwaysThinks")}
+        </p>
+      )}
     </div>
   )
 }
