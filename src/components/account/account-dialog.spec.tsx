@@ -589,10 +589,12 @@ describe("AccountDialog", () => {
     render()
     await setInput("account-email", "writer@example.com")
     await setInput("account-password", "password123")
+    await acceptLegalTerms()
 
     await act(async () => {
       submitButton().click()
     })
+    expect(login).toHaveBeenCalledTimes(1)
     await act(async () => {
       useAccountStore.setState({ dialogOpen: false })
     })

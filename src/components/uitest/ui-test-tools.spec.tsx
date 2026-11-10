@@ -323,11 +323,10 @@ describe("真实模型列表的测试版分组", () => {
     await render(<LlmProviderSection />)
   }
 
-  it("默认只展示自定义模型，风险说明折叠但完整可展开", async () => {
+  it("模型设置保留提供方与自定义模型入口，账号入口由账号页承接", async () => {
     await renderProviders()
-    // 标题随三栏入口（添加账号 / 添加提供方 / 添加自定义模型）改为「我的模型设置」。
     expect(container.textContent).toContain("我的模型设置")
-    expect(container.textContent).toContain("＋ 添加账号")
+    expect(container.textContent).not.toContain("＋ 添加账号")
     expect(container.textContent).toContain("＋ 添加提供方")
     expect(container.textContent).toContain("＋ 添加自定义模型")
     expect(container.querySelector(".model-add-panel")).toBeNull()
@@ -343,7 +342,8 @@ describe("真实模型列表的测试版分组", () => {
     await act(async () => { addProvider.click() })
     const panel = container.querySelector<HTMLElement>("[data-ui='llm-library']")!
     expect(panel?.hidden).toBe(false)
-    for (const preset of LLM_PRESETS.filter((preset) => preset.id !== "custom")) expect(panel.textContent).toContain(preset.label)
+    for (const preset of LLM_PRESETS.filter((preset) => preset.id !== "custom" && preset.id !== "qmai-builtin")) expect(panel.textContent).toContain(preset.label)
+    expect(panel.textContent).not.toContain("青幕内置模型")
     expect(panel.textContent).toContain("官方 Claude API")
     expect(panel.textContent).not.toContain("Uses the local")
     expect(modelIo.connection).not.toHaveBeenCalled()

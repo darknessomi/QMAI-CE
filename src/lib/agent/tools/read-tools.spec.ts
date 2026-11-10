@@ -379,4 +379,39 @@ describe("read tools", () => {
     const result = await tool.execute({ conversationId: "oc1" })
     expect(result).toContain("plan")
   })
+
+  /*
+   * ── 「选中（AI 不读取）」的读取拦截 ──
+   *
+   * 只在上下文注入处过滤是不够的：模型改走 read_chapter / read_outline 就能把
+   * 被排除的内容读回来，"AI 任何时候都不读取"就成了空话。所以这里钉的是
+   * **工具层**的拒绝，并且拒绝文案里必须写清"别再换路径试"（否则模型会拿另一个
+   * 名称反复重试，白白烧 token）。
+   */
+  it("read_chapter 拒绝读取被选中的章节，且不把正文漏出去", async () => {
+    vi.mocked(readFile).mockResolvedValue("---\nchapter_number: 1\nai_exclude: true\n---\n\n第1章正文内容")
+    const tool = createReadChapterTool("/project/wiki/chapters")
+    const result = await tool.execute({ name: "第1章" })
+    expect(result).toContain("AI 不读取")
+    expect(result).toContain("不得读取")
+    expect(result).not.toContain("第1章正文内容")
+  })
+
+  it("read_outline 同样拒绝被选中的大纲（含模糊匹配命中的路径）", async () => {
+    vi.mocked(readFile).mockImplementation(async (path) => {
+      if (path === "/project/wiki/outlines/卷一 残灯有火.md") {
+        return "---\ntype: outline\nai_exclude: true\n---\n\n# 卷一 残灯有火\n大纲正文"
+      }
+      throw new Error("missing")
+    })
+    vi.mocked(listDirectory).mockResolvedValue([
+      { name: "卷一 残灯有火.md", path: "/project/wiki/outlines/卷一 残灯有火.md", is_dir: false },
+    ])
+
+    const tool = createReadOutlineTool("/project/wiki/outlines")
+    const result = await tool.execute({ name: "残灯有火" })
+
+    expect(result).toContain("AI 不读取")
+    expect(result).not.toContain("大纲正文")
+  })
 })

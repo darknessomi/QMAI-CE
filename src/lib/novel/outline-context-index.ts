@@ -1,6 +1,7 @@
 import { listDirectory, readFile } from "@/commands/fs"
 import { mapWithConcurrency } from "@/lib/async-pool"
 import { parseFrontmatter } from "@/lib/frontmatter"
+import { isAiExcluded } from "./ai-exclude"
 import { normalizePath } from "@/lib/path-utils"
 import type { FileNode } from "@/types/wiki"
 
@@ -251,6 +252,15 @@ function createOutlineDocumentIndex(
     const raw = file.content
     if (!raw.trim()) return null
     const parsed = parseFrontmatter(raw)
+    /*
+     * 「选中（AI 不读取）」：被选中的大纲**整体不进索引**。
+     *
+     * 这里是最省事也最彻底的闸口：索引里的 document/segment 是
+     * `buildOutlineContext`、`resolveChapterOutline`、材料清单、细纲案头等
+     * 所有大纲上下文的唯一来源，把它们挡在索引之外，等价于"这份大纲对模型不存在"，
+     * 不必去 20 多个消费点逐个加判断（漏一处就等于没排干净）。
+     */
+    if (isAiExcluded(parsed.frontmatter as Record<string, unknown> | null)) return null
     const relativePath = relativeOutlinePath(outlinesRoot, file.path)
     const folder = relativePath.includes("/") ? relativePath.split("/")[0] : undefined
     const content = parsed.body.trim()

@@ -23,7 +23,7 @@ export function MemberGateNotice({ feature }: { feature: MemberFeature }) {
     catch { setFeedback("暂时无法读取会员状态，请稍后重试。") }
     finally { setRefreshing(false) }
   }
-  return <section className="member-gate" data-ui="member-gate-notice" data-ui-page="member-gate">
+  return <section className="member-gate" data-ui="member-gate-notice" data-ui-page="member-gate" data-member-feature={feature}>
     <div className="member-gate-inner">
       <header className="member-gate-header">
         <div className="member-gate-icon"><Sparkles size={23} aria-hidden="true" /></div>

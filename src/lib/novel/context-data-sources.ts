@@ -7,6 +7,8 @@ import { readFile } from "@/commands/fs"
 import { searchWiki } from "@/lib/search"
 import { parseFrontmatter } from "@/lib/frontmatter"
 import { parseChapterMeta } from "./chapter-meta"
+import { isAiExcludedContent } from "./ai-exclude"
+import { listAiExcludedChapterNumbers } from "./ai-exclude-chapters"
 import { listSnapshots, loadSnapshot, type ChapterSnapshot } from "./chapter-ingest"
 import { loadRevisionFeedbackForContext, createEmptyRevisionFeedback } from "./revision-feedback"
 import { loadCognitionState } from "./character-cognition"
@@ -158,8 +160,21 @@ const snapshotDataSource: DataSource<{
       Promise.all(summaryNumbers.map((n) => loadSnapshot(projectPath, n))),
     ])
 
-    const validLookback = lookbackSnapshots.filter((snapshot): snapshot is ChapterSnapshot => Boolean(snapshot))
-    const validSummarySnapshots = summarySnapshots.filter((snapshot): snapshot is ChapterSnapshot => Boolean(snapshot))
+    /*
+     * 「选中（AI 不读取）」：被选中章节的**记忆快照**也不能进上下文 ——
+     * 摘要、人物状态、时间线都是从那一章正文提炼出来的，放行等于换个形式读取。
+     */
+    const excludedNumbers = await listAiExcludedChapterNumbers(projectPath, [
+      ...lookbackNumbers,
+      ...summaryNumbers,
+    ])
+
+    const validLookback = lookbackSnapshots
+      .filter((snapshot): snapshot is ChapterSnapshot => Boolean(snapshot))
+      .filter((snapshot) => !excludedNumbers.has(snapshot.chapterNumber))
+    const validSummarySnapshots = summarySnapshots
+      .filter((snapshot): snapshot is ChapterSnapshot => Boolean(snapshot))
+      .filter((snapshot) => !excludedNumbers.has(snapshot.chapterNumber))
 
     const previousSnapshot = validLookback[0]
     const recentSummaries = validSummarySnapshots.map((snapshot) => `第${snapshot.chapterNumber}章：${snapshot.summary}`)
@@ -204,6 +219,8 @@ const recentChapterContentsDataSource: DataSource<string[]> = {
         const results = await searchWiki(context.projectPath, `chapter_number:${chapterNumber}`)
         if (results.length === 0) continue
         const content = await readFile(results[0].path)
+        // 「选中（AI 不读取）」：被排除的章节正文不进上下文。
+        if (isAiExcludedContent(content)) continue
         const body = stripFrontmatterBody(content)
         if (!body) continue
         contents.push(`## 第${chapterNumber}章正文片段\n${excerptChapterContent(body)}`)
@@ -223,6 +240,8 @@ const fallbackRecentSummariesDataSource: DataSource<string[]> = {
       for (const r of results.slice(0, context.config.recentSummaryWindow)) {
         try {
           const content = await readFile(r.path)
+          // 「选中（AI 不读取）」：被排除的章节不进降级摘要。
+          if (isAiExcludedContent(content)) continue
           const parsed = parseFrontmatter(content)
           const fm = parsed.frontmatter as Record<string, unknown> | null
           const meta = fm ? parseChapterMeta(fm) : null
@@ -250,6 +269,8 @@ const fallbackPreviousEndingDataSource: DataSource<string> = {
       const results = await searchWiki(context.projectPath, `chapter_number:${context.chapterNumber - 1}`)
       if (results.length > 0) {
         const content = await readFile(results[0].path)
+        // 「选中（AI 不读取）」：被排除的上一章不给结尾钩子。
+        if (isAiExcludedContent(content)) return ""
         const bodyStart = content.indexOf("---", 4)
         const body = bodyStart >= 0 ? content.slice(bodyStart + 3).trim() : content
         const lines = body.split("\n")

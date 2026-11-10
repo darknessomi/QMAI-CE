@@ -425,6 +425,75 @@ describe("测试版正文编辑器", () => {
     expect(container.textContent).not.toContain("已保存")
   })
 
+  /*
+   * ── 「选中（AI 不读取）」：真渲染 + 真落盘 ──
+   *
+   * 源码文本断言只能证明那段 JSX 还在文件里。这个功能最要命的两件事它证明不了：
+   *   1. 点下去到底有没有把 `ai_exclude` 写进文件（没写 = 功能等于没做）；
+   *   2. HTML 视图下（iframe 占满）它到底在不在（入口消失过一次，就是「提取记忆」）。
+   * 所以这一组全部走渲染层，并且检查盘上的文件内容。
+   */
+  async function settle() {
+    await act(async () => { await new Promise<void>((resolve) => requestAnimationFrame(() => resolve())) })
+  }
+
+  it.each([
+    ["章节", chapterPath],
+    ["大纲（无伴生 HTML）", outlinePath],
+  ])("%s：工具栏最左是「选中」，点一下就把 ai_exclude 写进文件", async (_kind, path) => {
+    await mount(path)
+    const toolbar = container.querySelector(".ui-test-editor-toolbar")!
+    const entry = button("选中", toolbar)
+    const first = [...toolbar.querySelectorAll("button.ui-test-editor-action")][0]
+    expect(first, "「选中」必须排在工具栏最左").toBe(entry)
+    expect(container.querySelector(".ui-test-ai-exclude-bar"), "未选中时不该有排除带").toBeNull()
+
+    await act(async () => { entry.click() })
+    await settle()
+
+    expect(fixture.write, "点击必须落盘，不能只改内存").toHaveBeenCalled()
+    expect(fixture.files.get(path) ?? "").toContain("ai_exclude: true")
+    expect(container.querySelector(".ui-test-ai-exclude-bar"), "选中后应出现排除带").not.toBeNull()
+  })
+
+  it("已选中的章节：排除带写明「本章」、两个 AI 动作禁用，再点一次能取消", async () => {
+    fixture.files.set(
+      chapterPath,
+      chapter.replace("chapter_status: draft\n", "chapter_status: draft\nai_exclude: true\n"),
+    )
+    await mount(chapterPath)
+
+    const bar = container.querySelector(".ui-test-ai-exclude-bar")
+    expect(bar?.textContent).toContain("本章已排除在 AI 之外")
+    expect(button("提取记忆").disabled, "已选中时不许提取记忆").toBe(true)
+    expect(button("去AI味").disabled, "已选中时不许去AI味").toBe(true)
+
+    await act(async () => { button("已选中（AI 不读取）").click() })
+    await settle()
+
+    expect(fixture.files.get(chapterPath) ?? "").not.toContain("ai_exclude")
+    expect(container.querySelector(".ui-test-ai-exclude-bar"), "取消后排除带应消失").toBeNull()
+    expect(button("提取记忆").disabled).toBe(false)
+  })
+
+  it("大纲的 HTML 视图：双格式顶栏里也有这枚入口，点下去同样落盘", async () => {
+    fixture.files.set(
+      outlinePath.replace(/\.md$/i, ".html"),
+      "<!DOCTYPE html><html><body><h1>折叠树</h1></body></html>",
+    )
+    await mount(outlinePath)
+
+    expect(container.querySelector("iframe"), "默认应是 HTML 模式").not.toBeNull()
+    const bar = container.querySelector("[data-outline-dual-actions]")
+    expect(bar, "HTML / MD 标识旁应有操作区").not.toBeNull()
+
+    await act(async () => { button("选中", bar!).click() })
+    await settle()
+
+    expect(fixture.files.get(outlinePath) ?? "").toContain("ai_exclude: true")
+    expect(container.querySelector(".ui-test-ai-exclude-bar"), "HTML 视图下也要出现排除带").not.toBeNull()
+  })
+
   it("加载文件不显示常驻底部状态，例行自动保存全程不打扰", async () => {
     await mount()
     expect(container.querySelector(".ui-test-editor-footer")).toBeNull()
@@ -614,10 +683,14 @@ describe("编辑器异常与原业务回归", () => {
      *    它原先夹在「字体设置」与「一键排版」之间，
      *    所以这次不是简单地少一项，而是**尾三项重排**。
      *
-     * 现顺序 = 记忆组（去AI味 / 提取记忆 / 查看记忆）→ 设置组（字体设置）
-     * → 排版组（一键排版）→ 细纲（最右）。
+     * 现顺序 = 选中（AI 不读取）→ 记忆组（去AI味 / 提取记忆 / 查看记忆）
+     * → 设置组（字体设置）→ 排版组（一键排版）→ 细纲（最右）。
+     *
+     * 2026-11-10 追加：「选中（AI 不读取）」排在最左（用户选定的方案 C）。
+     * 它必须是工具栏的**第一枚** —— 用户的心智是"先决定这篇要不要给 AI 看，
+     * 再决定怎么处理它"，放在记忆组之后会被当成同一个功能的一部分。
      */
-    expect(labels).toEqual(["去AI味", "提取记忆", "查看记忆", "字体设置", "一键排版", "生成章节细纲"])
+    expect(labels).toEqual(["选中", "去AI味", "提取记忆", "查看记忆", "字体设置", "一键排版", "生成章节细纲"])
     /*
      * 补一条**位置**断言，不只是"在数组里"：
      * 用户要的是"最右侧"，而数组末尾同时也能被下面这种写法满足 ——

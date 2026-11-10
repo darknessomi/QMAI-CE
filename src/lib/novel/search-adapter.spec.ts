@@ -107,4 +107,35 @@ describe("novelMixedSearch vector noise control", () => {
     expect(results[0].snippet).toContain("northern faction owns the seal")
     expect(results[0].snippet).not.toContain("Unrelated Page Introduction")
   })
+
+  /*
+   * 「选中（AI 不读取）」：检索命中也不能把被排除的内容当"参考资料"送进模型。
+   * 语义检索这一路是模型最容易被"顺手泄漏"的入口 —— 它不经过大纲/正文注入，
+   * 命中就直接进上下文。
+   */
+  it("被选中（AI 不读取）的文档不会作为检索结果返回", async () => {
+    mockSearchByEmbedding.mockResolvedValue([{
+      id: "seal-memory",
+      score: 0.92,
+      matchedChunks: [{
+        text: "Lin discovers that the northern faction owns the seal.",
+        headingPath: "Chapter 12 / Seal",
+        score: 0.82,
+      }],
+    }])
+    mockReadFile.mockResolvedValue("---\ntitle: Seal\ntype: concept\nai_exclude: true\n---\n\n# Seal\n\nnorthern faction owns the seal")
+
+    const results = await novelMixedSearch({
+      projectPath: "/project",
+      query: "who controls the seal",
+      topK: 2,
+      includeKeyword: true,
+      includeVector: true,
+      includeGraph: false,
+      includeRecentChapters: false,
+      includeCanon: false,
+    })
+
+    expect(results).toEqual([])
+  })
 })

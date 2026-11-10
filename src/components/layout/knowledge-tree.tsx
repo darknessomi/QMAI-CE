@@ -14,6 +14,8 @@ import { isChapterPathInProject, normalizePath } from "@/lib/path-utils"
 import { countChapterBodyWords } from "@/lib/chapter-word-count"
 import { scrollChapterDirectory } from "@/lib/chapter-directory-scroll"
 import { normalizeChapterStatus, type ChapterStatus } from "@/lib/novel/chapter-meta"
+import { AI_EXCLUDE_KEY, isAiExcluded } from "@/lib/novel/ai-exclude"
+import { parseFrontmatter } from "@/lib/frontmatter"
 import {
   extractChapterNumber,
   extractPageOrderFromTitle,
@@ -93,6 +95,14 @@ interface WikiPageInfo {
   statusLabel?: string
   wordCount?: number
   wordCountLabel?: string
+  /**
+   * 「选中（AI 不读取）」：这份大纲/章节已被排除在 AI 之外（见 `lib/novel/ai-exclude.ts`）。
+   *
+   * 为什么放在这里而不是另扫一遍盘：`loadPages` 本来就把每个 .md 读进来交给
+   * `parsePageInfo`，这里只是顺手多解析一行 —— 树里加标记的代价是 0 次额外 I/O。
+   * 另建一份"排除索引"则会多出第二个真相源，还必须在每次保存后同步。
+   */
+  aiExcluded?: boolean
 }
 
 export interface KnowledgeCreateRequest {
@@ -253,6 +263,19 @@ function parsePageInfo(path: string, fileName: string, content: string): WikiPag
     }
   }
 
+  /*
+   * 「选中（AI 不读取）」：判据交给 `isAiExcluded`，不用本地正则自己写一遍 ——
+   * 上面的 frontmatter 快取匹配要求纯 LF 换行，CRLF 文件在这里取不到块，
+   * 而真正拦截模型的那条链路（`parseFrontmatter`）是认 CRLF 的。
+   * 两处判据一旦不同，就会出现"编辑器说已选中、目录里没有标记"。
+   *
+   * 先 `includes` 再解析：绝大多数文件不含这个词，js-yaml 只在真有可能时才跑，
+   * 目录每次刷新（每次保存）都解析几百份 YAML 的代价就省掉了。
+   */
+  const aiExcluded = content.includes(AI_EXCLUDE_KEY)
+    ? isAiExcluded(parseFrontmatter(content).frontmatter as Record<string, unknown> | null)
+    : false
+
   const wordCount = type === "chapter" ? countChapterBodyWords(content) : undefined
   /*
    * 章号（含绿点专用的文件名回退来源）走共享解析器，见 chapter-utils 的说明。
@@ -274,6 +297,7 @@ function parsePageInfo(path: string, fileName: string, content: string): WikiPag
     statusLabel: status ? getChapterStatusLabel(status) : undefined,
     wordCount,
     wordCountLabel: typeof wordCount === "number" ? buildChapterWordCountLabel(wordCount) : undefined,
+    aiExcluded,
   }
 }
 
@@ -1826,6 +1850,21 @@ export function KnowledgeTree({
             ) : (
               <>
                 <span className="min-w-0 flex-1 truncate">{page.title.replace(/^第(\d+)章\s*/, "$1 ")}</span>
+                {/*
+                 * 「选中（AI 不读取）」小标签：章节与大纲共用同一处（本行渲染器按
+                 * filterType 复用）。它紧跟标题、排在字数之前 —— 用户扫目录时先看到
+                 * "这篇对 AI 是关的"，再看字数。
+                 */}
+                {page.aiExcluded ? (
+                  <span
+                    data-ui-tree-ai-excluded="true"
+                    className="ui-test-tree-ai-excluded"
+                    title="已选中：AI 不读取本篇（生成、对话、检索、提取记忆都会跳过）"
+                    aria-label="已选中，AI 不读取"
+                  >
+                    AI 不读
+                  </span>
+                ) : null}
                 {page.type === "chapter" && page.wordCountLabel && (
                   <span data-ui-tree-meta="true" className={`shrink-0 text-right text-[0.6875rem] ${isSelected ? "qm-selected-muted" : "text-muted-foreground"}`}>
                     {page.wordCountLabel}

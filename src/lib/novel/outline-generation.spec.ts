@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   refreshProjectStateMock: vi.fn(),
   hasUsableLlmMock: vi.fn(() => true),
   listDirectoryMock: vi.fn(),
+  readFileMock: vi.fn(async () => ""),
   outlineSnapshotExistsMock: vi.fn(),
   outlineStore: {
     tasks: [] as Array<{ id: string; projectPath: string; outlinePath: string | null; status: string; message: string; error: string | null; updatedAt: number }>,
@@ -68,6 +69,11 @@ vi.mock("@/commands/fs", async () => {
   return {
     ...actual,
     listDirectory: mocks.listDirectoryMock,
+    /*
+     * 一键提取要先读一眼"这份大纲是不是被选中（AI 不读取）"。
+     * 默认返回空串 = 没有标记，既有用例的行为完全不变。
+     */
+    readFile: mocks.readFileMock,
   }
 })
 
@@ -119,6 +125,8 @@ describe("bulk outline ingest", () => {
     mocks.hasUsableLlmMock.mockReset()
     mocks.hasUsableLlmMock.mockReturnValue(true)
     mocks.listDirectoryMock.mockReset()
+    mocks.readFileMock.mockReset()
+    mocks.readFileMock.mockResolvedValue("")
     mocks.outlineSnapshotExistsMock.mockReset()
     mocks.outlineStore.tasks = []
     mocks.importProgressStore.tasks = []
@@ -262,5 +270,38 @@ describe("bulk outline ingest", () => {
       emptyReason: "already_extracted",
     })
     expect(mocks.ingestOutlineMock).not.toHaveBeenCalled()
+  })
+
+  /*
+   * 「选中（AI 不读取）」：一键提取也必须跳过。
+   *
+   * 只禁用单篇按钮是不够的 —— 大纲面板与大纲工作台都有「一键提取」，
+   * 那条路直接列目录调 ingest，不经过任何按钮状态。
+   */
+  it("跳过被选中的大纲且不计失败，其余照常提取", async () => {
+    mocks.listDirectoryMock.mockResolvedValueOnce([
+      { path: "E:/Novel/wiki/outlines/a.md", name: "a.md", is_dir: false },
+      { path: "E:/Novel/wiki/outlines/b.md", name: "b.md", is_dir: false },
+    ])
+    mocks.readFileMock.mockImplementation(async (path: string) => (
+      String(path).endsWith("a.md")
+        ? "---\ntype: outline\nai_exclude: true\n---\n\n# a\n不参与 AI"
+        : "---\ntype: outline\n---\n\n# b\n正常大纲"
+    ))
+    mocks.ingestOutlineMock.mockResolvedValueOnce({
+      snapshot: { chapterId: "outline-b", chapterNumber: -2 },
+      truncated: false,
+      originalLength: 10,
+      bodyLength: 10,
+      bodyBudget: 100,
+      failureReason: null,
+    })
+
+    const result = await runBulkOutlineIngest("E:/Novel", { mode: "all" })
+
+    expect(result).toMatchObject({ total: 1, succeeded: 1, failed: 0 })
+    expect(mocks.ingestOutlineMock).toHaveBeenCalledTimes(1)
+    expect(mocks.ingestOutlineMock.mock.calls[0]?.[1]).toContain("b.md")
+    expect(mocks.ingestOutlineMock.mock.calls[0]?.[1]).not.toContain("a.md")
   })
 })

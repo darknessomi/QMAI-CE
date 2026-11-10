@@ -1,4 +1,5 @@
 import { listDirectory, readFile } from "@/commands/fs"
+import { isAiExcludedContent } from "@/lib/novel/ai-exclude"
 import { isAbsolutePath, isPathInside, normalizePath } from "@/lib/path-utils"
 import type { FileNode } from "@/types/wiki"
 
@@ -19,6 +20,29 @@ type ReadMarkdownResourceOutcome =
   | { kind: "file"; content: string; resolvedPath: string }
   | { kind: "directory"; content: string }
   | { kind: "error"; content: string }
+
+/**
+ * 「选中（AI 不读取）」的读取拦截。
+ *
+ * 这一处是 Agent 侧**所有**按名 / 按路径读取的公共出口（read_chapter /
+ * read_outline / read_memory 都走它），所以必须在这里拦：只在上下文注入处过滤，
+ * 模型只要改用 `read_chapter` 就能把被排除的内容读回来，"AI 任何时候都不读取"
+ * 就成了一句空话。
+ *
+ * 返回的是**明确的拒绝**而不是空串：空字符串会让模型以为文件是空的，
+ * 于是反复换名字重试；拒绝文案里写清"别再换路径试"，才能让它停下来。
+ */
+function excludedOutcome(
+  content: string,
+  label: string,
+  displayName: string,
+): ReadMarkdownResourceOutcome | null {
+  if (!isAiExcludedContent(content)) return null
+  return {
+    kind: "error",
+    content: `错误：${label}「${displayName}」已被作者标记为「选中（AI 不读取）」，**不得读取**。请不要再用其它名称、章号或路径尝试读取同一份内容；只有作者在界面上取消选中后，它才会重新对 AI 可见。`,
+  }
+}
 
 function resolveExplicitResourcePath(baseDir: string, path: string): string | null {
   const normalizedBase = normalizePath(baseDir).replace(/\/+$/, "")
@@ -192,6 +216,8 @@ async function resolveMarkdownResource(
     }
     try {
       const content = await readTextFile(resolvedPath)
+      const blocked = excludedOutcome(content, label, displayName)
+      if (blocked) return blocked
       return { kind: "file", content, resolvedPath }
     } catch {
       // May be a directory path, or a bare folder name with .md wrongly appended.
@@ -208,6 +234,8 @@ async function resolveMarkdownResource(
   const directPath = `${baseDir}/${ensureMarkdownName(queryName)}`
   try {
     const content = await readTextFile(directPath)
+    const blocked = excludedOutcome(content, label, displayName)
+    if (blocked) return blocked
     return { kind: "file", content, resolvedPath: normalizePath(directPath) }
   } catch {
     // 继续用目录候选纠错。
@@ -229,6 +257,8 @@ async function resolveMarkdownResource(
   if (singleMatch) {
     try {
       const content = await readTextFile(singleMatch.path)
+      const blocked = excludedOutcome(content, label, singleMatch.name)
+      if (blocked) return blocked
       return { kind: "file", content, resolvedPath: normalizePath(singleMatch.path) }
     } catch {
       return {

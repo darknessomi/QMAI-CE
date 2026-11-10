@@ -1,6 +1,7 @@
 import type { LlmConfig } from "@/stores/wiki-store"
 import { readFile } from "@/commands/fs"
 import { searchWiki } from "@/lib/search"
+import { isAiExcludedContent } from "./ai-exclude"
 import { computeContextBudget, planChapterRequestBudget } from "@/lib/context-budget"
 import {
   getEffectiveMaxOutputTokens,
@@ -41,6 +42,11 @@ export async function readPreviousChapterBodies(
       const results = await searchWiki(projectPath, `chapter_number:${i}`)
       if (results.length > 0) {
         const content = await readFile(results[0].path)
+        /*
+         * 「选中（AI 不读取）」：前情分析 / 联网补搜都要把前几章正文交给模型，
+         * 被选中的章节在这里同样跳过。少一章分析是它的代价，不是 bug。
+         */
+        if (isAiExcludedContent(content)) continue
         const bodyStart = content.indexOf("---", 4)
         const body = bodyStart >= 0 ? content.slice(bodyStart + 3).trim() : content
         if (body) previousChapters.push({ number: i, content: body })

@@ -4,6 +4,7 @@ import { chapterSnapshotNumbersFromFileNames } from "./chapter-memory-dot"
 import { useWikiStore } from "@/stores/wiki-store"
 import { parseFrontmatter } from "@/lib/frontmatter"
 import { isChapterPage, isFinalChapter, parseChapterNumber } from "./chapter-meta"
+import { isAiExcluded, isAiExcludedContent } from "./ai-exclude"
 import { streamChat, type StreamCallbacks } from "@/lib/llm-client"
 import type { ChatMessage } from "@/lib/llm-providers"
 import { getOutputLanguage, buildLanguageReminder } from "@/lib/output-language"
@@ -316,7 +317,7 @@ function materializeRestoredCurrentSnapshot(
   })
 }
 
-type IngestFailReason = "no_llm" | "not_chapter" | "not_final" | "invalid_chapter_number" | "extract_failed" | "cancelled"
+type IngestFailReason = "no_llm" | "not_chapter" | "not_final" | "invalid_chapter_number" | "extract_failed" | "cancelled" | "ai_excluded"
 
 interface IngestResult {
   snapshot: ChapterSnapshot | null
@@ -370,6 +371,16 @@ export async function ingestChapter(
   const parsed = parseFrontmatter(content)
   const fm = parsed.frontmatter as Record<string, unknown> | null
   if (!fm || !isChapterPage(fm)) return logFail("not_chapter", "不是章节页")
+  /*
+   * 「选中（AI 不读取）」：摄取是"让模型读整章"最集中的地方，所以守在这里。
+   *
+   * 界面按钮已禁用、一键提取已跳过、MCP 已拒绝 —— 但那三处都是**调用方**的自觉。
+   * 这一道是**被调用方**的底线：将来新增任何入口（导入后自动提取、批量脚本、
+   * 新的 Agent 工具）都绕不过它。返回明确原因而不是静默成功，调用方才说得清话。
+   */
+  if (isAiExcluded(fm)) {
+    return logFail("ai_excluded", "该篇已被选中（AI 不读取），不提取记忆；需要先在界面上取消选中")
+  }
   if (!options.allowDraft && !isFinalChapter(fm)) {
     console.warn(`[Chapter Ingest] Chapter status is not final, skipping ingest.`)
     return logFail("not_final", "章节不是正式稿")
@@ -595,7 +606,7 @@ export interface OutlineIngestResult {
   originalLength: number
   bodyLength: number
   bodyBudget: number
-  failureReason?: "no_llm" | null
+  failureReason?: "no_llm" | "ai_excluded" | null
 }
 
 interface IngestOutlineOptions {
@@ -1499,6 +1510,8 @@ export async function ingestOutline(
 
   const content = await readFile(outlinePath)
   const originalLength = content.length
+  // 「选中（AI 不读取）」：与章节同一道底线，见 ingestChapter 里那段说明。
+  if (isAiExcludedContent(content)) return emptyResult(null, "ai_excluded")
 
   const outputLang = getOutputLanguage()
   const langReminder = buildLanguageReminder(outputLang)

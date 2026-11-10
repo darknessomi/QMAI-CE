@@ -385,6 +385,31 @@ describe("runBulkChapterIngest：目标集合与空集", () => {
   })
 
   /*
+   * 「选中（AI 不读取）」：一键提取必须跳过被选中的章节。
+   *
+   * 提取记忆本身就是让模型读正文，漏掉这一条，"选中"就只管住了生成、管不住提取，
+   * 与承诺的"AI 任何时候都不读取"对不上。
+   */
+  it("被选中（AI 不读取）的章节不进一键提取，其余章节照常提取", async () => {
+    chapterFile("", "第1章", 1)
+    const excluded = chapterFile("", "第2章", 2)
+    io.files.set(
+      excluded,
+      `---\ntype: chapter\nchapter_number: 2\nchapter_status: final\nai_exclude: true\n---\n\n这一章不进模型\n`,
+    )
+    chapterFile("", "第3章", 3)
+
+    const result = await runBulkChapterIngest(project)
+
+    expect(result.total).toBe(2)
+    expect(result.succeeded).toBe(2)
+    const extractedPaths = ingestMock.mock.calls.map((call) => String(call[1]))
+    expect(extractedPaths.some((path) => path.endsWith("第1章.md"))).toBe(true)
+    expect(extractedPaths.some((path) => path.endsWith("第3章.md"))).toBe(true)
+    expect(extractedPaths.some((path) => path.endsWith("第2章.md"))).toBe(false)
+  })
+
+  /*
    * 回归：算不出章号的章节以前被整章静默跳过，而 mode=all 还会回一句
    * 「所有章节都已提取过」—— 用户明明按的是「提取全部」，却被告知没事可做，
    * 那个文件就永远躺在那里没人提取。
