@@ -460,6 +460,14 @@ html[data-ui-test-skin] .ui-test-contact-dialog { width: min(920px, calc(100vw -
  * 大纲标题恢复成与章节标题同号的 0.875rem（继承行按钮的 text-sm）。
  */
 .ui-test-root [data-ui-tree-row] > button:first-of-type > [data-ui-tree-meta] { font-size: 0.75rem; }
+/*
+ * 「选中（AI 不读取）」小标签。
+ *
+ * 与编辑器顶部那条排除带同一套语义色（暖底 + 危险色），让"目录里这一篇关掉了 AI"
+ * 和"打开后顶上那条带子"看起来是同一件事。字号比字数更小一档：它是一枚状态标记，
+ * 不该跟标题抢注意力。
+ */
+.ui-test-root .ui-test-tree-ai-excluded { flex: none; padding: 1px 5px; border: 1px solid color-mix(in srgb, var(--ui-danger) 35%, transparent); border-radius: 4px; background: var(--ui-warm); color: var(--ui-danger); font-size: 0.625rem; font-weight: 700; line-height: 1.5; white-space: nowrap; }
 .ui-test-root .ui-test-tree-more { position: absolute; right: 2px; top: 5px; display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; margin: 0; padding: 0; border: 0; border-radius: 6px; background: var(--ui-panel); line-height: 0; box-shadow: none; z-index: 2; }
 .ui-test-root .ui-test-tree-more svg { display: block; width: 15px; height: 15px; margin: 0; }
 .ui-test-root .ui-test-tree-more:hover, .ui-test-root .ui-test-tree-more:active, .ui-test-root .ui-test-tree-more:focus-visible { padding: 0; border: 0; border-radius: 6px; box-shadow: none; transform: none; }

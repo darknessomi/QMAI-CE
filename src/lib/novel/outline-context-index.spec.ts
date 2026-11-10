@@ -602,4 +602,46 @@ describe("capOutlineSourcesToBudget 的前缀稳定性（缓存命中率）", ()
       expect(capOutlineSourcesToBudget(many, cap).length).toBeLessThanOrEqual(cap)
     }
   })
+
+  /*
+   * ── 「选中（AI 不读取）」：被选中的大纲**整体不进索引** ──
+   *
+   * 闸口只有一处（createOutlineDocumentIndex），但它是所有大纲上下文的唯一来源，
+   * 所以这条用例同时代表：buildOutlineContext / resolveChapterOutline / 材料清单
+   * 都看不到被排除的那一份。若哪天有人把过滤挪到某个消费点，这里会红。
+   */
+  it("被选中的大纲不进索引：卷纲/设定/章纲一律不出现在上下文里", async () => {
+    const masterPath = `${root}/大纲/总纲.md`
+    const volumePath = `${root}/卷纲/第一卷.md`
+    const settingPath = `${root}/设定/世界观.md`
+    const chapterPath = `${root}/章纲/第5章.md`
+    vi.mocked(listDirectory).mockResolvedValue([
+      directory(`${root}/大纲`, [file(masterPath)]),
+      directory(`${root}/卷纲`, [file(volumePath)]),
+      directory(`${root}/章纲`, [file(chapterPath)]),
+      directory(`${root}/设定`, [file(settingPath)]),
+    ])
+    const raw: Record<string, string> = {
+      [masterPath]: "# 总纲\n全书主线",
+      [volumePath]: "# 第一卷\n第一卷概述",
+      [chapterPath]: "# 第5章 断线\n本章章纲正文",
+      [settingPath]: "# 世界观\n世界规则",
+    }
+    vi.mocked(readFile).mockImplementation(async (path) => {
+      const content = raw[String(path)] ?? ""
+      // 只有「卷纲」被选中排除
+      return String(path) === volumePath ? `---\nai_exclude: true\n---\n${content}` : content
+    })
+
+    const index = await loadOutlineDocumentIndex("/book")
+    const context = buildOutlineContext(index, 5)
+    const resolution = resolveChapterOutline(index, 5)
+
+    expect(context).toContain("全书主线")
+    expect(context).toContain("世界规则")
+    expect(context).not.toContain("第一卷概述")
+    // 章纲正文提到第5章，但它自己没有 ai_exclude，仍应被解析到
+    expect(resolution.content).toContain("本章章纲正文")
+    expect(resolution.sourcePaths).not.toContain(volumePath)
+  })
 })

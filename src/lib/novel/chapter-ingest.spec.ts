@@ -55,3 +55,26 @@ describe("chapter ingest 不写无人读取的派生产物", () => {
     expect(source).toContain('type: "entity_new"')
   })
 })
+
+/*
+ * 「选中（AI 不读取）」在摄取层的底线。
+ *
+ * 界面按钮、一键提取、MCP 三处都在**调用方**自觉；这里是**被调用方**的底线，
+ * 将来新加入口（导入后自动提取、批量脚本、新 Agent 工具）也绕不过。
+ */
+describe("chapter ingest 拒绝读取被选中的文档", () => {
+  it("章节：读到 ai_exclude 就直接返回失败原因", () => {
+    expect(source).toContain("if (isAiExcluded(fm)) {")
+    expect(source).toContain('return logFail("ai_excluded"')
+  })
+
+  it("大纲：同一道底线（一键提取 / 生成后自动摄取都走这里）", () => {
+    const outlineFn = source.slice(source.indexOf("export async function ingestOutline"))
+    expect(outlineFn).toContain("if (isAiExcludedContent(content)) return emptyResult(null, \"ai_excluded\")")
+  })
+
+  it("失败原因是闭合联合的一员，调用方能区分「被排除」和「模型没配」", () => {
+    expect(source).toContain('"cancelled" | "ai_excluded"')
+    expect(source).toContain('failureReason?: "no_llm" | "ai_excluded" | null')
+  })
+})

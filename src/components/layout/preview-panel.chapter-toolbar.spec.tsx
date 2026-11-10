@@ -623,4 +623,27 @@ describe("字体设置浮层的「默认设置」按钮", () => {
       "反向控制：清洗只该去掉注释，真按钮必须留下",
     ).toContain("左右边距跟随窗口")
   })
+
+  /*
+   * ── 「选中（AI 不读取）」的三个入口（2026-11-10）──
+   *
+   * 用户需求原文是按场景提的（大纲 / MD 文档 / HTML 文档），但代码里只有两处插入点：
+   * 大纲的 HTML 与 MD 共用同一份 `outlineMemoryActions`（双格式顶栏那一份），
+   * 章节另有一处。所以这里钉的是"两处插入点"而不是"三个按钮"，
+   * 同时保证 HTML 视图不会因为 iframe 把工具栏顶掉而丢掉入口。
+   */
+  it("「选中（AI 不读取）」同时进大纲双格式顶栏与章节工具栏，且排在章节工具栏最左", () => {
+    expect(OUTLINE_ACTIONS_SCOPE, "大纲（HTML 与 MD 共用）必须有这枚入口").toContain("{aiExcludeToggle}")
+    const chapterActions = sliceBetween("actions={isSelectedChapter ? (", "moreActions={[]}")
+    expect(chapterActions, "章节工具栏必须有这枚入口").toContain("{aiExcludeToggle}")
+    expect(
+      chapterActions.indexOf("{aiExcludeToggle}"),
+      "它必须排在最左 —— 先决定这篇给不给 AI 看，再决定怎么处理它",
+    ).toBeLessThan(chapterActions.indexOf("chapter.deai"))
+  })
+
+  it("已选中时两处「提取记忆」都被禁用：否则点一下照样把正文喂给模型", () => {
+    expect(source).toContain("disabled={!canIngestOutline || isOutlineIngesting || aiExcluded}")
+    expect(source).toContain("disabled={!canSaveAsFinal || isFinalChapterSaving || aiExcluded}")
+  })
 })

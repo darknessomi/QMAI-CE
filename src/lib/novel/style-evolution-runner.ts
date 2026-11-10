@@ -14,6 +14,7 @@
  */
 import { createDirectory, listDirectory, readFile, writeFileAtomic } from "@/commands/fs"
 import { parseFrontmatter } from "@/lib/frontmatter"
+import { isAiExcludedContent } from "./ai-exclude"
 import { normalizePath, joinPath } from "@/lib/path-utils"
 import { useWikiStore } from "@/stores/wiki-store"
 import { decodeWritingSources, normalizeCountableText, writingTextHash } from "@/lib/writing-stats"
@@ -110,6 +111,11 @@ export async function collectProjectChapters(projectPath: string): Promise<Style
   for (const file of files) {
     try {
       const raw = await readFile(file.path)
+      /*
+       * 「选中（AI 不读取）」：文风取样同样是把正文喂给模型。
+       * 被选中的章节（废案、备选版本、不想被参考的段落）不该影响文风演进。
+       */
+      if (isAiExcludedContent(raw)) continue
       // 剥掉 frontmatter：它是 YAML 元数据（人物、时间线），不是作者的行文。
       // 混进去会污染句长与标点密度。
       const { body } = parseFrontmatter(raw)

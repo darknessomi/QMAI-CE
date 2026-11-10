@@ -8,6 +8,8 @@ import { searchWiki, tokenizeQuery } from "@/lib/search"
 import { normalizePath } from "@/lib/path-utils"
 import { useWikiStore } from "@/stores/wiki-store"
 import { parseChapterMeta } from "./chapter-meta"
+import { isAiExcludedContent } from "./ai-exclude"
+import { listAiExcludedChapterNumbers } from "./ai-exclude-chapters"
 import { parseFrontmatter } from "@/lib/frontmatter"
 import { listSnapshots, loadSnapshot, type ChapterSnapshot } from "./chapter-ingest"
 import { buildRevisionDirectives } from "./revision-feedback"
@@ -234,22 +236,35 @@ async function buildContextPackFromRawData(
   const lookbackEntries = context.chapterNumber
     ? retrievalEntries.filter((e) => e.chapterNumber < context.chapterNumber!).slice(-lookbackCount)
     : retrievalEntries.slice(-lookbackCount)
-  const retrievalRecentSummaries = summaryEntries.map(
+  /*
+   * 「选中（AI 不读取）」：检索索引里的条目同样是章节派生数据（摘要 / 人物状态 /
+   * 时间线），被选中的章号在这里剔除。
+   *
+   * 只反查**窗口内**的章号（summaryCount + lookbackCount 条），不按全书条目扫：
+   * 这个函数每次生成都会跑，开销不能随章节数增长。
+   */
+  const excludedRetrievalNumbers = await listAiExcludedChapterNumbers(
+    context.projectPath,
+    [...summaryEntries, ...lookbackEntries].map((entry) => entry.chapterNumber),
+  )
+  const visibleSummaryEntries = summaryEntries.filter((entry) => !excludedRetrievalNumbers.has(entry.chapterNumber))
+  const visibleLookbackEntries = lookbackEntries.filter((entry) => !excludedRetrievalNumbers.has(entry.chapterNumber))
+  const retrievalRecentSummaries = visibleSummaryEntries.map(
     (entry) => `第${entry.chapterNumber}章 ${entry.chapterTitle}：${entry.summary}`,
   )
   const retrievalCharacterStates = joinNonEmpty(
-    lookbackEntries
+    visibleLookbackEntries
       .filter((e) => e.characterStates)
       .map((e) => `第${e.chapterNumber}章：${e.characterStates}`),
     "\n",
   )
   const retrievalTimeline = joinNonEmpty(
-    lookbackEntries
+    visibleLookbackEntries
       .filter((e) => e.timelineEvents)
       .map((e) => `第${e.chapterNumber}章：${e.timelineEvents}`),
     "\n",
   )
-  const retrievalForeshadowingSignals = lookbackEntries
+  const retrievalForeshadowingSignals = visibleLookbackEntries
     .filter((e) => e.foreshadowingChanges)
     .flatMap((e) => e.foreshadowingChanges.split("\n").filter(Boolean))
 
@@ -729,8 +744,15 @@ async function readSnapshotContext(
     Promise.all(summaryNumbers.map((n) => loadSnapshot(pp, n))),
   ])
 
-  const validLookback = lookbackSnapshots.filter((snapshot): snapshot is ChapterSnapshot => Boolean(snapshot))
-  const validSummarySnapshots = summarySnapshots.filter((snapshot): snapshot is ChapterSnapshot => Boolean(snapshot))
+  // 「选中（AI 不读取）」：被选中章节的派生快照一并不进上下文（口径见 ai-exclude-chapters.ts）。
+  const excludedSnapshotNumbers = await listAiExcludedChapterNumbers(pp, [...lookbackNumbers, ...summaryNumbers])
+
+  const validLookback = lookbackSnapshots
+    .filter((snapshot): snapshot is ChapterSnapshot => Boolean(snapshot))
+    .filter((snapshot) => !excludedSnapshotNumbers.has(snapshot.chapterNumber))
+  const validSummarySnapshots = summarySnapshots
+    .filter((snapshot): snapshot is ChapterSnapshot => Boolean(snapshot))
+    .filter((snapshot) => !excludedSnapshotNumbers.has(snapshot.chapterNumber))
 
   const previousSnapshot = validLookback[0]
   const recentSummaries = validSummarySnapshots.map((snapshot) => `第${snapshot.chapterNumber}章：${snapshot.summary}`)
@@ -763,6 +785,8 @@ async function readRecentChapterSummaries(pp: string, count: number): Promise<st
     for (const r of results.slice(0, count)) {
       try {
         const content = await readFile(r.path)
+        // 「选中（AI 不读取）」：被排除的章节不进摘要。
+        if (isAiExcludedContent(content)) continue
         const parsed = parseFrontmatter(content)
         const fm = parsed.frontmatter as Record<string, unknown> | null
         const meta = fm ? parseChapterMeta(fm) : null
@@ -784,6 +808,8 @@ async function readPreviousChapterEnding(pp: string, chapterNumber?: number): Pr
     const results = await searchWiki(pp, `chapter_number:${chapterNumber - 1}`)
     if (results.length > 0) {
       const content = await readFile(results[0].path)
+      // 「选中（AI 不读取）」：被排除的章节连结尾钩子都不给。
+      if (isAiExcludedContent(content)) return ""
       const lines = content.split("\n")
       const lastLines = lines.slice(-10).join("\n")
       return lastLines

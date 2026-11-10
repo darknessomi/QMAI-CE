@@ -4,6 +4,8 @@ import { normalizePath } from "@/lib/path-utils"
 import { rerankCandidates } from "@/lib/rerank"
 import { useWikiStore } from "@/stores/wiki-store"
 import { loadSnapshot, listSnapshots } from "./chapter-ingest"
+import { isAiExcludedContent } from "./ai-exclude"
+import { listAiExcludedChapterNumbers } from "./ai-exclude-chapters"
 import {
   buildNovelVectorSnippet,
   selectRelevantNovelVectorResults,
@@ -222,6 +224,8 @@ async function runVectorSearch(
           } catch {}
         }
         if (foundPath && content) {
+          // 「选中（AI 不读取）」：检索命中也不能把被排除的内容当"参考资料"送进模型。
+          if (isAiExcludedContent(content)) continue
           const title = extractTitle(content, vr.id)
           const matchedSnippet = buildNovelVectorSnippet(vr)
           items.push({
@@ -282,6 +286,7 @@ async function runGraphSearch(
           seenIds.add(node.id)
           try {
             const content = await readFile(node.path)
+            if (isAiExcludedContent(content)) continue
             scoredNodes.push({
               title: node.title,
               path: node.path,
@@ -316,8 +321,11 @@ async function runRecentChapterSearch(
 
     const recentNumbers = chapterNumbers.slice(-topK).reverse()
     const items: NovelSearchResult[] = []
+    // 「选中（AI 不读取）」：快照也是从被排除的章节里提炼的，检索里同样不出现。
+    const excludedNumbers = await listAiExcludedChapterNumbers(pp, recentNumbers)
 
     for (const num of recentNumbers) {
+      if (excludedNumbers.has(num)) continue
       const snap = await loadSnapshot(pp, num)
       if (snap) {
         const paddedNum = String(num).padStart(3, "0")

@@ -5,6 +5,7 @@ import { getOpenDocumentGuard } from "@/lib/mcp/open-document"
 import { normalizePath } from "@/lib/path-utils"
 import { useImportProgressStore } from "@/stores/import-progress-store"
 import { chapterSnapshotJsonPath, ingestChapter } from "./chapter-ingest"
+import { isAiExcludedContent } from "./ai-exclude"
 import { isFinalChapter, updateChapterStatus } from "./chapter-meta"
 import { extractChapterNumber, flattenMdFiles } from "./chapter-utils"
 
@@ -209,17 +210,28 @@ export async function runBulkChapterIngest(
   }
 
   /** 章号：调用方给的 → 调用方给的「文件名数字」→ 正文 frontmatter → 文件名。 */
-  async function resolveChapterNumber(chapter: ResolvedChapter): Promise<number | undefined> {
+  async function resolveChapterNumber(chapter: ResolvedChapter, content?: string): Promise<number | undefined> {
     if (chapter.chapterNumber) return chapter.chapterNumber
     if (chapter.fileChapterNumber) return chapter.fileChapterNumber
-    return chapterNumberOf(chapter.fileName, await readFile(chapter.path))
+    return chapterNumberOf(chapter.fileName, content ?? await readFile(chapter.path))
   }
 
   const pending: ResolvedChapter[] = []
   for (const chapter of candidates) {
     if (abortController.signal.aborted) return settleCancelled()
     try {
-      const chapterNumber = await resolveChapterNumber(chapter)
+      /*
+       * 「选中（AI 不读取）」：被选中的章节**不参与**批量提取 —— 提取记忆本身就是
+       * 让模型读这一章，静默跳过才守得住"选中即不读取"；跳过不计失败，因为它不是
+       * 错误，是用户明确表达过的意图。
+       *
+       * ⚠️ 读不到时**不能**当成"已排除"：`读不到` 要按既有语义交给 ingestChapter
+       * 报错（见下面「算不出章号的章节不会被静默丢掉」那条回归用例），
+       * 在这里吞掉会把"文件损坏"和"作者不想让 AI 读"混成同一件事。
+       */
+      const content = await readFile(chapter.path).catch(() => "")
+      if (content && isAiExcludedContent(content)) continue
+      const chapterNumber = await resolveChapterNumber(chapter, content || undefined)
       // 算不出章号就没法查快照；这种情况仍然放行，让 ingestChapter 明确报
       // 「章节号无效」并被计成一次失败 —— 悄悄跳过会让用户以为全书都提完了。
       if (mode === "pending" && chapterNumber && await fileExists(chapterSnapshotJsonPath(root, chapterNumber))) {

@@ -6,6 +6,7 @@ import { hasUsableLlm } from "@/lib/has-usable-llm"
 import { useWikiStore, type LlmConfig } from "@/stores/wiki-store"
 import { parseLlmJsonArray, parseLlmJsonObject } from "./book-analysis/llm-json"
 import { appendChapterIngestLog, previewLlmOutput } from "./chapter-ingest-log"
+import { isAiExcludedContent } from "./ai-exclude"
 import { parseCharacterRoleFileName } from "./extract-established-context"
 import {
   PERSONA_DOCUMENT_FIELDS,
@@ -1635,6 +1636,12 @@ export async function promotePersonaSighting(options: {
     const chapterPath = await findChapterFileByNumber(pp, sighting.lastChapter)
     if (!chapterPath) return false
     const chapterBody = await readFile(chapterPath)
+    /*
+     * 「选中（AI 不读取）」：建档要把这一章的正文交给模型。
+     * 被选中的章节直接放弃建档（返回 false，与"找不到这一章"同一处理），
+     * 而不是拿半份材料硬建一个可能失真的档案。
+     */
+    if (isAiExcludedContent(chapterBody)) return false
 
     /*
      * `knownCharacter` 在这条路径上**不影响结果**（`pinned: true` 已把门槛压到 1、

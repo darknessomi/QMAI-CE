@@ -1,4 +1,4 @@
-import { listDirectory } from "@/commands/fs"
+import { readFile, listDirectory } from "@/commands/fs"
 import { normalizePath } from "@/lib/path-utils"
 import { refreshProjectState } from "@/lib/project-refresh"
 import i18n from "@/i18n"
@@ -15,6 +15,7 @@ import {
 } from "./chapter-ingest"
 import { resolveNovelModel } from "@/lib/novel/model-resolver"
 import { getOutlineFileName, outlineSnapshotExists } from "./outline-ingest-utils"
+import { isAiExcludedContent } from "./ai-exclude"
 
 function createOutlineIngestTask(projectPath: string, outlinePath: string): string {
   return useOutlineGenerationStore.getState().createTask({
@@ -462,6 +463,20 @@ export async function runBulkOutlineIngest(
   if (outlinePaths.length === 0) {
     return { total: 0, succeeded: 0, failed: 0, failures: [], emptyReason: "no_outlines" }
   }
+
+  /*
+   * 「选中（AI 不读取）」：一键提取跳过被选中的大纲。
+   *
+   * 跳过**不计失败**：那是用户明确表达过的意图，不是错误。放在 pending 过滤之前，
+   * 这样"待提取"的名单里根本不会出现它们，进度总数也不会虚高。
+   */
+  const ingestable: string[] = []
+  for (const outlinePath of outlinePaths) {
+    const content = await readFile(outlinePath).catch(() => "")
+    if (content && isAiExcludedContent(content)) continue
+    ingestable.push(outlinePath)
+  }
+  outlinePaths = ingestable
 
   if (mode === "pending") {
     const pending: string[] = []

@@ -1,6 +1,6 @@
 import { type CSSProperties, Suspense, lazy, useEffect, useCallback, useRef, useMemo, useState, useLayoutEffect } from "react"
 import { useTranslation } from "react-i18next"
-import { BookOpen, Brain, Eraser, Lightbulb, MoreHorizontal, Type, WandSparkles, X } from "lucide-react"
+import { BookOpen, Brain, CheckSquare, Eraser, Lightbulb, MoreHorizontal, ShieldOff, Square, Type, WandSparkles, X } from "lucide-react"
 import { useWikiStore } from "@/stores/wiki-store"
 import { SlotActions } from "@/components/plugins/SlotActions"
 import { usePluginSlotIndex } from "@/lib/plugins/declarative/api"
@@ -23,6 +23,7 @@ import { chapterHasLaterChapter, chapterOrdersFromTree, resolveDraftMemoryHint, 
 import { saveNovelConfig, saveUiBodyFontFamily, saveUiBodyFontPx, saveUiBodyLineHeight, saveUiBodyLetterSpacing, saveUiBodyMarginX, saveUiBodySafeBottom } from "@/lib/project-store"
 import { registerPreCloseFlush } from "@/lib/pre-close-flush"
 import { isChapterPage, isFinalChapter, parseChapterMeta, updateChapterStatus, updateChapterTitle } from "@/lib/novel/chapter-meta"
+import { isAiExcluded, setAiExcluded } from "@/lib/novel/ai-exclude"
 import { chapterSnapshotNumbersFrom, chapterSnapshotNumbersFromFileNames, resolveChapterMemoryDotState } from "@/lib/novel/chapter-memory-dot"
 import { resolveChapterDotNumbers } from "@/lib/novel/chapter-utils"
 import { resolveReviewModel } from "@/lib/novel/review-model"
@@ -1203,6 +1204,34 @@ export function PreviewPanel() {
     return fm
   }, [fileContent, selectedFile])
 
+  /*
+   * ── 「选中（AI 不读取）」 ──
+   *
+   * 判据只看**当前这份正文里的 frontmatter**（fileContent 就是编辑器手上那一份），
+   * 不另建一份状态：按钮、手改 YAML、外部编辑器回写都会在下次读盘后自动对齐，
+   * 不会出现"界面说已选中、文件里其实没写"。
+   */
+  const aiExcluded = useMemo(() => {
+    if (!selectedFile || getFileCategory(selectedFile) !== "markdown") return false
+    return isAiExcluded(parseFrontmatter(fileContent).frontmatter as Record<string, unknown> | null)
+  }, [fileContent, selectedFile])
+
+  /**
+   * 切换「选中（AI 不读取）」并**立刻落盘**。
+   *
+   * 走 handleSave 这条既有写盘链，而不是自己 writeFileAtomic：这条链会同步
+   * fileContent / ref / 磁盘一致性快照与写作统计。绕过去的话，下一次正文自动保存
+   * 会用旧副本把刚写进去的标记盖掉 —— 表现为"点了选中，过一会儿又变回未选中"。
+   */
+  const handleToggleAiExclude = useCallback(() => {
+    const current = fileContentRef.current
+    const excluded = isAiExcluded(parseFrontmatter(current).frontmatter as Record<string, unknown> | null)
+    const next = setAiExcluded(current, !excluded)
+    if (next === current) return
+    handleSave(next, { immediate: true })
+    setSaveStatus(excluded ? "已取消选中：本篇重新对 AI 可见。" : "已选中：AI 不再读取本篇。")
+  }, [handleSave])
+
   const canSaveAsFinal = Boolean(novelMode && project && selectedFile && chapterFrontmatter)
   const alreadyFinal = chapterFrontmatter ? isFinalChapter(chapterFrontmatter) : false
   const canFormatWriting = Boolean(selectedFile && getFileCategory(selectedFile) === "markdown" && isChapterPath(selectedFile))
@@ -2157,12 +2186,21 @@ export function PreviewPanel() {
   }, [bumpDataVersion, project, setFileTree])
 
   const handleSelectionAction = useCallback((action: ChapterSelectionAction, selection: ChapterBodySelection) => {
+    /*
+     * 「选中（AI 不读取）」：本篇被排除时，润色 / 去AI味 / 续写这些**把正文交给模型**
+     * 的动作一并停掉。只在工具栏上禁用按钮是不够的 —— 这两个入口长在正文的
+     * 选中浮层与右键菜单里，绕过去就等于还能把内容喂给 AI。
+     */
+    if (aiExcluded) {
+      setSaveStatus("本章已选中（AI 不读取），AI 改写已停用；要处理请先取消选中。")
+      return
+    }
     if (action === "de-ai") {
       void openDeAiSkillPicker(selection)
       return
     }
     void runSelectionTransform(action, selection)
-  }, [openDeAiSkillPicker, runSelectionTransform])
+  }, [aiExcluded, openDeAiSkillPicker, runSelectionTransform])
 
   const handleApplySelectionTransform = useCallback(() => {
     if (!selectionTransformSelection || !selectionTransformCandidateContent) return
@@ -2199,6 +2237,10 @@ export function PreviewPanel() {
   }, [fileContent, handleSave, selectionTransformAction, selectionTransformCandidateContent, selectionTransformSelection])
 
   const handleContinuationRequest = useCallback((anchor: ContinuationAnchor, position: { x: number; y: number }) => {
+    if (aiExcluded) {
+      setSaveStatus("本章已选中（AI 不读取），续写已停用；要继续写请先取消选中。")
+      return
+    }
     const state = useWikiStore.getState()
     const llmConfig = resolveDefaultModel(state.llmConfig)
     if (!hasUsableLlm(llmConfig, state.providerConfigs)) {
@@ -2217,7 +2259,9 @@ export function PreviewPanel() {
     setContinuationTruncated(false)
     setContinuationOpen(true)
     setSaveStatus("")
-  }, [])
+    // 依赖里必须有 aiExcluded：省略的话闭包会把首帧的 false 一直带下去，
+    // 上面那道「已选中就不续写」的拦截就永远不生效。
+  }, [aiExcluded])
 
   const runContinuation = useCallback(async () => {
     const anchor = continuationAnchor
@@ -2489,16 +2533,34 @@ export function PreviewPanel() {
    * ⚠️ `effectiveCompanionHtml` 只对 `isOutlinePath` 的文档非空（见上面读伴生
    * html 的 effect），所以这里不需要再判一次是不是大纲。
    */
+  /*
+   * 「选中（AI 不读取）」按钮。
+   *
+   * 一个元素同时服务三处入口：章节工具栏、大纲 MD 工具栏、大纲 HTML 双格式顶栏
+   * （后两者本来就是同一份 `outlineMemoryActions`，见下）。三处视觉必须完全一致 ——
+   * 用户的心智是"不管我在 HTML 还是 MD 里看，都在同一个位置能把它选中"。
+   *
+   * ⚠️ 写成**单行**：`preview-panel.chapter-toolbar.spec.tsx` 的 buttonBlock 以
+   * 「同一行同时含 `<button` 与 `aria-label`」为命中条件，拆行会让守卫查不到它
+   * （与上面「字体设置」同一条约束）。
+   */
+  const aiExcludeToggle = (
+    <button type="button" className={`ui-test-editor-action is-icon-only${aiExcluded ? " is-picked" : ""}`} data-guide="doc.ai-exclude" aria-pressed={aiExcluded} aria-label={aiExcluded ? "已选中（AI 不读取）" : "选中"} title={aiExcluded ? "已选中：AI 不会读取本篇。点击取消选中。" : "选中：让 AI 不再读取本篇"} onClick={handleToggleAiExclude}>
+      {aiExcluded ? <CheckSquare aria-hidden="true" /> : <Square aria-hidden="true" />}
+    </button>
+  )
+
   const outlineMemoryActions = (
     <>
+      {aiExcludeToggle}
       <button
         type="button"
         className="ui-test-editor-action is-icon-only"
         data-guide="outline.memory"
         aria-label={isOutlineIngesting ? "正在提取记忆…" : outlineIngested ? "重新提取记忆" : "提取记忆"}
-        title={isOutlineIngesting ? "正在提取记忆…" : outlineIngested ? "重新提取记忆" : "提取记忆"}
+        title={aiExcluded ? "本篇已选中（AI 不读取），提取记忆已停用；要提取请先取消选中" : isOutlineIngesting ? "正在提取记忆…" : outlineIngested ? "重新提取记忆" : "提取记忆"}
         onClick={() => void handleIngestOutline()}
-        disabled={!canIngestOutline || isOutlineIngesting}
+        disabled={!canIngestOutline || isOutlineIngesting || aiExcluded}
       >
         <Brain aria-hidden="true" />
       </button>
@@ -2568,10 +2630,11 @@ export function PreviewPanel() {
       auxiliaryPanel={!isSelectedChapter ? <UiTestOutlineTools /> : undefined}
       actions={isSelectedChapter ? (
         <>
-          <button type="button" className="ui-test-editor-action is-icon-only" data-guide="chapter.deai" aria-label={chapterDeAiButtonLabel} title={`${chapterDeAiButtonLabel} · ${chapterDeAiButtonTitle}`} onClick={(event) => void openDeAiSkillPicker(null, event.currentTarget)} disabled={currentChapterDeAiProcessing || !extractDeAiChapterText(fileContent).trim()}>
+          {aiExcludeToggle}
+          <button type="button" className="ui-test-editor-action is-icon-only" data-guide="chapter.deai" aria-label={chapterDeAiButtonLabel} title={aiExcluded ? "本章已选中（AI 不读取），去AI味已停用；要处理请先取消选中" : `${chapterDeAiButtonLabel} · ${chapterDeAiButtonTitle}`} onClick={(event) => void openDeAiSkillPicker(null, event.currentTarget)} disabled={currentChapterDeAiProcessing || aiExcluded || !extractDeAiChapterText(fileContent).trim()}>
             <Eraser aria-hidden="true" />
           </button>
-          <button type="button" className="ui-test-editor-action is-icon-only" data-guide="chapter.memory" data-draft-memory-target="" aria-label={isFinalChapterSaving ? "正在提取记忆…" : chapterMemoryExtracted ? "重新提取记忆" : "提取记忆"} title={isFinalChapterSaving ? "正在提取记忆…" : chapterMemoryExtracted ? "重新提取记忆" : "提取记忆"} onClick={() => void (alreadyFinal ? handleReingest() : handleSaveAsFinal({ thenExtract: true }))} disabled={!canSaveAsFinal || isFinalChapterSaving}>
+          <button type="button" className="ui-test-editor-action is-icon-only" data-guide="chapter.memory" data-draft-memory-target="" aria-label={isFinalChapterSaving ? "正在提取记忆…" : chapterMemoryExtracted ? "重新提取记忆" : "提取记忆"} title={aiExcluded ? "本章已选中（AI 不读取），提取记忆已停用；要提取请先取消选中" : isFinalChapterSaving ? "正在提取记忆…" : chapterMemoryExtracted ? "重新提取记忆" : "提取记忆"} onClick={() => void (alreadyFinal ? handleReingest() : handleSaveAsFinal({ thenExtract: true }))} disabled={!canSaveAsFinal || isFinalChapterSaving || aiExcluded}>
             <Brain aria-hidden="true" />
           </button>
           <button type="button" className="ui-test-editor-action is-icon-only" data-guide="chapter.view-memory" aria-label="查看记忆" title="查看记忆" onClick={() => canViewSnapshot ? setShowSnapshot(true) : setSaveStatus("尚无可查看的章节记忆，请先确认章节编号并提取记忆。")}>
@@ -2662,16 +2725,34 @@ export function PreviewPanel() {
   return (
     <div className="flex h-full flex-col">
       {uiTestEditorElement ? (
-        effectiveCompanionHtml ? (
-          <OutlineDualPreview
-            htmlContent={effectiveCompanionHtml}
-            mdEditor={uiTestEditorElement}
-            label={outlineFolderLabel ? `${outlineFolderLabel}双格式` : undefined}
-            actions={outlineMemoryActions}
-            onSaveHtml={saveCompanionHtml}
-            documentKey={selectedFile}
-          />
-        ) : uiTestEditorElement
+        <>
+          {/*
+           * 「选中（AI 不读取）」的常驻带：只在**已选中**时出现。
+           *
+           * 用户选了方案 C（排除态皮肤）：状态不能只靠一枚图标表达 —— 写作时一眼扫过
+           * 工具栏，看不出"这篇到底进不进模型"是这个功能最危险的失败方式。
+           * 所以选中后顶部压一条暖色带，写明哪些环节不读，并给唯一撤销入口。
+           */}
+          {aiExcluded ? (
+            <div className="ui-test-ai-exclude-bar" role="status">
+              <ShieldOff aria-hidden="true" />
+              <span><b>{isSelectedChapter ? "本章" : "本篇"}已排除在 AI 之外</b>：{isSelectedChapter ? "生成正文、AI 对话、检索、提取记忆都不会读取这一章。" : "生成正文、AI 对话、检索、提取记忆都不会读取这份大纲。"}</span>
+              <button type="button" className="ui-test-ai-exclude-undo" onClick={handleToggleAiExclude}>取消选中</button>
+            </div>
+          ) : null}
+          <div className={`min-h-0 flex-1${aiExcluded ? " ui-test-ai-excluded" : ""}`}>
+            {effectiveCompanionHtml ? (
+              <OutlineDualPreview
+                htmlContent={effectiveCompanionHtml}
+                mdEditor={uiTestEditorElement}
+                label={outlineFolderLabel ? `${outlineFolderLabel}双格式` : undefined}
+                actions={outlineMemoryActions}
+                onSaveHtml={saveCompanionHtml}
+                documentKey={selectedFile}
+              />
+            ) : uiTestEditorElement}
+          </div>
+        </>
       ) : (
       <>
       <div className="flex h-12 shrink-0 items-center border-b px-3">

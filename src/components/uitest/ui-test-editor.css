@@ -769,3 +769,29 @@
 @media (prefers-reduced-motion: reduce) {
   .ui-test-root .ui-test-editor-action { transition: none; }
 }
+
+/*
+ * ── 「选中（AI 不读取）」的排除态（用户选定方案 C「排除态皮肤」）──
+ *
+ * 三条规则各管一件事，缺一条这个方案就不成立：
+ *   · `.ui-test-ai-exclude-bar`：顶部常驻暖色带。**状态不能只靠一枚工具栏图标** ——
+ *     写作时扫一眼看不出"这篇到底进不进模型"，正是这个功能最危险的失败方式。
+ *   · `.ui-test-ai-excluded::before`：正文左侧 3px 暖色竖条，滚动到哪儿都还在。
+ *   · `.ui-test-ai-excluded` 后两条：正文层去饱和，让"这一篇对 AI 是灰的"成为直觉。
+ *
+ * ⚠️ filter 只加在**正文层**（编辑器滚动区 / HTML 预览 iframe），不加在容器上：
+ * 容器里还有工具栏与 HTML/MD 切换，一起变灰会让按钮看起来像被禁用 —— 它们其实完全可用。
+ * ⚠️ 选择器必须受 `.ui-test-root ` 约束：本文件有守卫逐条断言前缀。
+ */
+.ui-test-root .ui-test-ai-exclude-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 8px 14px; background: var(--ui-warm); border-bottom: 1px solid color-mix(in srgb, var(--ui-danger) 30%, transparent); color: color-mix(in srgb, var(--ui-danger) 78%, var(--ui-ink)); font: 400 0.8125rem/1.5 var(--ui); }
+.ui-test-root .ui-test-ai-exclude-bar svg { width: 15px; height: 15px; flex: none; }
+.ui-test-root .ui-test-ai-exclude-bar b { font-weight: 700; color: var(--ui-danger); }
+.ui-test-root .ui-test-ai-exclude-bar span { min-width: 0; flex: 1 1 240px; overflow-wrap: anywhere; }
+.ui-test-root .ui-test-ai-exclude-undo { flex: none; padding: 3px 11px; border: 1px solid color-mix(in srgb, var(--ui-danger) 40%, transparent); border-radius: 999px; background: var(--ui-paper); color: var(--ui-danger); font: 600 0.75rem/1.6 var(--ui); cursor: pointer; }
+.ui-test-root .ui-test-ai-exclude-undo:hover { background: var(--ui-soft); }
+.ui-test-root .ui-test-ai-excluded { position: relative; }
+.ui-test-root .ui-test-ai-excluded::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 3px; background: color-mix(in srgb, var(--ui-danger) 35%, transparent); z-index: 2; pointer-events: none; }
+.ui-test-root .ui-test-ai-excluded .ui-test-editor-scroll,
+.ui-test-root .ui-test-ai-excluded iframe { filter: saturate(0.42) contrast(0.97); }
+.ui-test-root .ui-test-editor-action.is-picked { background: var(--ui-warm); color: var(--ui-danger); }
+.ui-test-root .ui-test-editor-action.is-picked:hover { background: var(--ui-soft); color: var(--ui-danger); }
