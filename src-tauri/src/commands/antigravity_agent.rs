@@ -529,7 +529,9 @@ pub(crate) fn agent_mcp_config(url: &str, token: &str) -> Value {
     })
 }
 
-/// 为一个回合准备隔离 HOME：只带上登录凭据，MCP 和权限配置都写在这里面。
+/// 为一个回合准备隔离 HOME：带上仍存在的登录凭据文件、MCP 和权限配置。
+/// agy 1.5.5 把登录态放在系统钥匙串，不再写 `antigravity-oauth-token`。文件缺失时继续，
+/// 由调用方链接钥匙串；agy 自己未登录时再返回登录错误。
 fn prepare_isolated_home(
     root: &Path,
     real_dir: &Path,
@@ -543,13 +545,10 @@ fn prepare_isolated_home(
         std::fs::create_dir_all(dir).map_err(|e| format!("无法创建 Antigravity 隔离目录：{e}"))?;
     }
     let token_src = real_dir.join(OAUTH_TOKEN_FILE);
-    if !token_src.exists() {
-        return Err(
-            "没有找到 Antigravity CLI 的登录凭据，请先在终端运行 agy 完成登录。".to_string(),
-        );
+    if token_src.exists() {
+        link_or_copy(&token_src, &cli_dir.join(OAUTH_TOKEN_FILE))
+            .map_err(|e| format!("无法引用 Antigravity 登录凭据：{e}"))?;
     }
-    link_or_copy(&token_src, &cli_dir.join(OAUTH_TOKEN_FILE))
-        .map_err(|e| format!("无法引用 Antigravity 登录凭据：{e}"))?;
     let installation = real_dir.join(INSTALLATION_ID_FILE);
     if installation.exists() {
         let _ = std::fs::copy(&installation, cli_dir.join(INSTALLATION_ID_FILE));
@@ -1492,11 +1491,13 @@ mod tests {
         let base = std::env::temp_dir().join(format!("qmai-agy-test-{}", Uuid::new_v4().simple()));
         let real = base.join("real");
         std::fs::create_dir_all(&real).unwrap();
-        assert!(
-            prepare_isolated_home(&base.join("s0"), &real, "http://x", "t")
-                .unwrap_err()
-                .contains("登录")
-        );
+        let (home, work) =
+            prepare_isolated_home(&base.join("s0"), &real, "http://x", "t").unwrap();
+        assert!(work.is_dir());
+        assert!(!home
+            .join(".gemini/antigravity-cli")
+            .join(OAUTH_TOKEN_FILE)
+            .exists());
         std::fs::write(real.join(OAUTH_TOKEN_FILE), "tok").unwrap();
         let (home, work) = prepare_isolated_home(
             &base.join("s1"),
