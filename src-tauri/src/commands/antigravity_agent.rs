@@ -11,9 +11,9 @@
 //! 3. QMAI 执行工具后带着 `role:"tool"` 消息再次请求，代理按 `tool_call_id` 找回挂起的
 //!    调用，把结果交给 agy，同一个 agy 进程继续往下跑。
 //!
-//! 隔离：每个回合使用独立的临时 HOME（只链接登录凭据），在里面写 MCP 配置和权限规则，
-//! 不碰用户全局 `~/.gemini`，所以反重力搜索和用户自己的 agy 不受影响。权限规则只放行
-//! `mcp(qmai/*)`，拒绝 agy 自带的读写文件、执行命令和读网页工具。
+//! 隔离：每个回合使用独立的临时 HOME（链接登录凭据，macOS 上再链接登录钥匙串），在里面写
+//! MCP 配置和权限规则，不碰用户全局 `~/.gemini`，所以反重力搜索和用户自己的 agy 不受影响。
+//! 权限规则只放行 `mcp(qmai/*)`，拒绝 agy 自带的读写文件、执行命令和读网页工具。
 
 use std::collections::{HashMap, VecDeque};
 use std::io::{Read, Write};
@@ -529,7 +529,9 @@ pub(crate) fn agent_mcp_config(url: &str, token: &str) -> Value {
     })
 }
 
-/// 为一个回合准备隔离 HOME：只带上登录凭据，MCP 和权限配置都写在这里面。
+/// 为一个回合准备隔离 HOME：带上仍存在的登录凭据文件、MCP 和权限配置。
+/// agy 1.5.5 把登录态放在系统钥匙串，不再写 `antigravity-oauth-token`。文件缺失时继续，
+/// 由调用方链接钥匙串；agy 自己未登录时再返回登录错误。
 fn prepare_isolated_home(
     root: &Path,
     real_dir: &Path,
@@ -543,13 +545,10 @@ fn prepare_isolated_home(
         std::fs::create_dir_all(dir).map_err(|e| format!("无法创建 Antigravity 隔离目录：{e}"))?;
     }
     let token_src = real_dir.join(OAUTH_TOKEN_FILE);
-    if !token_src.exists() {
-        return Err(
-            "没有找到 Antigravity CLI 的登录凭据，请先在终端运行 agy 完成登录。".to_string(),
-        );
+    if token_src.exists() {
+        link_or_copy(&token_src, &cli_dir.join(OAUTH_TOKEN_FILE))
+            .map_err(|e| format!("无法引用 Antigravity 登录凭据：{e}"))?;
     }
-    link_or_copy(&token_src, &cli_dir.join(OAUTH_TOKEN_FILE))
-        .map_err(|e| format!("无法引用 Antigravity 登录凭据：{e}"))?;
     let installation = real_dir.join(INSTALLATION_ID_FILE);
     if installation.exists() {
         let _ = std::fs::copy(&installation, cli_dir.join(INSTALLATION_ID_FILE));
@@ -565,6 +564,35 @@ fn prepare_isolated_home(
     )
     .map_err(|e| format!("无法写入 Antigravity MCP 配置：{e}"))?;
     Ok((root.to_path_buf(), work))
+}
+
+/// agy 用绝对路径调用 `/usr/bin/security` 写默认钥匙串。`security` 按进程的 `HOME` 找
+/// `Library/Keychains/login.keychain-db`。隔离目录里没有这个文件时，macOS 会弹出
+/// 「找不到用于储存 antigravity 的钥匙串」。这里只放符号链接，`security` 会解析到用户
+/// 原来的登录钥匙串；临时目录删除后链接消失，钥匙串搜索列表不变。
+#[cfg(any(target_os = "macos", all(unix, test)))]
+fn link_login_keychain(home: &Path, login_keychain: &Path) -> Result<(), String> {
+    let name = login_keychain
+        .file_name()
+        .ok_or_else(|| "登录钥匙串路径无效".to_string())?;
+    let dir = home.join("Library").join("Keychains");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("无法创建钥匙串目录：{e}"))?;
+    std::os::unix::fs::symlink(login_keychain, dir.join(name))
+        .map_err(|e| format!("无法链接登录钥匙串：{e}"))?;
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn login_keychain_path() -> Option<PathBuf> {
+    let home = current_local_cli_environment().home?;
+    let dir = PathBuf::from(home).join("Library").join("Keychains");
+    for name in ["login.keychain-db", "login.keychain"] {
+        let path = dir.join(name);
+        if path.is_file() {
+            return Some(path);
+        }
+    }
+    None
 }
 
 // ---------------------------------------------------------------------------
@@ -917,6 +945,13 @@ fn spawn_session(proxy: &Arc<Proxy>, body: &Value) -> Result<Arc<Session>, Strin
         &mcp_url,
         &proxy.token,
     )?;
+    #[cfg(target_os = "macos")]
+    if let Some(keychain) = login_keychain_path() {
+        if let Err(error) = link_login_keychain(&home, &keychain) {
+            let _ = std::fs::remove_dir_all(&home);
+            return Err(error);
+        }
+    }
     let prompt = build_agent_prompt(&messages, &tool_defs);
     let session = Arc::new(Session {
         id: session_id.clone(),
@@ -1456,11 +1491,13 @@ mod tests {
         let base = std::env::temp_dir().join(format!("qmai-agy-test-{}", Uuid::new_v4().simple()));
         let real = base.join("real");
         std::fs::create_dir_all(&real).unwrap();
-        assert!(
-            prepare_isolated_home(&base.join("s0"), &real, "http://x", "t")
-                .unwrap_err()
-                .contains("登录")
-        );
+        let (home, work) =
+            prepare_isolated_home(&base.join("s0"), &real, "http://x", "t").unwrap();
+        assert!(work.is_dir());
+        assert!(!home
+            .join(".gemini/antigravity-cli")
+            .join(OAUTH_TOKEN_FILE)
+            .exists());
         std::fs::write(real.join(OAUTH_TOKEN_FILE), "tok").unwrap();
         let (home, work) = prepare_isolated_home(
             &base.join("s1"),
@@ -1491,6 +1528,21 @@ mod tests {
             mcp["mcpServers"]["qmai"]["headers"]["Authorization"],
             "Bearer secret"
         );
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn isolated_home_links_login_keychain_without_copying_it() {
+        let base = std::env::temp_dir().join(format!("qmai-agy-kc-{}", Uuid::new_v4().simple()));
+        let keychain = base.join("login.keychain-db");
+        let home = base.join("home");
+        std::fs::create_dir_all(&base).unwrap();
+        std::fs::write(&keychain, "keychain-bytes").unwrap();
+        link_login_keychain(&home, &keychain).unwrap();
+        let linked = home.join("Library/Keychains/login.keychain-db");
+        assert!(linked.symlink_metadata().unwrap().file_type().is_symlink());
+        assert_eq!(std::fs::read_link(&linked).unwrap(), keychain);
         let _ = std::fs::remove_dir_all(&base);
     }
 
