@@ -40,6 +40,7 @@ const NATIVE_METHOD_PREFIXES = [
 
 export function restrictedCodexConfig(): Record<string, unknown> {
   return {
+    agents: { enabled: false },
     features: {
       apps: false,
       browser_use: false,
@@ -48,7 +49,6 @@ export function restrictedCodexConfig(): Record<string, unknown> {
       computer_use: false,
       image_generation: false,
       in_app_browser: false,
-      multi_agent: false,
       multi_agent_v2: false,
       plugins: false,
       remote_plugin: false,

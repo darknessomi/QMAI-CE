@@ -49,6 +49,7 @@ describe("codex app-server transport", () => {
   it("disables native extension, shell, web, image, and project-rule surfaces", () => {
     const restricted = restrictedCodexConfig()
     expect(restricted).toEqual(expect.objectContaining({
+      agents: { enabled: false },
       web_search: "disabled",
       project_doc_max_bytes: 0,
       project_root_markers: [],
@@ -57,11 +58,12 @@ describe("codex app-server transport", () => {
         apps: false,
         plugins: false,
         shell_tool: false,
-        multi_agent: false,
+        multi_agent_v2: false,
         skill_search: false,
         view_image: false,
       }),
     }))
+    expect(restricted.features).not.toHaveProperty("multi_agent")
   })
 
   it("serializes trimmed chat history and images into turn input", () => {

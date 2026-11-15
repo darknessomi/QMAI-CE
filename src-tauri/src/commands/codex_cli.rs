@@ -131,7 +131,6 @@ fn isolated_codex_config(home_dir: Option<&Path>) -> toml::Table {
         "image_generation",
         "in_app_browser",
         "memories",
-        "multi_agent",
         "multi_agent_v2",
         "plugins",
         "remote_plugin",
@@ -145,6 +144,14 @@ fn isolated_codex_config(home_dir: Option<&Path>) -> toml::Table {
     .map(|key| (key.to_string(), toml::Value::Boolean(false)))
     .collect::<toml::Table>();
     isolated.insert("features".to_string(), toml::Value::Table(features));
+    isolated.insert(
+        "agents".to_string(),
+        toml::Value::Table(
+            [("enabled".to_string(), toml::Value::Boolean(false))]
+                .into_iter()
+                .collect(),
+        ),
+    );
     isolated.insert(
         "web_search".to_string(),
         toml::Value::String("disabled".to_string()),
@@ -282,6 +289,7 @@ fn probe_thread_request(id: u64, cwd: &Path) -> Value {
 
 fn restricted_feature_config() -> Value {
     json!({
+        "agents": { "enabled": false },
         "features": {
             "apps": false,
             "browser_use": false,
@@ -290,7 +298,6 @@ fn restricted_feature_config() -> Value {
             "computer_use": false,
             "image_generation": false,
             "in_app_browser": false,
-            "multi_agent": false,
             "multi_agent_v2": false,
             "plugins": false,
             "remote_plugin": false,
@@ -782,11 +789,16 @@ mod tests {
             Some("disabled")
         );
         assert_eq!(
+            config.pointer("/agents/enabled").and_then(Value::as_bool),
+            Some(false)
+        );
+        assert_eq!(
             config
-                .pointer("/features/multi_agent")
+                .pointer("/features/multi_agent_v2")
                 .and_then(Value::as_bool),
             Some(false)
         );
+        assert!(config.pointer("/features/multi_agent").is_none());
         assert_eq!(
             config
                 .pointer("/features/browser_use")
@@ -845,6 +857,25 @@ command = "danger"
 
         let serialized = serialize_isolated_codex_config(Some(&dir)).unwrap();
         let reparsed = serialized.parse::<toml::Table>().unwrap();
+        assert_eq!(
+            reparsed
+                .get("agents")
+                .and_then(toml::Value::as_table)
+                .and_then(|agents| agents.get("enabled"))
+                .and_then(toml::Value::as_bool),
+            Some(false)
+        );
+        let features = reparsed
+            .get("features")
+            .and_then(toml::Value::as_table)
+            .unwrap();
+        assert_eq!(
+            features
+                .get("multi_agent_v2")
+                .and_then(toml::Value::as_bool),
+            Some(false)
+        );
+        assert!(!features.contains_key("multi_agent"));
         assert_eq!(
             reparsed.get("model_provider").and_then(toml::Value::as_str),
             Some("proxy")
