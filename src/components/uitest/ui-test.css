@@ -251,8 +251,10 @@ html[data-ui-test-skin], html[data-ui-test-skin] body, html[data-ui-test-skin] #
  * （三个圆点从 left:19px 起、共 79px 宽），不是"宽度"，改小会压到红绿灯上。
  */
 .ui-test-root[data-platform="macos"] .ui-test-traffic { position: absolute; left: 19px; top: 0; height: 50px; margin-left: 0; gap: 9px; z-index: 2; }
-.ui-test-traffic-btn { width: 14px; height: 14px; padding: 0; border: 0; border-radius: 50%; background: #dddddd; display: grid; place-items: center; appearance: none; -webkit-appearance: none; }
-.ui-test-traffic-glyph { grid-area: 1 / 1; width: 14px; height: 14px; display: none; pointer-events: none; }
+.ui-test-traffic-btn { width: 14px; height: 14px; padding: 0; border: 0; border-radius: 50%; background: transparent; display: grid; place-items: center; appearance: none; -webkit-appearance: none; }
+/* 失焦底色单独裁成圆形，避免主题圆角覆盖后露出方块，同时保留按钮的焦点轮廓。 */
+.ui-test-traffic-btn::before { content: ""; grid-area: 1 / 1; width: 14px; height: 14px; background: #dddddd; clip-path: circle(50%); pointer-events: none; }
+.ui-test-traffic-glyph { grid-area: 1 / 1; z-index: 1; width: 14px; height: 14px; display: none; pointer-events: none; }
 .ui-test-root[data-window-focused="true"] .ui-test-traffic-glyph.is-idle { display: block; }
 .ui-test-traffic:hover .ui-test-traffic-glyph.is-idle { display: none; }
 .ui-test-traffic:hover .ui-test-traffic-glyph.is-hover { display: block; }
