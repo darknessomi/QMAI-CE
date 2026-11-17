@@ -458,16 +458,15 @@
  * 那个原生图标还会「3 秒后自己消失」（Edge 的自动隐藏行为），
  * 看起来像 bug。用浏览器专有伪元素把它彻底关掉，只保留我们自己的控件。
  *
- * 注意：这些伪元素选择器不被标准认可，浏览器不支持时会直接忽略，
- * 不会造成副作用；非 Edge/WebView2 环境本就没有这个图标。
+ * 仅隐藏登录密码框的原生按钮。WebKit 的装饰容器同时承载可编辑文本，
+ * 隐藏整个容器会让密码、占位符和光标一起消失。
  */
-input[type="password"]::-ms-reveal,
-input[type="password"]::-ms-clear {
+.account-password-field input[type="password"]::-ms-reveal,
+.account-password-field input[type="password"]::-ms-clear {
   display: none;
 }
 
-input[type="password"]::-webkit-credentials-auto-fill-button,
-input[type="password"]::-webkit-textfield-decoration-container {
+.account-password-field input[type="password"]::-webkit-credentials-auto-fill-button {
   display: none !important;
   visibility: hidden;
   pointer-events: none;

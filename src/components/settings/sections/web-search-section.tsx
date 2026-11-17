@@ -96,17 +96,19 @@ export function WebSearchSection() {
   const [savedId, setSavedId] = useState<string | null>(null)
 
   async function persist(next: SearchApiConfig) {
-    const { saveSearchApiConfig } = await import("@/lib/project-store")
+    // 受控输入框需要在输入事件结束前更新，避免 React 恢复旧值。
     setSearchApiConfig(next)
+    const { saveSearchApiConfig } = await import("@/lib/project-store")
     await saveSearchApiConfig(next)
   }
 
   function updateProvider(id: Exclude<SearchProvider, "none">, patch: SearchProviderOverride) {
-    const currentConfigs = resolvedConfig.providerConfigs ?? {}
+    const current = resolveSearchConfig(useWikiStore.getState().searchApiConfig)
+    const currentConfigs = current.providerConfigs ?? {}
     const merged = { ...(currentConfigs[id] ?? {}), ...patch }
     const nextConfigs = { ...currentConfigs, [id]: merged }
     const next = resolveSearchConfig({
-      ...resolvedConfig,
+      ...current,
       providerConfigs: nextConfigs,
     })
     persist(next).catch(() => {})
@@ -115,8 +117,9 @@ export function WebSearchSection() {
   }
 
   function toggleActive(id: Exclude<SearchProvider, "none">) {
-    const nextProvider = resolvedConfig.provider === id ? "none" : id
-    persist(resolveSearchConfig({ ...resolvedConfig, provider: nextProvider })).catch(() => {})
+    const current = resolveSearchConfig(useWikiStore.getState().searchApiConfig)
+    const nextProvider = current.provider === id ? "none" : id
+    persist(resolveSearchConfig({ ...current, provider: nextProvider })).catch(() => {})
   }
 
   return (
