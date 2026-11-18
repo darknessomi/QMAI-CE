@@ -9,6 +9,8 @@ import type { WikiProject } from "@/types/wiki"
 
 const mocks = vi.hoisted(() => ({
   uiTest: true,
+  isMacOS: vi.fn(),
+  homeDir: vi.fn(),
   getExecutableDir: vi.fn(),
   listDirectory: vi.fn(),
   openProject: vi.fn(),
@@ -49,7 +51,8 @@ vi.mock("@/lib/project-store", () => ({
   removeProjectRecords: vi.fn(),
   saveOutputLanguage: mocks.saveOutputLanguage,
 }))
-vi.mock("@/lib/platform", () => ({ pickDirectory: mocks.pickDirectory }))
+vi.mock("@/lib/platform", () => ({ pickDirectory: mocks.pickDirectory, isMacOS: mocks.isMacOS }))
+vi.mock("@tauri-apps/api/path", () => ({ homeDir: mocks.homeDir }))
 vi.mock("@/lib/templates", () => ({
   getTemplate: () => ({ schema: "原有结构", purpose: "原有用途", extraDirs: ["wiki/outlines"] }),
 }))
@@ -357,6 +360,34 @@ describe("独立 UI 书架", () => {
 })
 
 describe("书架新建小说弹窗", () => {
+  it("macOS 书架扫描、弹窗预览和创建使用同一主目录", async () => {
+    mocks.isMacOS.mockReturnValue(true)
+    mocks.homeDir.mockResolvedValue("/Users/作者")
+    const expected = "/Users/作者/QM-BOOK"
+    await renderShelf()
+    expect(mocks.fileExists).toHaveBeenCalledWith(expected)
+    await act(async () => root.render(<CreateProjectDialog open onOpenChange={vi.fn()} onCreated={vi.fn()} />))
+    const dialog = document.body.querySelector<HTMLElement>('[data-ui-test-dialog="create-project"]')!
+    expect(dialog.querySelector("output")?.textContent).toBe(expected)
+    await typeInto(dialog.querySelector("input")!, "新书")
+    await act(async () => button("创建并写大纲", dialog).click())
+    expect(mocks.createProject).toHaveBeenCalledWith("新书", expected)
+  })
+
+  it("macOS 主目录读取失败时仍可选择目录创建", async () => {
+    mocks.isMacOS.mockReturnValue(true)
+    mocks.homeDir.mockRejectedValue(new Error())
+    mocks.pickDirectory.mockResolvedValue("/Volumes/小说")
+    await act(async () => root.render(<CreateProjectDialog open onOpenChange={vi.fn()} onCreated={vi.fn()} />))
+    const dialog = document.body.querySelector<HTMLElement>('[data-ui-test-dialog="create-project"]')!
+    await typeInto(dialog.querySelector("input")!, "新书")
+    expect(dialog.querySelector("output")?.textContent).toContain("请选择存放位置")
+    expect(button("创建并写大纲", dialog).disabled).toBe(true)
+    await act(async () => button("选择目录", dialog).click())
+    await act(async () => button("创建并写大纲", dialog).click())
+    expect(mocks.createProject).toHaveBeenCalledWith("新书", "/Volumes/小说")
+  })
+
   it("测试版提供两主字段、目录选择和创建并写大纲，保留原创建链", async () => {
     const onCreated = vi.fn()
     const onOpenChange = vi.fn()

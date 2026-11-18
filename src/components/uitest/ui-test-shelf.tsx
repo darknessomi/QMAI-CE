@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react"
 import { FolderOpen, Plus, BookOpen, RectangleVertical } from "lucide-react"
 import type { WikiProject } from "@/types/wiki"
-import { fileExists, getExecutableDir, listDirectory, moveProjectToSystemTrash, openProjectFolder, readFile, renameProject } from "@/commands/fs"
-import { buildDefaultNovelDir } from "@/lib/default-paths"
+import { fileExists, listDirectory, moveProjectToSystemTrash, openProjectFolder, readFile, renameProject } from "@/commands/fs"
+import { getDefaultNovelDir } from "@/lib/default-paths"
 import { flattenMdFiles } from "@/lib/novel/chapter-utils"
 import { countChapterBodyWords } from "@/lib/chapter-word-count"
 import { isAbsolutePath, normalizeComparablePath } from "@/lib/path-utils"
@@ -80,8 +80,7 @@ function readableProjects(values: unknown): { projects: WikiProject[]; dropped: 
 }
 
 async function discoverDefaultProjects(cancelled: () => boolean): Promise<WikiProject[]> {
-  const executableDir = await getExecutableDir()
-  const defaultDir = buildDefaultNovelDir(executableDir)
+  const defaultDir = await getDefaultNovelDir()
   if (!(await fileExists(defaultDir))) return []
   const root = normalizeComparablePath(defaultDir)
   const nodes = await listDirectory(defaultDir, { maxDepth: 1 })

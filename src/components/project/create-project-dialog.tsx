@@ -6,14 +6,14 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { ArrowRight, FolderOpen, X } from "lucide-react"
-import { createProject, writeFile, createDirectory, getExecutableDir } from "@/commands/fs"
+import { createProject, writeFile, createDirectory } from "@/commands/fs"
 import { getTemplate } from "@/lib/templates"
 import type { WikiProject } from "@/types/wiki"
 import { normalizePath } from "@/lib/path-utils"
 import { useWikiStore, type OutputLanguage } from "@/stores/wiki-store"
 import { saveOutputLanguage } from "@/lib/project-store"
 import { pickDirectory } from "@/lib/platform"
-import { buildDefaultNovelDir } from "@/lib/default-paths"
+import { getDefaultNovelDir } from "@/lib/default-paths"
 import { pickGuideDemoNovel, readGuideDemoNovel, rememberGuideDemoNovel } from "@/lib/guide/guide-demo-novel"
 import { useGuideStore } from "@/lib/guide/guide-store"
 import "@/components/uitest/ui-test-shelf.css"
@@ -27,61 +27,19 @@ interface CreateProjectDialogProps {
 export function CreateProjectDialog({ open: isOpen, onOpenChange, onCreated }: CreateProjectDialogProps) {
   const { t } = useTranslation()
   const [name, setName] = useState("")
-  const [path, setPath] = useState("")
+  const [path, setPath] = useState<string | null>(null)
   const [error, setError] = useState("")
   const [creating, setCreating] = useState(false)
-  const [hasInitializedPath, setHasInitializedPath] = useState(false)
-  const [uiDefaultPath, setUiDefaultPath] = useState("")
   const setOutputLanguage = useWikiStore((s) => s.setOutputLanguage)
 
-  async function resolveDefaultParentDir(): Promise<string> {
-    let defaultPath = buildDefaultNovelDir("")
-    try {
-      const executableDir = await getExecutableDir()
-      defaultPath = buildDefaultNovelDir(executableDir)
-    } catch {
-      // Keep fallback path.
-    }
-    return defaultPath
-  }
-
   useEffect(() => {
     if (!isOpen) {
-      setHasInitializedPath(false)
-      setPath("")
-      return
-    }
-    if (hasInitializedPath || path.trim()) {
-      return
-    }
-
-    let cancelled = false
-    setHasInitializedPath(true)
-
-    const initializePath = async () => {
-      const defaultPath = await resolveDefaultParentDir()
-
-      if (!cancelled) {
-        setPath((currentPath) => (currentPath.trim() ? currentPath : defaultPath))
-      }
-    }
-
-    void initializePath()
-
-    return () => {
-      cancelled = true
-    }
-  }, [hasInitializedPath, isOpen, path])
-
-  // 测试版只读路径预览独立等待，不改变正式版的初始化或创建流程。
-  useEffect(() => {
-    if (!isOpen) {
-      setUiDefaultPath("")
+      setPath(null)
       return
     }
     let cancelled = false
-    void resolveDefaultParentDir().then((defaultPath) => {
-      if (!cancelled) setUiDefaultPath(defaultPath)
+    void getDefaultNovelDir().catch(() => "").then((defaultPath) => {
+      if (!cancelled) setPath((current) => current ?? defaultPath)
     })
     return () => { cancelled = true }
   }, [isOpen])
@@ -111,16 +69,11 @@ export function CreateProjectDialog({ open: isOpen, onOpenChange, onCreated }: C
       setError(t("project.errorNameRequired"))
       return
     }
+    if (!path || creating) return
     setCreating(true)
     setError("")
     try {
-      const parentDir = normalizePath(path.trim() || await resolveDefaultParentDir())
-      if (!parentDir.trim()) {
-        setError(t("project.errorNameRequired"))
-        return
-      }
-
-      setPath(parentDir)
+      const parentDir = normalizePath(path)
       await createDirectory(parentDir)
 
       const project = await createProject(name.trim(), parentDir)
@@ -140,7 +93,7 @@ export function CreateProjectDialog({ open: isOpen, onOpenChange, onCreated }: C
       onCreated(project)
       onOpenChange(false)
       setName("")
-      setPath("")
+      setPath(null)
     } catch (err) {
       setError(String(err))
     } finally {
@@ -209,7 +162,9 @@ export function CreateProjectDialog({ open: isOpen, onOpenChange, onCreated }: C
               <div className="ui-test-create-field">
                 <Label htmlFor="ui-test-novel-location">存放位置</Label>
                 <div className="ui-test-create-location" data-guide="create.location">
-                  <output id="ui-test-novel-location" className="ui-test-create-path">{path || uiDefaultPath || "正在读取默认小说目录…"}</output>
+                  <output id="ui-test-novel-location" className="ui-test-create-path">
+                    {path === null ? "正在读取默认小说目录…" : path || "无法读取默认目录，请选择存放位置。"}
+                  </output>
                   <button
                     type="button"
                     className="ui-test-create-button browse"
@@ -232,7 +187,7 @@ export function CreateProjectDialog({ open: isOpen, onOpenChange, onCreated }: C
             </div>
             <div className="ui-test-create-footer">
               <button type="button" className="ui-test-create-button" disabled={creating} onClick={() => onOpenChange(false)}>取消</button>
-              <button type="submit" className="ui-test-create-button primary" data-guide="create.submit" disabled={creating || !name.trim()}>
+              <button type="submit" className="ui-test-create-button primary" data-guide="create.submit" disabled={creating || !name.trim() || !path}>
                 <ArrowRight aria-hidden="true" />
                 {creating ? "创建中…" : "创建并写大纲"}
               </button>
