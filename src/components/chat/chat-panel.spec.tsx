@@ -101,7 +101,6 @@ describe("chat-panel agent reference integration", () => {
     expect(source).toContain("forceRequiredToolsImmediately: true")
     expect(source).toContain("retryAssistantMessageId: assistantMessage.id")
     expect(source).toContain("workflowMode: sessionWorkflowMode")
-    expect(source).toContain("planExecuteActive,")
     expect(source).toContain("resetAssistantMessageForRequiredToolRetry")
     expect(source).toContain("message.id !== sendOptions?.retryAssistantMessageId")
     expect(source).toContain("message.id !== retryUserMessageId")
@@ -146,63 +145,6 @@ describe("chat-panel agent reference integration", () => {
     expect(source).toContain("本次启用 Skill")
     expect(source).toContain('kind: "skill_used"')
     expect(source).toContain("prePluginResult?.selectedSkills")
-  })
-
-  it("keeps Plan Execute as an independent switch outside fast and strict modes", () => {
-    expect(source).toContain("planExecuteEnabled")
-    expect(source).toContain("setPlanExecuteEnabled")
-    expect(source).toContain("aiSessionPlanExecuteLabel")
-    expect(source).toContain("计划")
-    expect(source).toContain("label: \"共创\"")
-    expect(source).toContain("aria-pressed={planExecuteEnabled && workflowModeSupportsPlan}")
-    expect(source).toContain("disabled={!workflowModeSupportsPlan}")
-    expect(source).toContain("const workflowModeSupportsPlan = aiWorkflowMode !== \"fast\" && aiWorkflowMode !== \"discuss\"")
-  })
-
-  /*
-   * 计划开关的**实际渲染形态**（用户要求：常态只留图标，悬停显示「计划」两个字）。
-   *
-   * ⚠️ 这个文件里别的断言都是对整个 `source` 做 `toContain` —— 对本条要求**不够**，
-   * 因为 chat-panel.tsx 里存在**两块**计划按钮：
-   *   · 上面 `{false && novelMode && ...}` 里那块（`workflowModeSupportsPlan`，死代码）；
-   *   · 真正渲染的那块（`aiWorkflowMode !== "fast"`）。
-   * 第一轮改动就改错了块：改完毫无效果，回归测试还定位到错误的元素。
-   * 所以这里先把**活的那块**切出来，只在它内部断言，
-   * 并且钉住「活块的判据」本身 —— 免得两块哪天调换，测试还在替死代码背书。
-   */
-  it("计划开关只有图标、悬停显示「计划」：只认真正渲染的那块", () => {
-    const LIVE_MARK = 'aria-pressed={planExecuteEnabled && aiWorkflowMode !== "fast"}'
-    // 判据必须唯一，否则切片会切错块
-    expect(source.split(LIVE_MARK)).toHaveLength(2)
-
-    const start = source.indexOf(LIVE_MARK)
-    const end = source.indexOf("</Tooltip>", start)
-    expect(end, "活块后面应当有 </Tooltip> 收尾").toBeGreaterThan(start)
-    const liveBlock = source.slice(start, end)
-
-    // 1. 常态只剩图标：`ListChecks` 后必须紧跟自闭合，中间不再夹文字
-    expect(liveBlock).toContain('<ListChecks className="h-3.5 w-3.5" />')
-    expect(liveBlock).not.toContain('className="mr-1 h-3.5 w-3.5" />计划')
-    expect(liveBlock).not.toMatch(/<\/ListChecks>\s*计划/)
-
-    // 2. 悬停显示「计划」：title 就是这两个字
-    expect(liveBlock).toContain('title="计划"')
-    // 浮层第一行也是「计划」（真实渲染时才可见，这里钉源码形态）
-    expect(liveBlock).toContain('<div className="font-medium">计划</div>')
-
-    // 3. 动作语义没有被 title 挤掉：aria-label 仍随状态变化
-    expect(liveBlock).toContain('"关闭计划模式"')
-    expect(liveBlock).toContain('"开启计划模式"')
-    expect(liveBlock).toContain("快速模式下不支持计划，请切换到标准或严格模式")
-    expect(liveBlock).not.toContain('title="计划" aria-label="计划"')
-  })
-
-  it("injects Plan Execute policy only when the independent switch is enabled and not in fast mode", () => {
-    expect(source).toContain("buildPlanExecutePolicyPrompt")
-    expect(source).toContain("options.planExecuteEnabled && toolsEnabled && options.aiWorkflowMode !== \"fast\"")
-    expect(source).toContain("run_chapter_workflow")
-    expect(source).not.toContain("标准模式：复杂小说任务先给出简短计划")
-    expect(source).not.toContain("严格模式：复杂小说任务必须先规划")
   })
 
   it("makes fast mode behave like ordinary chat without automatic skill or review loop", () => {
@@ -296,19 +238,6 @@ describe("chat-panel agent reference integration", () => {
     expect(guardedRunIndex).toBeLessThan(runIndex)
   })
 
-  it("does not run the novel pre-plugin chain in fast mode even when Plan Execute is enabled", () => {
-    expect(source).toContain("aiWorkflowMode !== \"fast\" && aiWorkflowMode !== \"discuss\" && planExecuteEnabled")
-    const planExecuteActiveMatch = source.match(/planExecuteActive\s*=/)
-    expect(planExecuteActiveMatch).not.toBeNull()
-    const planExecuteActiveLine = source.slice(
-      (planExecuteActiveMatch?.index ?? 0),
-      (planExecuteActiveMatch?.index ?? 0) + 200,
-    )
-    expect(planExecuteActiveLine).toContain("sessionWorkflowMode !== \"fast\"")
-    expect(planExecuteActiveLine).toContain("planExecuteEnabled")
-    expect(planExecuteActiveLine).toContain("planExecutionFollowup")
-  })
-
   it("passes workflow mode and available skills into the novel pre-plugin chain", () => {
     expect(source).toContain("deAiSkillToUserSkill")
     expect(source).toContain("const availableAgentSkills")
@@ -321,10 +250,7 @@ describe("chat-panel agent reference integration", () => {
     expect(source).toContain("getSelectedSkillsPrompt")
   })
 
-  it("passes Plan Execute mode into the novel pre-plugin chain and consumes its final prompt", () => {
-    expect(source).toContain("planExecuteEnabled,")
-    expect(source).toContain("planExecuteEnabled: planExecuteActive")
-    expect(source).toContain("if (!hasAgentError && planExecuteActive)")
+  it("consumes the novel pre-plugin chain’s final prompt", () => {
     expect(source).toContain("prePluginResult?.finalSystemPrompt")
     expect(source).toContain("prePluginSystemPrompt")
   })
@@ -374,9 +300,8 @@ describe("chat-panel agent reference integration", () => {
     expect(source).toContain('settleRunningAgentToolCalls(message.agentToolCalls, "error")')
   })
 
-  it("settles visible tool calls when generation is cancelled from any chat confirmation path", () => {
+  it("settles visible tool calls when generation is stopped", () => {
     expect(source).toContain('agentToolCalls: settleRunningAgentToolCalls(message.agentToolCalls, "cancelled")')
-    expect(source).toContain("已取消计划，未进入正文生成。")
     expect(source).toContain("已停止生成。")
   })
 
@@ -387,13 +312,6 @@ describe("chat-panel agent reference integration", () => {
     expect(continueIndex).toBeGreaterThan(-1)
     expect(sessionRunnerIndex).toBeGreaterThan(-1)
     expect(source).not.toContain("await streamChat(")
-  })
-
-  it("passes the confirmed blueprint and captured conversation to the scoped followup run", () => {
-    expect(source).toContain(
-      'handleSendRef.current(followupText, [], "执行已确认计划", confirmedBlueprint, capturedConvId)',
-    )
-    expect(source).not.toContain("confirmedBlueprintRef")
   })
 
   it("routes continue-unfinished through the ReAct send path with compact display text", () => {
@@ -428,112 +346,6 @@ describe("chat-panel agent reference integration", () => {
   it("pins the conversation history control to the far right of the AI chat toolbar", () => {
     expect(source).toContain('className="qmai-header-actions ml-auto flex shrink-0 items-center"')
     expect(source).toContain("qmai-history-button")
-  })
-})
-
-describe("chat-panel chapter plan confirm integration (Stage C)", () => {
-  it("imports ChapterPlanConfirmDialog and helper functions", () => {
-    expect(source).toContain("ChapterPlanConfirmDialog")
-    expect(source).toContain("extractChapterPlan")
-    expect(source).toContain("buildPlanConfirmMessage")
-    expect(source).toContain("buildPlanSkipMessage")
-    expect(source).toContain('from "./chapter-plan-confirm-dialog"')
-  })
-
-  it("declares pendingChapterPlan state with planContent, fullContent and conversationId", () => {
-    expect(source).toContain("pendingChapterPlan")
-    expect(source).toContain("planContent")
-    expect(source).toContain("fullContent")
-    expect(source).toContain("conversationId")
-    expect(source).toContain("pendingChapterPlans")
-    expect(source).toContain("chapterPlanResolversRef")
-  })
-
-  it("provides closeChapterPlanDialog and requestChapterPlanConfirm helpers", () => {
-    expect(source).toContain("closeChapterPlanDialog")
-    expect(source).toContain("requestChapterPlanConfirm")
-    expect(source).toContain('new Promise<"confirm" | "skip" | "cancel" | { modify: string }>')
-  })
-
-  it("章节计划自检上下文带上同人原作正典", () => {
-    const fnIndex = source.indexOf("function buildChapterPlanSelfCheckContext")
-    expect(fnIndex).toBeGreaterThan(-1)
-    const fnBody = source.slice(fnIndex, source.indexOf("\n}", fnIndex))
-
-    // self-check 里有一条「原作正典」核对行，构造点漏传就会恒为空
-    expect(fnBody).toContain("canonRules: pack.canonRules")
-    expect(fnBody).toContain("sourceCanon: pack.sourceCanon")
-  })
-
-  it("detects chapter_plan marker inside onDone callback", () => {
-    const onDoneIndex = source.indexOf("onDone: () => {")
-    expect(onDoneIndex).toBeGreaterThan(-1)
-
-    const afterOnDone = source.slice(onDoneIndex)
-    expect(afterOnDone).toContain("extractChapterPlan")
-  })
-
-  it("skips chapter plan confirmation when Plan Execute is disabled", () => {
-    const runnerIndex = source.indexOf("const record = await runAiChatSession(")
-    const afterRunner = source.slice(runnerIndex)
-    expect(afterRunner).toContain("if (!hasAgentError && planExecuteActive)")
-  })
-
-  it("calls requestChapterPlanConfirm when a plan marker is found", () => {
-    const onDoneIndex = source.indexOf("onDone: () => {")
-    const afterOnDone = source.slice(onDoneIndex)
-    expect(afterOnDone).toContain("requestChapterPlanConfirm")
-  })
-
-  it("builds confirm and skip followup messages using the helper functions", () => {
-    const onDoneIndex = source.indexOf("onDone: () => {")
-    const afterOnDone = source.slice(onDoneIndex)
-    expect(afterOnDone).toContain("buildPlanConfirmMessage")
-    expect(afterOnDone).toContain("buildPlanSkipMessage")
-  })
-
-  it("waits for chapter plan confirmation outside the completed stream guard before follow-up execution", () => {
-    const runnerIndex = source.indexOf("const record = await runAiChatSession(")
-    const finishIndex = source.indexOf("finishAgentSession(() => {", runnerIndex)
-    const planConfirmIndex = source.indexOf("await requestChapterPlanConfirm(", runnerIndex)
-    const followupIndex = source.indexOf("await handleSendRef.current(followupText", runnerIndex)
-
-    expect(runnerIndex).toBeGreaterThan(-1)
-    expect(finishIndex).toBeGreaterThan(runnerIndex)
-    expect(planConfirmIndex).toBeGreaterThan(finishIndex)
-    expect(followupIndex).toBeGreaterThan(planConfirmIndex)
-
-    const afterPlanConfirm = source.slice(planConfirmIndex, followupIndex)
-    expect(afterPlanConfirm).not.toContain("streamSessionGuardRef.current.isActive")
-    expect(afterPlanConfirm).not.toContain("setActiveConversation(capturedConvId)")
-    expect(afterPlanConfirm).toContain("capturedConvId")
-  })
-
-  it("disables Plan Execute protocol for confirmed plan follow-up messages and fast mode", () => {
-    expect(source).toContain("isChapterPlanExecutionFollowup")
-    expect(source).toContain("sessionWorkflowMode !== \"fast\" && sessionWorkflowMode !== \"discuss\" && planExecuteEnabled && !planExecutionFollowup")
-    expect(source).toContain("planExecuteEnabled: planExecuteActive")
-  })
-
-  it("renders ChapterPlanConfirmDialog in JSX bound to pendingChapterPlan", () => {
-    expect(source).toContain("<ChapterPlanConfirmDialog")
-    expect(source).toContain("{pendingChapterPlan &&")
-    expect(source).toContain("pendingChapterPlan.planContent")
-  })
-
-  it("wires dialog actions to closeChapterPlanDialog", () => {
-    expect(source).toContain('closeChapterPlanDialog(pendingChapterPlan.conversationId, "confirm")')
-    expect(source).toContain('closeChapterPlanDialog(pendingChapterPlan.conversationId, "skip")')
-    expect(source).toContain('closeChapterPlanDialog(pendingChapterPlan.conversationId, "cancel")')
-    expect(source).toContain('closeChapterPlanDialog(pendingChapterPlan.conversationId, { modify:')
-  })
-
-  it("records a visible cancellation when the chapter plan dialog is cancelled", () => {
-    expect(source).toContain("recordChapterPlanExecutionCancelled")
-    expect(source).toContain("已取消计划，未进入正文生成。")
-    expect(source).toContain("用户取消了章节计划确认")
-    expect(source).toContain('settleRunningAgentStages(message.agentStages, "cancelled")')
-    expect(source).toContain('if (action === "cancel")')
   })
 })
 
@@ -621,20 +433,6 @@ describe("aiWorkflowMode store 读取", () => {
   it("切换正文执行模式时落盘", () => {
     expect(source).toContain("saveAiWorkflowMode")
     expect(source).toContain("void saveAiWorkflowMode(mode)")
-  })
-})
-
-describe("resolver 卸载清理", () => {
-  it("useEffect 卸载钩子中清理章节计划 pending resolver", () => {
-    expect(source).toContain("Object.values(chapterPlanResolversRef.current)")
-    expect(source).toContain("chapterPlanResolversRef.current = {}")
-  })
-})
-
-describe("章节计划弹窗输入框禁用一致性", () => {
-  it("当前会话存在 pendingChapterPlan 时禁用主输入框", () => {
-    expect(source).toMatch(/disabled=\{isStreaming \|\| Boolean\(pendingChapterPlan\)\}/)
-    expect(source).not.toContain("pendingSoulDialog.open")
   })
 })
 

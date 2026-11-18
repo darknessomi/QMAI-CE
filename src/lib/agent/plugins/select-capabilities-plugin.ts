@@ -5,25 +5,6 @@ import { resolveAiWorkflowMode } from "../workflow-mode"
 import { listLocalEntityNames } from "@/lib/novel/local-entity-names"
 import { getOutlineSkillNames, getWritingSkillNames } from "@/lib/novel/skill-route-registry"
 
-const PLAN_PHASE_ALLOWED_TOOLS = new Set([
-  "read_chapter",
-  "read_outline",
-  "read_memory",
-  "read_deduction",
-  "read_chat_history",
-  "read_outline_history",
-  "list_chapters",
-  "list_outlines",
-  "list_memories",
-  "list_deductions",
-  "search_chapters",
-  "load_context",
-  "trim_context",
-  "web_search",
-  "read_web_page",
-  "summarize_search_results",
-])
-
 export function createSelectCapabilitiesPlugin(): PrePlugin {
   return {
     name: "select_capabilities",
@@ -53,19 +34,13 @@ export function createSelectCapabilitiesPlugin(): PrePlugin {
         blockedSources: input.blockedSources as any,
       })
 
-      const isPlanPhase = Boolean(input.planExecuteEnabled)
-      const filteredCapabilities = isPlanPhase
-        ? selectedCapabilities.filter(
-            (cap) => cap.toolName && PLAN_PHASE_ALLOWED_TOOLS.has(cap.toolName),
-          )
-        : selectedCapabilities
       const injectedSkillIds = new Set((input.selectedSkills ?? []).map((skill) => skill.id))
       const deterministicSkillNames = route.intent === "generate_outline"
         ? getOutlineSkillNames(input.userMessage)
         : getWritingSkillNames(route.intent, input.userMessage)
       const capabilitiesWithoutDuplicateSkillTool = injectedSkillIds.size > 0 || deterministicSkillNames.length > 0
-        ? filteredCapabilities.filter((capability) => capability.toolName !== "apply_skill")
-        : filteredCapabilities
+        ? selectedCapabilities.filter((capability) => capability.toolName !== "apply_skill")
+        : selectedCapabilities
 
       return {
         selectedCapabilities: capabilitiesWithoutDuplicateSkillTool,

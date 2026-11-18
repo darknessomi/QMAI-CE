@@ -189,6 +189,20 @@ describe("持久化的容错", () => {
     expect(readGuideSnapshot().stepIndex).toBe(GUIDE_STEPS.length - 1)
   })
 
+  it.each([
+    [36, "chapter-event-outline"],
+    [37, "chapter-style"],
+    [38, "chapter-style"],
+    [39, "chapter-reference"],
+  ])("恢复旧版引导的第 %s 步到 %s", (stepIndex, expectedStepId) => {
+    memoryStore.set(GUIDE_STORAGE_KEY, JSON.stringify({ status: "running", stepIndex }))
+    const restored = readGuideSnapshot()
+    expect(GUIDE_STEPS[restored.stepIndex].id).toBe(expectedStepId)
+
+    writeGuideSnapshot(restored)
+    expect(readGuideSnapshot().stepIndex).toBe(restored.stepIndex)
+  })
+
   it("负下标夹回 0", () => {
     writeGuideSnapshot({ status: "running", stepIndex: -8, skippedChapters: [] })
     expect(readGuideSnapshot().stepIndex).toBe(0)

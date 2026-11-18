@@ -18,10 +18,11 @@ const base = {
 }
 
 describe("buildChatAgentSystemPrompt 无工具降级", () => {
-  it("有工具时仍要求通过工具读写（原有行为不变）", () => {
-    const prompt = buildChatAgentSystemPrompt({ ...base, toolsEnabled: true })
+  it.each(["standard", "strict"] as const)("有工具时 %s 模式直接进入正文工作流", (aiWorkflowMode) => {
+    const prompt = buildChatAgentSystemPrompt({ ...base, aiWorkflowMode, toolsEnabled: true })
     expect(prompt).toContain("请通过可用工具读取项目资料")
     expect(prompt).toContain("必须调用 run_chapter_workflow 工具")
+    expect(prompt).not.toContain("等待用户确认")
   })
 
   it("无工具时不再要求调用任何工具，并要求直接产出正文", () => {
@@ -34,16 +35,6 @@ describe("buildChatAgentSystemPrompt 无工具降级", () => {
     expect(prompt).not.toContain("必须优先使用对应工具读取具体内容")
     expect(prompt).not.toContain("必须使用 web_search 工具")
     expect(prompt).not.toContain("请优先定位目标章节并使用章节读写工具")
-  })
-
-  it("无工具时计划执行阶段不会只出计划（否则用户永远执行不下去）", () => {
-    const prompt = buildChatAgentSystemPrompt({
-      ...base,
-      planExecuteEnabled: true,
-      toolsEnabled: false,
-    })
-    expect(prompt).not.toContain("本轮只输出章节创作计划")
-    expect(prompt).toContain("直接输出可放入章节库的完整正文")
   })
 
   it("无工具时开启联网写作提示也不会要求调用 web_search", () => {

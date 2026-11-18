@@ -61,18 +61,16 @@ interface ResolveRequiredToolsOnceInput {
   novelMode: boolean
   intent?: string | null
   mode?: AiWorkflowMode | null
-  planExecuteActive: boolean
   enabledToolNames?: string[] | null
 }
 
 /**
- * 非 fast 章节写作、且工具可用、非计划收集阶段时，要求至少调用一次 run_chapter_workflow。
+ * 标准或严格模式下的章节写作，工具可用时要求至少调用一次 run_chapter_workflow。
  */
 export function resolveRequiredToolsOnce(
   input: ResolveRequiredToolsOnceInput,
 ): string[] | undefined {
   if (!input.novelMode) return undefined
-  if (input.planExecuteActive) return undefined
   if (!input.intent || !OUTLINE_FIND_CHAPTER_INTENTS.has(input.intent as NovelTaskIntent)) {
     return undefined
   }

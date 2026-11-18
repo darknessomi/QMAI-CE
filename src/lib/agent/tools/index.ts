@@ -63,7 +63,6 @@ export interface ToolFactoryOptions {
   aiWorkflowMode?: AiWorkflowMode
   runDeepChapterGeneration?: RunDeepChapterGeneration
   onToolEvent?: (event: AgentToolEvent) => void
-  getPlanBlueprint?: () => string | undefined
   getSelectedSkillsPrompt?: () => string | undefined
   /** 丁-2「文风写作」：本轮临时覆盖的文风预设 id（三态：undefined/null/string）。 */
   getWritingStyleIdOverride?: () => string | null | undefined
@@ -125,7 +124,6 @@ export function registerAllBuiltInTools(registry: ToolRegistry, options: ToolFac
       aiWorkflowMode: options.aiWorkflowMode,
       runDeepChapterGeneration: options.runDeepChapterGeneration,
       onToolEvent: options.onToolEvent,
-      getPlanBlueprint: options.getPlanBlueprint,
       getSelectedSkillsPrompt: options.getSelectedSkillsPrompt,
       getWritingStyleIdOverride: options.getWritingStyleIdOverride,
     }))

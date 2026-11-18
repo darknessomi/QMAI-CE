@@ -34,8 +34,6 @@ describe("chat layout", () => {
     expect(chatPanelSource).not.toContain("pendingSoulDialog")
     expect(chatPanelSource).not.toContain("本次写作将注入角色灵魂上下文")
     expect(chatPanelSource).not.toContain("requestSoulDialog")
-    expect(chatPanelSource).toContain("pendingChapterPlan")
-    expect(chatPanelSource).toContain("ChapterPlanConfirmDialog")
     expect(chatPanelSource).not.toContain("window.confirm")
   })
 

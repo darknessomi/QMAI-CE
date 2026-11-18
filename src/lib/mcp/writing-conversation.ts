@@ -135,7 +135,6 @@ async function runDefaultSession(ctx: WritingSessionContext): Promise<string> {
     novelMode,
     intent: taskRoute.intent,
     mode: ctx.workflowMode,
-    planExecuteActive: false,
     enabledToolNames: prePlugin?.enabledToolNames,
   })
   const systemPrompt = prePlugin?.finalSystemPrompt?.trim() || agentConfig.systemPrompt

@@ -45,13 +45,6 @@ export function resolveNotificationSound(
   return "Default"
 }
 
-export function shouldNotifyChapterWriting(input: {
-  intent?: string | null
-  planOnly?: boolean
-}): boolean {
-  return isChapterWritingIntent(input.intent) && !input.planOnly
-}
-
 export function buildChapterWritingNotification(input: {
   ok: boolean
   chapterNumber?: number
@@ -91,14 +84,13 @@ export async function ensureSystemNotificationPermission(
 export async function notifyChapterWritingOutcome(
   input: {
     intent?: string | null
-    planOnly?: boolean
     ok: boolean
     chapterNumber?: number
     error?: string
   },
   bindings: SystemNotificationBindings = defaultBindings,
 ): Promise<void> {
-  if (!shouldNotifyChapterWriting(input)) return
+  if (!isChapterWritingIntent(input.intent)) return
   if (!bindings.isTauri()) return
 
   try {

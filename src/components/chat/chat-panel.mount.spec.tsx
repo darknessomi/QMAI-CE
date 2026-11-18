@@ -108,50 +108,11 @@ describe("ChatPanel mount 基础设施", () => {
     await view.unmount()
   })
 
-  /*
-   * ⚠️ 本条已按用户要求改写：计划开关的「计划」两个字**收进了图标**，
-   * 改为**悬停时**显示（用户原话：「只留下图标就可以了。鼠标放上去之后，
-   * 要显示『计划』这两个字」）。与「文风写作」同一处理。
-   *
-   * 钉三件互不相同的事，缺一条都会漏掉一种退化：
-   *  1. 常态**只剩图标**：文字为空 + 内含一个 svg。
-   *     （把「计划」加回去 ⇒ 红。）
-   *  2. 悬停出口是 `title="计划"`：这正是用户要的那两个字。
-   *     （把 title 删掉或改成别的 ⇒ 红。）
-   *  3. `aria-label` 仍是**带状态**的动作描述（开启/关闭/模式不支持）。
-   *     它不能跟着 title 一起退化成光秃秃的「计划」—— 图标按钮没有可见文字，
-   *     读屏用户唯一的动作线索就是它，而开关必须说清「点了会怎样」。
-   *     （把 aria-label 删掉、或改成与 title 相同的「计划」⇒ 红。）
-   */
-  it("输入工具栏的计划开关只剩图标，悬停提示是「计划」，动作仍由 aria-label 说清", async () => {
-    const view = await renderChatPanel({ activeConversation: true })
+  it.each(["standard", "strict"] as const)("正文工具栏在 %s 模式下没有计划开关", async (aiWorkflowMode) => {
+    const view = await renderChatPanel({ activeConversation: true, aiWorkflowMode })
 
-    expect(view.container.textContent).toContain("标准")
-    const plan = view.container.querySelector<HTMLButtonElement>('[aria-label="开启计划模式"]')
-    expect(plan, "输入工具栏应有计划开关").not.toBeNull()
-
-    // 1. 常态一个字都不显示，只剩 svg 图标
-    expect((plan!.textContent ?? "").trim()).toBe("")
-    expect(plan!.textContent ?? "").not.toContain("计划")
-    expect(plan!.querySelector("svg")).not.toBeNull()
-
-    // 2. 悬停显示「计划」两个字
-    expect(plan!.title).toBe("计划")
-
-    // 3. 动作语义没有被 title 挤掉
-    expect(plan!.getAttribute("aria-label")).toBe("开启计划模式")
-    expect(plan!.getAttribute("aria-pressed")).toBe("false")
-
-    /*
-     * 4. 方块是 28px（`h-7 w-7`），不是 32px。
-     *    用户反馈图标之间隔得太远；间距 = 容器 gap + 两侧内边距之和，
-     *    只收 gap 不够。28px 与同一行本来就是 28px 的「上下文用量」圆环、@ 按钮统一。
-     *    判别力：改回 h-8 w-8 ⇒ 红。大纲面板里对应位置的那个按钮另有自己的用例。
-     */
-    expect(plan!.className).toContain("h-7")
-    expect(plan!.className).toContain("w-7")
-    expect(plan!.className).not.toContain("h-8")
-    expect(plan!.className).not.toContain("w-8")
+    expect(view.container.querySelector('[data-guide="chat.mode"]')).not.toBeNull()
+    expect(view.container.querySelector('[data-guide="chapter.plan"], button[aria-label*="计划模式"], button[title="计划"]')).toBeNull()
 
     await view.unmount()
   })
@@ -346,8 +307,7 @@ describe("ChatPanel mount 基础设施", () => {
   })
 
   it.todo("PrePlugin 链触发：发送消息后 pipeline 执行")
-  it.todo("Stage C 对话框：standard 模式 chapter_plan 触发对话框")
-  it.todo("Stage C 跳过：fast 模式直接生成正文")
+  it.todo("快速模式直接生成正文")
   it.todo("Stage D 自检：章节写完后 PostWriteCheck 写入 trace")
   it.todo("Stage D 降级：无模型时降级到规则检查")
   it.todo("断点保存：失败时记录调试信息但不自动弹窗")
@@ -359,8 +319,6 @@ describe("ChatPanel mount 基础设施", () => {
  * run_chapter_workflow 的消费端断言（`getWritingStyleIdOverride` 的值真的进了
  * `DeepChapterGenerationInput`）在 run-chapter-workflow.spec.ts 里。
  * 这一条补的是另一半：**chat-panel 交出去的那个 getter 到底返回什么**。
- * 两条都在，才不是「getter 没有产出者」的死通道
- * （本仓库已有一个 `getPlanBlueprint` 形状的先例，那条通道必须两头都接）。
  */
 describe("ChatPanel 的「文风写作」产出端", () => {
   const styleStore = JSON.stringify({
@@ -372,12 +330,12 @@ describe("ChatPanel 的「文风写作」产出端", () => {
     ],
   })
 
-  /** 取最近一次 useAgentConfig 调用交出去的第 4 个参数（= 文风覆盖 getter）。 */
+  /** 取最近一次 useAgentConfig 调用交出去的第 3 个参数（= 文风覆盖 getter）。 */
   function writingStyleGetter(): () => string | null | undefined {
     const args = agentConfigArgs.at(-1)
     expect(args, "useAgentConfig 应已被调用").toBeDefined()
-    expect(args?.[3], "第 4 个参数应是文风覆盖 getter").toBeTypeOf("function")
-    return args![3] as () => string | null | undefined
+    expect(args?.[2], "第 3 个参数应是文风覆盖 getter").toBeTypeOf("function")
+    return args![2] as () => string | null | undefined
   }
 
   afterEach(() => {
@@ -526,12 +484,12 @@ describe("ChatPanel 的「@ 引用文风」消费端（丁-3）", () => {
     ],
   })
 
-  /** 取最近一次 useAgentConfig 调用交出去的第 4 个参数（= 文风覆盖 getter）。 */
+  /** 取最近一次 useAgentConfig 调用交出去的第 3 个参数（= 文风覆盖 getter）。 */
   function writingStyleGetter(): () => string | null | undefined {
     const args = agentConfigArgs.at(-1)
     expect(args, "useAgentConfig 应已被调用").toBeDefined()
-    expect(args?.[3], "第 4 个参数应是文风覆盖 getter").toBeTypeOf("function")
-    return args![3] as () => string | null | undefined
+    expect(args?.[2], "第 3 个参数应是文风覆盖 getter").toBeTypeOf("function")
+    return args![2] as () => string | null | undefined
   }
 
   /** 文风条目在 token 上的形状必须与 `createSkillProvider` 的透传一致。 */

@@ -126,7 +126,7 @@ beforeEach(() => {
   useWikiStore.setState({
     project: { id: "ui-test-project", path: "C:/__qmai_ui_test__/book", name: "内存测试项目" },
     novelMode: true, selectedFile: null, fileTree: [], chatExpanded: true,
-    aiWorkflowMode: "standard", outlineWorkflowMode: "standard", planExecuteEnabled: false,
+    aiWorkflowMode: "standard", outlineWorkflowMode: "standard",
     aiChatModel: "openai/ui-model", aiOutlineModel: "openai/ui-model",
     llmConfig: { ...useWikiStore.getState().llmConfig, provider: "openai", apiKey: "ui-test-only", model: "ui-model", maxContextSize: 8192 },
     providerConfigs: { openai: { enabled: true, apiKey: "ui-test-only", savedModels: [{ id: "ui-model", model: "ui-model", name: "本地验证模型", createdAt: 1 }] } },

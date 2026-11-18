@@ -16,6 +16,8 @@ import { GUIDE_CHAPTERS, GUIDE_STEPS, getChapterStartIndex, getGuideStepIndex } 
  */
 
 export const GUIDE_STORAGE_KEY = "qmai-guide-v1"
+const GUIDE_SNAPSHOT_VERSION = 2
+const LEGACY_CHAPTER_PLAN_STEP_INDEX = 37
 
 const EMPTY_SNAPSHOT: GuideSnapshot = {
   status: "new",
@@ -41,7 +43,7 @@ export function readGuideSnapshot(): GuideSnapshot {
   try {
     const raw = localStorage.getItem(GUIDE_STORAGE_KEY)
     if (!raw) return { ...EMPTY_SNAPSHOT }
-    const parsed = JSON.parse(raw) as Partial<GuideSnapshot> | null
+    const parsed = JSON.parse(raw) as (Partial<GuideSnapshot> & { version?: number }) | null
     if (!parsed || typeof parsed !== "object") return { ...EMPTY_SNAPSHOT }
     const status = parsed.status
     const normalizedStatus =
@@ -49,9 +51,15 @@ export function readGuideSnapshot(): GuideSnapshot {
     const skippedChapters = Array.isArray(parsed.skippedChapters)
       ? parsed.skippedChapters.filter(isChapterId)
       : []
+    // 旧引导中的计划步骤由下一步接替，其后的进度向前移动一格。
+    const stepIndex = typeof parsed.stepIndex === "number"
+      && parsed.version === undefined
+      && parsed.stepIndex >= LEGACY_CHAPTER_PLAN_STEP_INDEX + 1
+      ? parsed.stepIndex - 1
+      : parsed.stepIndex
     return {
       status: normalizedStatus,
-      stepIndex: clampStepIndex(parsed.stepIndex),
+      stepIndex: clampStepIndex(stepIndex),
       skippedChapters,
       finishedAt: typeof parsed.finishedAt === "number" ? parsed.finishedAt : undefined,
     }
@@ -63,7 +71,7 @@ export function readGuideSnapshot(): GuideSnapshot {
 export function writeGuideSnapshot(snapshot: GuideSnapshot): void {
   if (typeof localStorage === "undefined") return
   try {
-    localStorage.setItem(GUIDE_STORAGE_KEY, JSON.stringify(snapshot))
+    localStorage.setItem(GUIDE_STORAGE_KEY, JSON.stringify({ ...snapshot, version: GUIDE_SNAPSHOT_VERSION }))
   } catch {
     /* 存储写失败不影响当前这次引导，只是下次打开不记得进度。 */
   }

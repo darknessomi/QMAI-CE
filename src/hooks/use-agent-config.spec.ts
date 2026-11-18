@@ -180,7 +180,7 @@ async function renderHook(systemPrompt: string, overrides: StoreStates & {
       setGetterState({ fn })
       await flushPromises()
     })
-    result = useAgentConfig(systemPrompt, undefined, undefined, getterState.fn)
+    result = useAgentConfig(systemPrompt, undefined, getterState.fn)
     return null
   }
 

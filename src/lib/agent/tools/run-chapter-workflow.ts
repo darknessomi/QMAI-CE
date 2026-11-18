@@ -24,11 +24,6 @@ interface RunChapterWorkflowToolOptions {
   onToolEvent?: (event: AgentToolEvent) => void
   onActivityEvent?: (event: AgentActivityEvent) => void
   /**
-   * 当 AI 未在工具调用参数中携带 planBlueprint 时，从这里兜底取已确认的章节计划。
-   * 保证用户确认的计划为强制约束，不依赖模型是否遵守自然语言提示。
-   */
-  getPlanBlueprint?: () => string | undefined
-  /**
    * 本轮已选定的写作 Skill 提示。不作为工具参数，避免模型漏传。
    */
   getSelectedSkillsPrompt?: () => string | undefined
@@ -128,7 +123,7 @@ export function createRunChapterWorkflowTool(options: RunChapterWorkflowToolOpti
       planBlueprint: {
         type: "string",
         description:
-          "用户在会话层已确认的章节计划原文。若存在，必须完整透传，作为写作任务书的权威依据；不得改写或省略。",
+          "用户明确指定的写作蓝图，例如共创中选定的方向。若存在，必须完整透传，作为写作任务书的依据。",
       },
     },
     async execute(rawParams, signal, context?: ToolExecutionContext) {
@@ -141,9 +136,7 @@ export function createRunChapterWorkflowTool(options: RunChapterWorkflowToolOpti
      const parentCallId = context?.callId ?? `run_chapter_workflow:${Date.now()}`
      const emitToolEvent = context?.onToolEvent ?? options.onToolEvent
      const emitActivityEvent = context?.onActivityEvent ?? options.onActivityEvent
-      // 兜底：AI 未在工具调用参数中携带 planBlueprint 时，从外部 getter 补上，
-      // 保证用户确认的计划一定进入章节生成链路，不依赖模型是否遵守自然语言提示。
-      const planBlueprint = params.planBlueprint?.trim() || options.getPlanBlueprint?.()?.trim() || undefined
+      const planBlueprint = params.planBlueprint?.trim() || undefined
       const skillsPrompt = options.getSelectedSkillsPrompt?.()?.trim() || undefined
       // 三态原样透传：这里刻意不用 `?.() ?? undefined`，见 getWritingStyleIdOverride 的注释。
       const writingStyleIdOverride = options.getWritingStyleIdOverride

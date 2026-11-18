@@ -99,7 +99,6 @@ describe("resolveRequiredToolsOnce", () => {
         novelMode: true,
         intent: "write_chapter",
         mode: "strict",
-        planExecuteActive: false,
         enabledToolNames: ["read_chapter", "run_chapter_workflow"],
       }),
     ).toEqual(["run_chapter_workflow"])
@@ -109,28 +108,16 @@ describe("resolveRequiredToolsOnce", () => {
         novelMode: true,
         intent: "polish_chapter",
         mode: "standard",
-        planExecuteActive: false,
       }),
     ).toEqual(["run_chapter_workflow"])
   })
 
-  it("skips fast mode, plan phase, non-novel, and non-writing intents", () => {
+  it("skips fast mode, non-novel, and non-writing intents", () => {
     expect(
       resolveRequiredToolsOnce({
         novelMode: true,
         intent: "write_chapter",
         mode: "fast",
-        planExecuteActive: false,
-        enabledToolNames: ["run_chapter_workflow"],
-      }),
-    ).toBeUndefined()
-
-    expect(
-      resolveRequiredToolsOnce({
-        novelMode: true,
-        intent: "write_chapter",
-        mode: "strict",
-        planExecuteActive: true,
         enabledToolNames: ["run_chapter_workflow"],
       }),
     ).toBeUndefined()
@@ -140,7 +127,6 @@ describe("resolveRequiredToolsOnce", () => {
         novelMode: false,
         intent: "write_chapter",
         mode: "strict",
-        planExecuteActive: false,
       }),
     ).toBeUndefined()
 
@@ -149,7 +135,6 @@ describe("resolveRequiredToolsOnce", () => {
         novelMode: true,
         intent: "character_query",
         mode: "strict",
-        planExecuteActive: false,
       }),
     ).toBeUndefined()
   })
@@ -160,7 +145,6 @@ describe("resolveRequiredToolsOnce", () => {
         novelMode: true,
         intent: "write_chapter",
         mode: "strict",
-        planExecuteActive: false,
         enabledToolNames: ["read_chapter", "read_outline"],
       }),
     ).toBeUndefined()
@@ -172,7 +156,6 @@ describe("resolveRequiredToolsOnce", () => {
         novelMode: true,
         intent: "write_chapter",
         mode: "discuss",
-        planExecuteActive: false,
         enabledToolNames: ["read_chapter", "run_chapter_workflow"],
       }),
     ).toBeUndefined()

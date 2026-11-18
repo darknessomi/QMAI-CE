@@ -27,7 +27,6 @@ export interface UseAgentConfigResult {
 
 export function useAgentConfig(
   systemPrompt: string,
-  getPlanBlueprint?: () => string | undefined,
   getSelectedSkillsPrompt?: () => string | undefined,
   getWritingStyleIdOverride?: () => string | null | undefined,
 ): UseAgentConfigResult {
@@ -172,7 +171,6 @@ export function useAgentConfig(
       runDeepChapterGeneration,
       draftMode: novelMode,
       projectPath: normalizePath(projectPath),
-      getPlanBlueprint,
       getSelectedSkillsPrompt,
       getWritingStyleIdOverride,
       disabledTools: ["write_chapter", "write_outline_node", "write_memory"],
@@ -205,7 +203,6 @@ export function useAgentConfig(
     writingSkills,
     getChatConversations,
     getOutlineConversations,
-    getPlanBlueprint,
     getSelectedSkillsPrompt,
     getWritingStyleIdOverride,
     pluginTools,

@@ -2,22 +2,15 @@ import { ScrollToLatestButton } from "./scroll-to-latest-button"
 import { useRef, useEffect, useCallback, useState, useMemo, useDeferredValue, type CSSProperties } from "react"
 import { createPortal } from "react-dom"
 import { useTranslation } from "react-i18next"
-import { BookOpen, Plus, Trash2, ListChecks, ChevronDown, Check, History, X, Info } from "lucide-react"
+import { BookOpen, Plus, Trash2, ChevronDown, Check, History, X, Info } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { UiTestAiIdentity, UiTestAiAuthor, UiTestAiEmpty, UiTestAiModel, getUiTestAiMenuStyle, useUiTestAiMenuFocus } from "@/components/uitest/ui-test-ai-parts"
 import "@/components/uitest/ui-test-ai.css"
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { TooltipProvider } from "@/components/ui/tooltip"
 import { ChatMessage, StreamingMessage } from "./chat-message"
 import { ChatModelSelector } from "./chat-model-selector"
 import { useSourceFiles } from "./chat-shared"
 import { useStreamingText } from "@/hooks/use-streaming-text"
-import {
-  ChapterPlanConfirmDialog,
-  extractChapterPlan,
-  buildPlanConfirmMessage,
-  buildPlanSkipMessage,
-  isChapterPlanExecutionFollowup,
-} from "./chapter-plan-confirm-dialog"
 import { useChatStore, type DisplayMessage } from "@/stores/chat-store"
 import { useShallow } from "zustand/react/shallow"
 import { useOutlineChatStore } from "@/stores/outline-chat-store"
@@ -58,11 +51,6 @@ import { runDraftReviewSkill } from "@/lib/agent/skills/draft-review-skill"
 import { useDraftReviewStore } from "@/stores/draft-review-store"
 import { ToolRegistry } from "@/lib/agent/registry"
 import { registerAllBuiltInTools } from "@/lib/agent/tools"
-import {
-  runChapterPlanRevision as runChapterPlanRevisionModel,
-  runChapterPlanSelfCheck as runChapterPlanSelfCheckModel,
-  type ChapterPlanSelfCheckContext,
-} from "@/lib/novel/chapter-plan-self-check"
 import type { AgentMessage, AgentRunRecord } from "@/lib/agent/types"
 import type { AgentToolEvent } from "@/lib/agent/types"
 import { skillDisplayName, skillDisplayNameByName, type UserSkill } from "@/lib/novel/skill-library"
@@ -141,7 +129,6 @@ import { loadFrameworks } from "@/lib/novel/story-simulation/framework-store"
 import type { FrameworkBinding, StoryFramework } from "@/lib/novel/story-simulation/types"
 
 import type { AiWorkflowMode } from "@/lib/agent/workflow-mode"
-import { buildPlanExecutePolicyPrompt, WRITING_INTENTS } from "@/lib/agent/plan-execute-policy"
 import {
   buildOutlineFindProtocol,
   splitOutlineFindProtocolForCache,
@@ -215,7 +202,6 @@ const shouldRunNovelPrePluginChain = false
 const taskRoute = shouldRunNovelPrePluginChain ? rawTaskRoute : null
 const selectedSkillsPrompt = ""
 const aiSessionWorkflowModeLabel = "AI 会话执行模式"
-const aiSessionPlanExecuteLabel = "计划模式"
 const aiWorkflowModeOptions: Array<{
   mode: AiWorkflowMode
   label: string
@@ -252,7 +238,6 @@ void rawTaskRoute
 void shouldRunNovelPrePluginChain
 void taskRoute
 void selectedSkillsPrompt
-void aiSessionPlanExecuteLabel
 void currentModelNotSupportMsg
 if (rawTaskRoute && rawTaskRoute.intent !== "general_chat") {}
 let _prePluginResult: { stopReason?: string; contextPack?: any } | null = null
@@ -305,35 +290,18 @@ function appendWebSearchTrace(trace: ContextTrace, event: AgentToolEvent): Conte
   }
 }
 
-function buildChapterPlanSelfCheckContext(pack: ContextPack | null): ChapterPlanSelfCheckContext | undefined {
-  if (!pack) return undefined
-  return {
-    chapterGoal: pack.chapterGoal,
-    characterStates: pack.characterStates,
-    cognitionStates: pack.cognitionStates,
-    foreshadowingStates: pack.foreshadowingStates,
-    timeline: pack.timeline,
-    canonRules: pack.canonRules,
-    // 同人项目：章节计划自检也必须拿到原作正典，否则「原作正典」核对行恒为空。
-    sourceCanon: pack.sourceCanon ?? "",
-    mustAvoid: pack.mustAvoid,
-  }
-}
-
 function getWorkflowModeOption(mode: AiWorkflowMode) {
   return aiWorkflowModeOptions.find((option) => option.mode === mode) ?? aiWorkflowModeOptions[1]
 }
 
 function buildWorkflowRouteActivityContent(
   mode: AiWorkflowMode,
-  planExecuteActive: boolean,
   route: TaskRouteResult | null,
 ): string {
   const option = getWorkflowModeOption(mode)
   return [
     `当前模式：${option.label}模式（${option.description}）。`,
     `执行路线：${option.routeDescription}`,
-    `计划执行：${planExecuteActive ? "已开启，写正文前会先生成计划并等待确认。" : "未开启，按当前模式直接执行。"}`,
     route
       ? `识别任务：${route.intent}${route.chapterNumber ? `，目标第${route.chapterNumber}章` : ""}。`
       : "识别任务：普通会话或低置信度写作请求。",
@@ -366,7 +334,6 @@ export function buildChatAgentSystemPrompt(options: {
   chatEditModeEnabled: boolean
   aiWorkflowMode?: AiWorkflowMode
   writingWebSearchEnabled?: boolean
-  planExecuteEnabled?: boolean
   agentWritingSkills?: UserSkill[]
   projectName?: string
   bindingTitle?: string
@@ -410,16 +377,7 @@ export function buildChatAgentSystemPrompt(options: {
     lines.push("当前处于资料写入模式，用户可能希望把对话内容整理写入资料库。")
   }
   if (options.novelMode) {
-    // 计划阶段依赖后续用工具执行；没有工具时只出计划等于把用户卡死在半路，
-    // 所以无工具模式下不进计划阶段，直接走下面的「直接输出正文」。
-    const planPhase = toolsEnabled && Boolean(options.planExecuteEnabled) && options.aiWorkflowMode !== "fast" && options.aiWorkflowMode !== "discuss"
-    if (planPhase) {
-      // 计划阶段与"只输出正文/必须调 run_chapter_workflow"互斥：同时注入
-      // 会让模型在两套矛盾指令之间随机选择，表现为跳过计划直接产出正文。
-      lines.push(toolsEnabled
-        ? "当前处于章节计划阶段：本轮只输出章节创作计划并等待用户确认，禁止输出章节正文，禁止调用 run_chapter_workflow 等正文生成类工具。"
-        : "当前处于章节计划阶段：本轮只输出章节创作计划并等待用户确认，禁止输出章节正文。")
-    } else if (options.aiWorkflowMode === "fast") {
+    if (options.aiWorkflowMode === "fast") {
       lines.push("小说模式下，如果用户要求生成、续写或改写章节，只输出可直接放入章节库的正文。")
       lines.push("章节生成、续写或改写任务的最终回复必须只包含章节正文，不要把工具读取过程、写作计划或执行过程展示给用户。")
       lines.push("不要输出读取说明、执行总结、完成目标表格、章节结构、后续建议、引用来源或 Markdown 表格；章节标题和正文以外的内容都不要输出。")
@@ -445,7 +403,7 @@ export function buildChatAgentSystemPrompt(options: {
       lines.push("快速模式下可以读取必要上下文；除非用户明确要求使用工作流或 Skill，否则不要主动调用 run_chapter_workflow。")
     } else if (options.aiWorkflowMode === "discuss") {
       lines.push("本轮不要调用 run_chapter_workflow，也不要输出章节正文；只给出方向与关键判断。")
-    } else if (!planPhase && toolsEnabled) {
+    } else if (toolsEnabled) {
       lines.push("章节生成、续写、改写或润色必须调用 run_chapter_workflow 工具；未调用前禁止输出章节终稿正文。")
     }
   }
@@ -470,9 +428,6 @@ export function buildChatAgentSystemPrompt(options: {
       && options.aiWorkflowMode !== "fast"
     ) {
       lines.push("会联网搜索。外部公开资料才使用 web_search，不得声称已经搜索。库内剧情、伏笔、人物和设定不要发到公网。未使用联网资料时，在回复末尾注明。")
-    }
-    if (options.planExecuteEnabled && toolsEnabled && options.aiWorkflowMode !== "fast" && options.aiWorkflowMode !== "discuss") {
-      lines.push(buildPlanExecutePolicyPrompt(options.aiWorkflowMode))
     }
   }
   if (options.chatEditModeEnabled) {
@@ -529,7 +484,6 @@ interface ChatSendOptions {
   retryAssistantMessageId?: string
   /** Preserve the execution policy selected for the failed request. */
   workflowMode?: AiWorkflowMode
-  planExecuteActive?: boolean
   /** 共创模式：本轮是方向推演（decision）还是选定后的正文生成（generation）。 */
   chapterDiscussPhase?: "decision" | "generation"
 }
@@ -639,31 +593,7 @@ function updateAgentAssistantMessage(
   }))
 }
 
-function recordChapterPlanExecutionCancelled(messageId: string): void {
-  const timestamp = Date.now()
-  const cancelEvent = createAgentActivityEvent({
-    id: `chapter_plan_cancelled:${messageId}:${timestamp}`,
-    stageId: "write_confirmation",
-    kind: "stage_output",
-    title: "已取消计划",
-    content: "用户取消了章节计划确认，未进入正文生成。",
-    timestamp,
-  })
-  updateAgentAssistantMessage(messageId, (message) => ({
-    ...message,
-    content: message.content
-      ? `${message.content}\n\n已取消计划，未进入正文生成。`
-      : "已取消计划，未进入正文生成。",
-    agentToolCalls: settleRunningAgentToolCalls(message.agentToolCalls, "cancelled"),
-    agentStages: applyAgentActivityEvent(
-      settleRunningAgentStages(message.agentStages, "cancelled"),
-      cancelEvent,
-    ),
-    isAgentRunning: false,
-  }))
-}
-
-function ConversationTabs({ onBeforeDelete }: { onBeforeDelete: (conversationId: string) => void }) {
+function ConversationTabs() {
   const { t } = useTranslation()
   const novelMode = useWikiStore((s) => s.novelMode)
   const conversations = useChatStore((s) => s.conversations)
@@ -758,7 +688,6 @@ function ConversationTabs({ onBeforeDelete }: { onBeforeDelete: (conversationId:
   }
 
   function deleteConversationNow(convId: string) {
-    onBeforeDelete(convId)
     const runId = useChatStore.getState().runStates[convId]?.runId
     chatConversationRunRegistry.abort(convId)
     stopConversationRun(convId, runId)
@@ -1035,8 +964,6 @@ export function ChatPanel() {
   const [chapterSaveStatus, setChapterSaveStatus] = useState<string>("")
   const [deAiSkillWarningMessage, setDeAiSkillWarningMessage] = useState<string>("")
   const aiWorkflowMode = useWikiStore((s) => s.aiWorkflowMode)
-  // 快速与共创（discuss）模式都不支持「计划」开关：fast 直出，discuss 做方向推演。
-  const workflowModeSupportsPlan = aiWorkflowMode !== "fast" && aiWorkflowMode !== "discuss"
   const writingWebSearchEnabled = useWikiStore((s) => s.novelConfig.writingWebSearchEnabled)
   const setAiWorkflowMode = useWikiStore((s) => s.setAiWorkflowMode)
   const selectWorkflowMode = useCallback((mode: AiWorkflowMode) => {
@@ -1053,8 +980,6 @@ export function ChatPanel() {
   const [workflowModeDropdownStyle, setWorkflowModeDropdownStyle] = useState<CSSProperties | null>(null)
   const workflowModeDropdownRef = useRef<HTMLDivElement | null>(null)
   useUiTestAiMenuFocus(workflowModeDropdownOpen && Boolean(workflowModeDropdownStyle), workflowModeDropdownRef, workflowModeTriggerRef, setWorkflowModeDropdownOpen)
-  const planExecuteEnabled = useWikiStore((s) => s.planExecuteEnabled)
-  const setPlanExecuteEnabled = useWikiStore((s) => s.setPlanExecuteEnabled)
 
   const [isSavingChapter, setIsSavingChapter] = useState(false)
   // 故事框架绑定状态
@@ -1151,7 +1076,6 @@ export function ChatPanel() {
         chatEditModeEnabled,
         aiWorkflowMode,
         writingWebSearchEnabled,
-        planExecuteEnabled: aiWorkflowMode !== "fast" && aiWorkflowMode !== "discuss" && planExecuteEnabled,
         projectName: project?.name,
         bindingTitle: activeBinding?.framework.title,
       }),
@@ -1162,11 +1086,9 @@ export function ChatPanel() {
       novelMode,
       aiWorkflowMode,
       writingWebSearchEnabled,
-      planExecuteEnabled,
       project?.name,
     ],
   )
-  // 存储用户最近确认的章节计划，供 run_chapter_workflow 兜底注入，不依赖模型是否自觉传参。
   const selectedSkillsPromptRef = useRef("")
   const getSelectedSkillsPrompt = useCallback(() => {
     const value = selectedSkillsPromptRef.current.trim()
@@ -1254,7 +1176,7 @@ export function ChatPanel() {
     skillConfigLoaded: agentSkillConfigLoaded,
     skillConfig: agentSkillConfig,
     writingSkills: agentUserWritingSkills,
-  } = useAgentConfig(agentSystemPrompt, undefined, getSelectedSkillsPrompt, getWritingStyleIdOverride)
+  } = useAgentConfig(agentSystemPrompt, getSelectedSkillsPrompt, getWritingStyleIdOverride)
   const deferredReferenceText = useDeferredValue(referenceText)
   const liveContextUsage = useMemo(() => {
     const historyMessages = selectContextHistoryMessages(
@@ -1297,27 +1219,6 @@ export function ChatPanel() {
     agentSystemPrompt,
     deferredReferenceText,
   ])
-  const runChapterPlanSelfCheck = useCallback(async (planContent: string, contextPack?: ContextPack | null) => {
-    const trimmedPlan = planContent.trim()
-    if (!trimmedPlan) {
-      throw new Error("没有可自检的章节计划")
-    }
-    if (!agentConfig?.llmConfig) {
-      throw new Error("AI 会话模型尚未就绪，无法自检计划")
-    }
-
-    return runChapterPlanSelfCheckModel(
-      agentConfig.llmConfig,
-      trimmedPlan,
-      buildChapterPlanSelfCheckContext(contextPack ?? null),
-    )
-  }, [agentConfig?.llmConfig])
-  const runChapterPlanRevision = useCallback(async (planContent: string, selfCheckResult: string) => {
-    if (!agentConfig?.llmConfig) {
-      throw new Error("AI 会话模型尚未就绪，无法修订计划")
-    }
-    return runChapterPlanRevisionModel(agentConfig.llmConfig, planContent, selfCheckResult)
-  }, [agentConfig?.llmConfig])
   const agentDeAiSkills = useMemo(
     () => agentSkillConfig
       ? resolveAvailableDeAiSkills(agentSkillConfig).map(deAiSkillToUserSkill)
@@ -1411,55 +1312,7 @@ export function ChatPanel() {
     ],
     [agentSkillConfig, conversations, outlineConversations, writingStylePresets, characterSouls],
   )
-  // === Stage C: 章节计划确认 ===
-  const [pendingChapterPlans, setPendingChapterPlans] = useState<Record<string, {
-    planContent: string
-    fullContent: string
-    conversationId: string
-    contextPack?: ContextPack | null
-  }>>({})
-  const pendingChapterPlan = activeConversationId ? pendingChapterPlans[activeConversationId] : undefined
-  const chapterPlanResolversRef = useRef<Record<string, (action: "confirm" | "skip" | "cancel" | { modify: string }) => void>>({})
   const handleSendRef = useRef<ChatSend>(() => Promise.resolve())
-  const lastWritingTaskRouteRef = useRef<Record<string, TaskRouteResult>>({})
-
-  const closeChapterPlanDialog = useCallback(
-    (conversationId: string, action: "confirm" | "skip" | "cancel" | { modify: string }) => {
-      const resolver = chapterPlanResolversRef.current[conversationId]
-      delete chapterPlanResolversRef.current[conversationId]
-      setPendingChapterPlans((plans) => {
-        const { [conversationId]: _, ...rest } = plans
-        return rest
-      })
-      resolver?.(action)
-    },
-    [],
-  )
-
-  useEffect(() => {
-    return () => {
-      Object.values(chapterPlanResolversRef.current).forEach((resolver) => resolver("cancel"))
-      chapterPlanResolversRef.current = {}
-    }
-  }, [])
-
-  const requestChapterPlanConfirm = useCallback(
-    (planContent: string, fullContent: string, conversationId: string, contextPack?: ContextPack | null) => {
-      setPendingChapterPlans((plans) => ({
-        ...plans,
-        [conversationId]: { planContent, fullContent, conversationId, contextPack },
-      }))
-      return new Promise<"confirm" | "skip" | "cancel" | { modify: string }>((resolve) => {
-        chapterPlanResolversRef.current[conversationId] = resolve
-      })
-    },
-    [],
-  )
-  const cancelPendingChapterPlan = useCallback((conversationId: string) => {
-    if (chapterPlanResolversRef.current[conversationId]) {
-      closeChapterPlanDialog(conversationId, "cancel")
-    }
-  }, [closeChapterPlanDialog])
 
   const handleSaveAsChapter = useCallback(async (
     messageId: string,
@@ -1672,11 +1525,7 @@ export function ChatPanel() {
     ) => {
       const plainText = text.trim()
       const userVisibleText = (displayText ?? plainText).trim()
-      const planExecutionFollowup = isChapterPlanExecutionFollowup(plainText)
       const sessionWorkflowMode = sendOptions?.workflowMode ?? aiWorkflowMode
-      const planExecuteActive = sendOptions?.planExecuteActive ?? (
-        sessionWorkflowMode !== "fast" && sessionWorkflowMode !== "discuss" && planExecuteEnabled && !planExecutionFollowup
-      )
       setDeAiSkillWarningMessage("")
       // 新一轮对话清空上一轮的章节保存提示，避免「已保存为第X章」残留在新消息下方
       setChapterSaveStatus("")
@@ -1899,7 +1748,7 @@ export function ChatPanel() {
       let taskDirective = ""
       let goldenDirective = ""
       let prePluginResult: PrePluginChainResult | null = null
-      const shouldRunNovelPrePluginChain = novelMode && (sessionWorkflowMode !== "fast" || planExecuteActive)
+      const shouldRunNovelPrePluginChain = novelMode && sessionWorkflowMode !== "fast"
       const explicitSkills = collectExplicitSkills(
         availableAgentSkills,
         plainText,
@@ -1987,7 +1836,6 @@ export function ChatPanel() {
                     forceRequiredToolsImmediately: true,
                     retryAssistantMessageId: assistantMessage.id,
                     workflowMode: sessionWorkflowMode,
-                    planExecuteActive,
                   },
                 )
               },
@@ -2012,22 +1860,12 @@ export function ChatPanel() {
 
       // 用户气泡已经进列表。意图分类是网络调用，必须放在这次刷新之后，
       // 否则发送后要等分类接口返回，对话页才会出现这句话。
-      // 计划续写沿用上一轮已经分好的写作意图，不再打第二次模型。
       // 共创里用户已经点了「写这一章」：这是产品动作，直接钉成续写。
-      const savedWritingRoute = planExecutionFollowup
-        ? lastWritingTaskRouteRef.current[capturedConvId]
-        : undefined
-      let taskRoute = novelMode
-        ? (savedWritingRoute && WRITING_INTENTS.has(savedWritingRoute.intent)
-          ? savedWritingRoute
-          : await routeTask(plainText, sendOptions?.chapterDiscussPhase === "generation"
-            ? { classification: { intent: "continue_chapter", confidence: 1 }, signal: controller.signal }
-            : { llmConfig: agentConfig.llmConfig, signal: controller.signal }))
+      const taskRoute = novelMode
+        ? await routeTask(plainText, sendOptions?.chapterDiscussPhase === "generation"
+          ? { classification: { intent: "continue_chapter", confidence: 1 }, signal: controller.signal }
+          : { llmConfig: agentConfig.llmConfig, signal: controller.signal })
         : null
-
-      if (!planExecutionFollowup && taskRoute && WRITING_INTENTS.has(taskRoute.intent)) {
-        lastWritingTaskRouteRef.current[capturedConvId] = taskRoute
-      }
 
       if (controller.signal.aborted) {
         finishAgentSession()
@@ -2066,7 +1904,6 @@ export function ChatPanel() {
         chatEditModeEnabled,
         aiWorkflowMode: sessionWorkflowMode,
         writingWebSearchEnabled,
-        planExecuteEnabled: planExecuteActive,
         projectName: project?.name,
         bindingTitle: activeBinding?.framework.title,
         targetChapterNumber,
@@ -2075,7 +1912,7 @@ export function ChatPanel() {
         // pre-plugin 会注入找纲协议；仅在不会跑 pre-plugin 的章节写作路径由这里注入一次
         includeOutlineFindProtocol:
           shouldIncludeOutlineFindProtocol(effectiveTaskRoute?.intent) &&
-          !(novelMode && (sessionWorkflowMode !== "fast" || planExecuteActive)),
+          !(novelMode && sessionWorkflowMode !== "fast"),
         // 本轮是否真的带工具（关闭 Function Calling / 模型在黑名单时是 false）。
         // 提示词必须跟着降级成「直接生成内容」，否则它要求的工具根本不存在。
         toolsEnabled: agentSupportsTools,
@@ -2153,7 +1990,6 @@ export function ChatPanel() {
               taskRoute: effectiveTaskRoute,
               effectiveTaskRoute,
               aiWorkflowMode: sessionWorkflowMode,
-              planExecuteEnabled: planExecuteActive,
               availableSkills: availableAgentSkills,
               selectedSkills: explicitSkills,
               selectedFile,
@@ -2186,7 +2022,7 @@ export function ChatPanel() {
           stageId: "task_understanding",
           kind: "analysis",
           title: "当前执行路线",
-          content: buildWorkflowRouteActivityContent(sessionWorkflowMode, planExecuteActive, effectiveTaskRoute),
+          content: buildWorkflowRouteActivityContent(sessionWorkflowMode, effectiveTaskRoute),
           timestamp: now,
         })
         const skillEvent = createAgentActivityEvent({
@@ -2418,14 +2254,11 @@ export function ChatPanel() {
           novelMode,
           intent: effectiveTaskRoute?.intent,
           mode: sessionWorkflowMode,
-          planExecuteActive,
           enabledToolNames: prePluginResult?.enabledToolNames,
         })
-        // 计划阶段 / 共创讨论轮硬管控：不依赖任务路由/pre-plugin 是否命中，直接从本轮可用
-        // 工具中移除正文生成与写入类工具（模型的 tools 广告和文本工具调用解析
-        // 都以 config.tools 为准），从根上阻止模型跳过计划或推演直接产出正文。
+        // 共创讨论轮禁用正文生成与写入类工具，避免模型在方向推演时生成正文。
         const chapterDiscussActive = sessionWorkflowMode === "discuss"
-        const sessionTools = (planExecuteActive || chapterDiscussActive
+        const sessionTools = (chapterDiscussActive
           ? agentConfig.tools.filter(
               (tool) => tool.name !== "run_chapter_workflow" && tool.category !== "write",
             )
@@ -2629,14 +2462,6 @@ export function ChatPanel() {
             }
           })()
         }
-        // 计划模式：markDone/getCopyableAssistantContent 会重写消息内容
-        // （剥掉 HTML 注释等隐藏块），先捕获原始文本供后续计划提取使用，
-        // 避免 `<!-- chapter_plan -->` 标记在提取前就被剥掉。
-        const rawAssistantContentForPlan = planExecuteActive
-          ? useChatStore.getState().messages.find((m) => m.id === assistantMessage.id)?.content
-            || record.finalText
-            || ""
-          : ""
         if (contextTrace && effectiveTaskRoute && record.requiredToolDiagnostics) {
           const diagnosticTraceInfo = buildInitialContextTraceInfo(effectiveTaskRoute, prePluginResult, {
             workflowMode: sessionWorkflowMode,
@@ -2702,8 +2527,7 @@ export function ChatPanel() {
                   effectiveTaskRoute.intent === "continue_chapter")
               ) {
                 const chapterContent = finalContent
-                // 排除含 chapter_plan 标记的内容（计划本身不是正文）与空内容；
-                // 短完成句等未通过章节协议的结果也不进入自检/草稿校验。
+                // 兼容旧会话中的计划消息。写后检查仅接收通过章节协议的正文。
                 const hasChapterPlanMarker = chapterContent.includes("chapter_plan")
                 if (chapterContent && !hasChapterPlanMarker && chapterProtocolValid) {
                   void (async () => {
@@ -2806,73 +2630,9 @@ export function ChatPanel() {
             runId,
           )
         }
-        let chapterWritingPlanOnly = false
-        if (!hasAgentError && planExecuteActive) {
-          const storeState = useChatStore.getState()
-          const lastAssistant = storeState.messages.find(
-            (m) => m.id === assistantMessage.id && m.role === "assistant",
-          )
-          // 优先用重写前捕获的原始文本：markDone 会剥掉 HTML 注释，
-          // 只有原始文本还保留 `<!-- chapter_plan -->` 标记。
-          const fullContent = rawAssistantContentForPlan || lastAssistant?.content || record.finalText || ""
-          // 诊断日志：帮助定位"计划弹窗有时不出现"问题
-          const hasMarker = fullContent.includes("<!-- chapter_plan -->")
-          console.info("[PlanExecute] 检查计划提取", {
-            conversationId: capturedConvId,
-            fullContentLength: fullContent.length,
-            hasChapterPlanMarker: hasMarker,
-            messageContentLength: lastAssistant?.content?.length ?? 0,
-            recordFinalTextLength: record.finalText?.length ?? 0,
-          })
-          // 兜底：标记与关键词启发式都失败但确实有内容时，把整段回复
-          // 当作计划弹窗（用户可修改/跳过），替代静默不弹窗。仅对写作类
-          // 请求（或路由未识别的请求）生效，避免普通问答被误当计划。
-          const planFallbackEligible =
-            !effectiveTaskRoute || WRITING_INTENTS.has(effectiveTaskRoute.intent)
-          const extracted = extractChapterPlan(fullContent)
-            ?? (planFallbackEligible && fullContent.trim()
-              ? { plan: fullContent.trim(), body: "" }
-              : null)
-          chapterWritingPlanOnly = Boolean(extracted) || hasMarker
-          if (extracted) {
-            console.info("[PlanExecute] 计划提取成功，弹出确认对话框", {
-              planLength: extracted.plan.length,
-              bodyLength: extracted.body.length,
-            })
-            const action = await requestChapterPlanConfirm(
-              extracted.plan,
-              fullContent,
-              capturedConvId,
-              contextPack,
-            )
-            if (action === "cancel") {
-              recordChapterPlanExecutionCancelled(assistantMessage.id)
-            } else {
-              let followupText: string
-              let confirmedBlueprint: string | undefined
-              if (action === "confirm") {
-                confirmedBlueprint = extracted.plan
-                followupText = buildPlanConfirmMessage(extracted.plan)
-              } else if (action === "skip") {
-                followupText = buildPlanSkipMessage()
-              } else {
-                confirmedBlueprint = action.modify
-                followupText = buildPlanConfirmMessage(action.modify)
-              }
-              await handleSendRef.current(followupText, [], "执行已确认计划", confirmedBlueprint, capturedConvId)
-            }
-          } else {
-            console.warn("[PlanExecute] 计划提取失败，不弹窗", {
-              fullContentLength: fullContent.length,
-              hasChapterPlanMarker: hasMarker,
-              preview: fullContent.slice(0, 200),
-            })
-          }
-        }
         if (!hasAgentError) {
           void notifyChapterWritingOutcome({
             intent: effectiveTaskRoute?.intent,
-            planOnly: chapterWritingPlanOnly,
             ok: true,
             chapterNumber: effectiveTaskRoute?.chapterNumber,
           })
@@ -2928,11 +2688,9 @@ export function ChatPanel() {
       maxHistoryMessages,
       mode,
       novelMode,
-      planExecuteEnabled,
       project,
       projectPath,
       referenceDraftConversationId,
-      requestChapterPlanConfirm,
       requestSoulBindingTarget,
       selectedFile,
       setConversationInputDraft,
@@ -3077,7 +2835,7 @@ export function ChatPanel() {
       `按「${direction.title}」写这一章`,
       buildChapterDiscussPlanBlueprint(direction),
       conversationId,
-      { workflowMode: generationMode, planExecuteActive: false, chapterDiscussPhase: "generation" },
+      { workflowMode: generationMode, chapterDiscussPhase: "generation" },
     )
   }, [handleSend, markChapterDiscussDecision])
 
@@ -3098,7 +2856,7 @@ export function ChatPanel() {
       "换一批：重新推演后续方向",
       undefined,
       conversationId,
-      { workflowMode: "discuss", planExecuteActive: false, chapterDiscussPhase: "decision" },
+      { workflowMode: "discuss", chapterDiscussPhase: "decision" },
     )
   }, [handleSend, markChapterDiscussDecision])
 
@@ -3119,7 +2877,7 @@ export function ChatPanel() {
       `我的想法：${trimmed}`,
       undefined,
       conversationId,
-      { workflowMode: "discuss", planExecuteActive: false, chapterDiscussPhase: "decision" },
+      { workflowMode: "discuss", chapterDiscussPhase: "decision" },
     )
   }, [handleSend, markChapterDiscussDecision])
 
@@ -3197,7 +2955,7 @@ export function ChatPanel() {
 
   return (
     <div className="flex h-full flex-col overflow-hidden bg-background" data-ui-ai-panel="chapter">
-      <ConversationTabs onBeforeDelete={cancelPendingChapterPlan} />
+      <ConversationTabs />
 
       <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
         {!activeConversationId ? (
@@ -3349,35 +3107,6 @@ export function ChatPanel() {
                           document.body,
                         )}
                       </div>
-                      <Tooltip>
-                        <TooltipTrigger
-                          render={(
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              aria-pressed={planExecuteEnabled && workflowModeSupportsPlan}
-                              disabled={!workflowModeSupportsPlan}
-                              className={`h-8 shrink-0 rounded-full border px-2.5 text-xs ${
-                                planExecuteEnabled && workflowModeSupportsPlan
-                                  ? "border-primary bg-primary text-primary-foreground shadow-sm hover:bg-primary/90 hover:text-primary-foreground"
-                                  : "border-border text-muted-foreground hover:bg-accent hover:text-foreground"
-                              } disabled:cursor-not-allowed disabled:opacity-50`}
-                              onClick={() => setPlanExecuteEnabled(!planExecuteEnabled)}
-                              title={!workflowModeSupportsPlan ? "当前模式不支持计划，请切换到标准或严格模式" : planExecuteEnabled ? "关闭计划模式" : "开启计划模式"}
-                              aria-label={!workflowModeSupportsPlan ? "当前模式不支持计划，请切换到标准或严格模式" : planExecuteEnabled ? "关闭计划模式" : "开启计划模式"}
-                            />
-                          )}
-                        >
-                          <ListChecks className="mr-1 h-3.5 w-3.5" />
-                          计划
-                        </TooltipTrigger>
-                        <TooltipContent side="top" className="max-w-xs leading-5">
-                          {!workflowModeSupportsPlan
-                            ? "快速与共创模式下不支持计划；请切换到标准或严格模式。"
-                            : "开启后，本次写作会先创建计划，等待确认后再执行；可与标准、严格模式组合使用。"}
-                        </TooltipContent>
-                      </Tooltip>
                     </>
                   )}
                 </div>
@@ -3388,7 +3117,7 @@ export function ChatPanel() {
               clipboardScope={activeConversationId}
               value={referenceText}
               tokens={currentTokens}
-              disabled={isStreaming || Boolean(pendingChapterPlan)}
+              disabled={isStreaming}
               isStreaming={isStreaming}
               submitDisabled={concurrencyFull}
               submitDisabledReason={concurrencyFull ? concurrencyLimitReason : undefined}
@@ -3439,52 +3168,6 @@ export function ChatPanel() {
                           document.body,
                         )}
                       </div>
-                      {/*
-                        计划开关：常态只留图标，悬停显示「计划」两个字
-                        （与「文风写作」同一处理，用户要求）。
-
-                        ⚠️ 与「文风写作」那个按钮的处理**刻意不同**：
-                        文风按钮是纯图标、无描边无底色；计划按钮保留
-                        「开启时填充 primary」的激活态 —— 它是一个**开关**，
-                        去掉颜色就看不出当前是开还是关。所以只去掉文字与横向内边距，
-                        收成方正的小方块（`p-0` + 固定宽高；原来的 `px-2` 是给
-                        「图标 + 文字」留的，留着会让图标看起来偏左）。
-
-                        尺寸是 `h-7 w-7`（28px），不是 32px：用户反馈图标之间隔得太远。
-                        28px 与同一行里本来就是 28px 的「上下文用量」圆环和 @ 按钮统一，
-                        配合左组 `gap-0.5`（见 ReferenceInput.tsx）把墨迹间距从约 25px
-                        收到约 16px。大纲面板的同名按钮用同一组数值，两边必须一致。
-
-                        三个悬停/无障碍出口各司其职，缺一不可：
-                        · `title="计划"` —— 常态悬停就显示这两个字（用户明确要求）；
-                        · `aria-label` —— 随「开启 / 关闭 / 模式不支持」三态变化。
-                          它**不能**跟着 `title` 一起退化成一个光秃秃的「计划」：
-                          图标按钮没有可见文字，读屏用户唯一的动作线索就是这里，
-                          而开关必须说清「点了会怎样」。
-                        · `TooltipContent` —— 第一行是「计划」（与 title 一致），
-                          第二行随状态给出解释。
-                        ⚠️ 别把三者合并：它们分别服务「看清楚是什么」「知道点了会怎样」
-                        「了解当前是什么状态」。
-
-                        ⚠️ 上面 `{false && novelMode && ...}` 那块里有一个同名按钮，
-                        它是**死代码、从不渲染**，不要再去改它（本轮已踩过一次，
-                        改了没有任何效果，还会让回归测试定位到错误的元素）。
-                      */}
-                      <Tooltip>
-                        <TooltipTrigger render={<Button type="button" variant="ghost" size="sm" data-guide="chapter.plan" aria-pressed={planExecuteEnabled && aiWorkflowMode !== "fast"} disabled={aiWorkflowMode === "fast"} className={`h-7 w-7 shrink-0 border-0 bg-transparent p-0 shadow-none ${planExecuteEnabled && aiWorkflowMode !== "fast" ? "text-primary" : "text-muted-foreground"} disabled:cursor-not-allowed disabled:opacity-50`} onClick={() => setPlanExecuteEnabled(!planExecuteEnabled)} title="计划" aria-label={aiWorkflowMode === "fast" ? "快速模式下不支持计划，请切换到标准或严格模式" : planExecuteEnabled ? "关闭计划模式" : "开启计划模式"} />}>
-                          <ListChecks className="h-3.5 w-3.5" />
-                        </TooltipTrigger>
-                        <TooltipContent side="top" className="max-w-xs leading-5">
-                          <div className="font-medium">计划</div>
-                          <div className="mt-0.5 text-muted-foreground">
-                            {aiWorkflowMode === "fast"
-                              ? "快速模式下不支持计划，请切换到标准或严格模式。"
-                              : planExecuteEnabled
-                                ? "已开启：本次写作会先创建计划，等待确认后再执行。"
-                                : "开启后，本次写作会先创建计划，等待确认后再执行；可与标准、严格模式组合使用。"}
-                          </div>
-                        </TooltipContent>
-                      </Tooltip>
                       {/*
                         丁-2「文风写作」：文风入口。
 
@@ -3552,19 +3235,6 @@ export function ChatPanel() {
             onClose={() => setReferencePickerOpen(false)}
           />
         </div>
-        {pendingChapterPlan && (
-          <ChapterPlanConfirmDialog
-            open
-            planContent={pendingChapterPlan.planContent}
-            aiWorkflowMode={aiWorkflowMode}
-            onConfirm={() => closeChapterPlanDialog(pendingChapterPlan.conversationId, "confirm")}
-            onSkip={() => closeChapterPlanDialog(pendingChapterPlan.conversationId, "skip")}
-            onModify={(modified) => closeChapterPlanDialog(pendingChapterPlan.conversationId, { modify: modified })}
-            onSelfCheck={(planContent) => runChapterPlanSelfCheck(planContent, pendingChapterPlan.contextPack)}
-            onRevisePlan={runChapterPlanRevision}
-            onCancel={() => closeChapterPlanDialog(pendingChapterPlan.conversationId, "cancel")}
-          />
-        )}
         {/* 丁-4：`@某人灵魂` 的确认步骤（选绑给哪个小说人物）。由 hook 持有，
             打开时 `handleSend` 正 await 它，所以关闭（取消）就等于中止本次发送。 */}
         {soulBindingDialog}

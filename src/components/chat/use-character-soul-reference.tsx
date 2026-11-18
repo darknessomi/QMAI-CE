@@ -2,9 +2,7 @@
  * 丁-4：把项目里的**角色灵魂**（`CharacterAura`）投影成两个 UI 用途：
  *
  * 1. 引用弹窗「角色灵魂」子 tab 的条目来源（`souls`）；
- * 2. 发送前的**确认步骤**（`requestSoulBindingTarget` + `soulBindingDialog`）——
- *    把「问用户绑给谁」做成一个可以 `await` 的请求，形状与
- *    `chat-panel.tsx` 里 `requestChapterPlanConfirm`（`resolverRef` + state）一致。
+ * 2. 发送前通过 `requestSoulBindingTarget` 等待用户确认绑定对象，由 `soulBindingDialog` 显示确认弹窗。
  *
  * ⚠️ 这里**只读**：`listCharacterAuras` 读 `.qmai/character-aura.json`，
  * 写盘一律由 `message-scoped-soul-binding.ts` 在用户确认之后做。

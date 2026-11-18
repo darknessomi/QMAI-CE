@@ -1,11 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { isChapterWritingIntent } from "@/lib/novel/task-router"
 import {
   buildChapterWritingNotification,
   ensureSystemNotificationPermission,
   notifyChapterWritingOutcome,
   resolveNotificationSound,
-  shouldNotifyChapterWriting,
   type SystemNotificationBindings,
 } from "./system-notification"
 
@@ -35,23 +33,6 @@ describe("resolveNotificationSound", () => {
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
       "Win32",
     )).toBe("Default")
-  })
-})
-
-describe("shouldNotifyChapterWriting", () => {
-  it("allows chapter writing intents", () => {
-    expect(isChapterWritingIntent("write_chapter")).toBe(true)
-    expect(isChapterWritingIntent("continue_chapter")).toBe(true)
-    expect(isChapterWritingIntent("rewrite_chapter")).toBe(true)
-    expect(isChapterWritingIntent("polish_chapter")).toBe(true)
-    expect(shouldNotifyChapterWriting({ intent: "write_chapter" })).toBe(true)
-  })
-
-  it("skips non-writing intents and plan-only turns", () => {
-    expect(isChapterWritingIntent("generate_outline")).toBe(false)
-    expect(isChapterWritingIntent("general_chat")).toBe(false)
-    expect(shouldNotifyChapterWriting({ intent: "generate_outline" })).toBe(false)
-    expect(shouldNotifyChapterWriting({ intent: "write_chapter", planOnly: true })).toBe(false)
   })
 })
 
@@ -143,11 +124,10 @@ describe("notifyChapterWritingOutcome", () => {
     })
   })
 
-  it("does not send for plan-only chapter writing", async () => {
+  it.each(["generate_outline", "general_chat"])("does not send for %s", async (intent) => {
     const testBindings = bindings()
     await notifyChapterWritingOutcome({
-      intent: "write_chapter",
-      planOnly: true,
+      intent,
       ok: true,
     }, testBindings)
     expect(testBindings.sendNotification).not.toHaveBeenCalled()

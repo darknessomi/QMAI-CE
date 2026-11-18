@@ -45,7 +45,7 @@ const outlineChapter: GuideChapter = {
 const chapterChapter: GuideChapter = {
   id: "chapter",
   title: "进入章节写作",
-  summary: "章节模式、标题栏五枚功能、计划与文风、示例正文。",
+  summary: "章节模式、标题栏五枚功能、文风、示例正文。",
 }
 
 const featuresChapter: GuideChapter = {
@@ -598,17 +598,6 @@ export const GUIDE_STEPS: GuideStep[] = [
     padding: 10,
   },
   {
-    id: "chapter-plan",
-    chapter: "chapter",
-    title: "计划模式",
-    body: [
-      "输入框上方的清单按钮。开启后，这一次写作会**先出计划、等你看过并确认，再动笔**。",
-      "适合长章、多线并进、或者你只想先看结构不想它直接写完。可与标准、严格模式组合；快速与共创模式下不支持。",
-    ],
-    anchor: "chapter.plan",
-    padding: 10,
-  },
-  {
     id: "chapter-style",
     chapter: "chapter",
     title: "文风模式",
@@ -740,7 +729,6 @@ export const GUIDE_ANCHORS = [
   "chapter.view-memory",
   "chapter.font",
   "chapter.event-outline",
-  "chapter.plan",
   "chapter.style",
   "chat.reference",
 ] as const

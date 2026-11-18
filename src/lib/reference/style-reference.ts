@@ -4,8 +4,7 @@
  * 为什么单独一个模块：**解析口径必须只有一处**。产出端（引用弹窗里的条目，
  * `chat-panel.tsx` 的 `createSkillProvider` getter）与消费端（同文件 `handleSend` 与
  * `getWritingStyleIdOverride`）隔着整个 UI，各写一份就会出现「条目里带了 id、
- * 消费端读的是另一个字段」这种**看着接上、其实断开**的通道
- * —— 本仓库已经有过一条 `getPlanBlueprint` 形状的死通道（只注册了消费者、没有产出者）。
+ * 消费端读的是另一个字段」这种断开的传递路径。
  *
  * 取哪个字段：文风条目和其它技能共用 `providers.ts` 的 `createSkillProvider`，
  * 那条透传写的是 `skillId: skill.id`，所以**预设 id 就落在 `ReferenceToken.skillId`**，

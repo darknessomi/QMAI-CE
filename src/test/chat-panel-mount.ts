@@ -25,12 +25,10 @@ const wikiState = {
   chatEditModeEnabled: false,
   selectedFile: null,
   aiWorkflowMode: "standard",
-  planExecuteEnabled: false,
   novelConfig: { contextTokenBudget: 0 },
   setActiveView: vi.fn(),
   setAiChatModel: vi.fn(),
   setAiWorkflowMode: vi.fn(),
-  setPlanExecuteEnabled: vi.fn(),
   setChatEditModeEnabled: vi.fn(),
   setSelectedFile: vi.fn(),
   // 丁-4：临时角色灵魂绑定写入/还原后靠 dataVersion 触发重新读盘。

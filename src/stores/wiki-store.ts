@@ -773,7 +773,6 @@ interface WikiState {
   /** 切入「共创」前所处的模式；共创选定方向后按它生成正文（默认 standard）。 */
   aiWorkflowModeBeforeDiscuss: AiWorkflowMode
   outlineWorkflowMode: OutlineWorkflowMode
-  planExecuteEnabled: boolean
   novelConfig: NovelConfig
   /** 社区摘要生成错误信息（UI 层监听并弹窗提示） */
   communitySummaryError: string | null
@@ -876,7 +875,6 @@ interface WikiState {
   setChatEditModeEnabled: (enabled: boolean) => void
   setAiWorkflowMode: (mode: AiWorkflowMode) => void
   setOutlineWorkflowMode: (mode: OutlineWorkflowMode) => void
-  setPlanExecuteEnabled: (enabled: boolean) => void
   setNovelConfig: (config: Partial<NovelConfig>) => void
   setCommunitySummaryError: (error: string | null) => void
   setPersonaSkillLearningError: (error: string | null) => void
@@ -1131,7 +1129,6 @@ export const useWikiStore = create<WikiState>((set) => ({
   aiWorkflowMode: DEFAULT_AI_WORKFLOW_MODE,
   aiWorkflowModeBeforeDiscuss: DEFAULT_AI_WORKFLOW_MODE,
   outlineWorkflowMode: DEFAULT_OUTLINE_WORKFLOW_MODE,
-  planExecuteEnabled: false,
   novelConfig: { ...DEFAULT_NOVEL_CONFIG },
   communitySummaryError: null,
   personaSkillLearningError: null,
@@ -1197,7 +1194,6 @@ export const useWikiStore = create<WikiState>((set) => ({
           : aiWorkflowMode,
     })),
   setOutlineWorkflowMode: (outlineWorkflowMode) => set({ outlineWorkflowMode }),
-  setPlanExecuteEnabled: (planExecuteEnabled) => set({ planExecuteEnabled }),
   setNovelConfig: (config) => set((state) => ({
     novelConfig: { ...state.novelConfig, ...config },
     ...(config.defaultLlmModel !== undefined
