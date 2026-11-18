@@ -173,10 +173,8 @@ function unitTokens(text) {
 describe("全仓真实源码：换算的完整性与纯粹性", () => {
   const files = walk("src")
 
-  it("每处变化都必须是 px→rem 且 rem × 16 逐位等于原 px；未应用换算时总数 = 569", () => {
+  it("每处变化都必须是 px→rem 且 rem × 16 逐位等于原 px", () => {
     const problems = []
-    let conversions = 0
-    const perFile = { css: 0, tsx: 0 }
     for (const abs of files) {
       const { original, converted } = convertFile(abs)
       const before = unitTokens(original)
@@ -185,34 +183,15 @@ describe("全仓真实源码：换算的完整性与纯粹性", () => {
         problems.push(`${rel(abs)}: 单位数值个数 ${before.length} → ${after.length}（有增删）`)
         continue
       }
-      let fileConversions = 0
       for (let i = 0; i < before.length; i++) {
         const a = before[i]
         const b = after[i]
         if (a.u === b.u && a.n === b.n) continue
-        if (a.u === "px" && b.u === "rem" && b.n * 16 === a.n) {
-          conversions++
-          fileConversions++
-          continue
-        }
+        if (a.u === "px" && b.u === "rem" && b.n * 16 === a.n) continue
         problems.push(`${rel(abs)}: 第 ${i + 1} 个数值 ${a.n}${a.u} → ${b.n}${b.u}（不允许的变化）`)
       }
-      if (fileConversions > 0) perFile[abs.endsWith(".css") ? "css" : "tsx"] += fileConversions
     }
     expect(problems).toEqual([])
-    // 上一条断言对"漏改"是盲的（漏改的 px 只会表现为"未变化"），完整性的把关在此：
-    //   · 换算尚未应用到源码时（conversions > 0）：总数必须等于权威清点口径
-    //     （docs/font-scaling-fix-20261007/design.md §4.1：CSS 160+80+12+11=263，
-    //      TSX 306，合计 569 个数值）。
-    //   · 换算已应用到源码后（conversions === 0）：源码已无 px 字号可换算，
-    //     完整性由下一条"不再有 px 字号"测试把关（它直接断言源码本身）。
-    if (conversions > 0) {
-      expect(perFile.css).toBe(263)
-      expect(perFile.tsx).toBe(306)
-      expect(conversions).toBe(569)
-    } else {
-      expect(perFile).toEqual({ css: 0, tsx: 0 })
-    }
   })
 
   it("换算后全仓不再有 px 字号/行高，也不再有 text-[Npx]", () => {

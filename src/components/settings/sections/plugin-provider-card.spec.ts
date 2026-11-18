@@ -63,10 +63,9 @@ import { getFileSize, readFile } from "@/commands/fs"
 import { pluginsApi } from "@/lib/plugins/api"
 import {
   getPluginProviderOverride,
-  setPluginProviderOverride,
   __resetPluginProviderOverrideCacheForTests,
 } from "@/lib/plugins/provider-overrides"
-import { useWikiStore, type LlmConfig } from "@/stores/wiki-store"
+import type { LlmConfig } from "@/stores/wiki-store"
 import {
   MAX_CREDENTIAL_FILE_BYTES,
   parseAccountList,

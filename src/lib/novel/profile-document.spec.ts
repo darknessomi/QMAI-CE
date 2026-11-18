@@ -369,8 +369,8 @@ describe("结构化数据 → Markdown 反推", () => {
           heading: "与其他势力",
           kind: "mixed",
           blocks: [
-            { kind: "list", items: ["与漕帮井水不犯河水"] },
-            { kind: "table", head: ["势力", "关系"], rows: [["漕帮", "互不干涉"]] },
+            { kind: "list", heading: "", items: ["与漕帮井水不犯河水"] },
+            { kind: "table", heading: "", head: ["势力", "关系"], rows: [["漕帮", "互不干涉"]] },
           ],
         },
       ],
@@ -514,7 +514,7 @@ describe("摊平式档案输出（模型自创顶层键）", () => {
 
   it("摊平后仍渲染不出空档案", () => {
     const doc = normalizeProfileDocument(flat)!
-    const html = renderProfileDocumentHtml(doc, MIN_TEMPLATE)
+    const html = renderProfileDocumentHtml(doc, MIN_TEMPLATE, "测试 · 卡")
     expect(html).not.toContain("未包含档案数据")
     expect(html).toContain("阶段")
   })

@@ -73,7 +73,7 @@ describe("resolveModelConfig：复合键必须保留渠道", () => {
       "custom-abc/newer-model-not-in-list",
       { provider: "openai", model: "", apiKey: "" } as never,
       providerConfigs as never,
-    ) as Record<string, unknown>
+    )
 
     expect(resolved.model).toBe("newer-model-not-in-list")
     // 这两条是这次修复的核心：不能被退回官方 openai 端点

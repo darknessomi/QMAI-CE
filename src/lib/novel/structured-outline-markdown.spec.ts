@@ -14,7 +14,7 @@
 import { describe, expect, it } from "vitest"
 import { parseOutlineSaveRequests } from "./outline-save-request"
 import { SETTING_PROFILE_SECTIONS, type SettingProfileKey } from "./setting-profile-contracts"
-import { profileDocumentFromMarkdown } from "./profile-document"
+import { profileDocumentFromMarkdown, type ProfileSection } from "./profile-document"
 
 const OUTPUTS: Record<SettingProfileKey, { single: string; list: string; fileType: string; fileName: string; folder: string }> = {
   characterBriefs: { single: "characterProfileData", list: "characterProfiles", fileType: "character", fileName: "角色-楚白.md", folder: "人物小传" },
@@ -27,14 +27,15 @@ const OUTPUTS: Record<SettingProfileKey, { single: string; list: string; fileTyp
   locationsOutline: { single: "locationProfileData", list: "locationProfiles", fileType: "setting", fileName: "竹屋.md", folder: "设定" },
 }
 
-function buildSections(key: SettingProfileKey) {
-  return SETTING_PROFILE_SECTIONS[key].map((spec, index) => {
+function buildSections(key: SettingProfileKey): ProfileSection[] {
+  return SETTING_PROFILE_SECTIONS[key].map<ProfileSection>((spec, index) => {
     if (spec.kind === "table") {
+      const head = spec.head!
       return {
         kind: "table",
         heading: spec.heading,
-        head: spec.head,
-        rows: [spec.head!.map((_, cell) => `CELL_${index}_${cell}_值`)],
+        head,
+        rows: [head.map((_, cell) => `CELL_${index}_${cell}_值`)],
       }
     }
     if (spec.kind === "list") {
@@ -409,18 +410,7 @@ describe("章纲：标题自带章号时不重复", () => {
  * 「设定卡片流」：页头从「力量体系」变成「设定」，等级阶梯加粗列、代价矩阵危险色表头、
  * 专属头图全部消失。用户看到的是「同一批八份设定，有的长得像卡，有的像清单」。
  */
-describe("八类设定：HTML 走各自的专属模板", () => {
-  const EYEBROW: Record<SettingProfileKey, string> = {
-    characterBriefs: "人物小传 · 角色卡",
-    organizationsOutline: "组织势力 · 势力卡",
-    powerSystem: "力量体系 · 体系卡",
-    goldenFinger: "金手指 · 能力卡",
-    backgroundSetting: "背景设定 · 背景卡",
-    geographySetting: "地理设定 · 地理卡",
-    locationsOutline: "地点设定 · 地点卡",
-    foreshadowingPlan: "伏笔计划 · 伏笔台账",
-  }
-
+describe("八类设定：结构化保存与 HTML 附件", () => {
   /** 文件名与 tag 都不含任何分项关键词——真实场景（提示词要求「文件名格式：名称.md」） */
   function replyWithoutKeywords(key: SettingProfileKey) {
     const output = OUTPUTS[key]

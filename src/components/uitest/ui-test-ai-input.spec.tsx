@@ -87,17 +87,22 @@ describe("测试版 AI 模型选择布局", () => {
     expect(css).toMatch(/\[data-ui-ai-composer\] \[aria-label="发送消息"\] \{[^}]*display:\s*inline-flex;[^}]*align-items:\s*center;[^}]*justify-content:\s*center;[^}]*width:\s*32px;[^}]*height:\s*32px;[^}]*padding:\s*0;/s)
   })
 
-  /*
-   * 上面那条是 CSS 文本契约，量不出"到底有没有换行"。
-   * 真实换行行为由浏览器几何脚本守：docs/ai-composer-nowrap-20261007/check-composer.mjs
-   * （8 个宽度实测同一行 + 模型框随之变窄 + 3 条负向对照）。
-   * 这里只做一件事：确认那条脚本还在，且没有被悄悄删掉。
-   */
-  it("底栏收窄行为由真实浏览器脚本守着（jsdom 量不出布局）", () => {
-    const script = readFileSync(resolve(__dirname, "../../../docs/ai-composer-nowrap-20261007/check-composer.mjs"), "utf8")
-    expect(script).toContain("flex-wrap:wrap")
-    expect(script).toContain("同一行")
-    expect(script).toContain("模型框确实收窄")
+  it("左侧控件、引用和右侧控件按收窄样式所需的顺序渲染", async () => {
+    await renderInput(true)
+    await act(async () => root.render(
+      <ReferenceInput
+        tokens={[]}
+        onSubmit={() => {}}
+        leftFooterControls={<button>上下文</button>}
+        rightControls={<button>模型</button>}
+      />,
+    ))
+    const footer = host.querySelector("[data-reference-input-footer]")
+    expect(footer?.children).toHaveLength(3)
+    expect(footer?.firstElementChild?.textContent).toBe("上下文")
+    expect(footer?.children[1]?.getAttribute("aria-label")).toBe("引用内容")
+    expect(footer?.lastElementChild?.textContent).toContain("模型")
+    expect(footer?.lastElementChild?.querySelector('[aria-label="发送消息"]')).toBeInstanceOf(HTMLButtonElement)
   })
 })
 

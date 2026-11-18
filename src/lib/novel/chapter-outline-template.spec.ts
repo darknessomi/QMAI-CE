@@ -575,14 +575,7 @@ describe("chapter-outline-template 卷纲交叉校验", () => {
         id: 1,
         range,
         title: "雨夜无我",
-        deliver: "",
-        gift: "",
-        mid: "",
-        twist: "",
-        hook: "",
-        climax: "",
         beats,
-        line: { main: "", sub: [], daily: { v: "", u: "" } },
         st: [],
       }],
     }
@@ -807,7 +800,7 @@ describe("章纲数据 → Markdown 反推", () => {
       handover: { nextStart: "", nextSolve: "", nextDelay: "", nextMood: "", nextHook: "" },
       checks: [],
     }
-    const text = renderChapterOutlineMarkdown({ title: "稀疏章纲", chapters: [sparse], words: 0 })
+    const text = renderChapterOutlineMarkdown({ ...buildData(1), title: "稀疏章纲", chapters: [sparse], words: 0 })
     expect(text).not.toContain("未填")
     // 必要条件四个值全空 ⇒ 整张「类型 / 内容」表不导出
     expect(text).not.toContain("| 类型 | 内容 |")

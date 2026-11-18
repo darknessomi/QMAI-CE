@@ -106,14 +106,15 @@ describe("streamAntigravityCli", () => {
       '{"event":"result","result":{"status":"ERROR","response":"","error":"invalid model selection"}}',
     ]
     scripted.exit = { code: 1, stderr: "" }
-    let error: Error | null = null
+    const onError = vi.fn<(error: Error) => void>()
     await streamAntigravityCli(config, [{ role: "user", content: "ping" }], {
       onToken: () => {},
       onDone: () => {},
-      onError: (err) => { error = err },
+      onError,
     })
-    expect(error).not.toBeNull()
-    expect(error?.message).toContain("invalid model selection")
+    expect(onError).toHaveBeenCalledWith(expect.objectContaining({
+      message: expect.stringContaining("invalid model selection"),
+    }))
   })
 
   it("explains a headless command denial without suggesting skipped permissions", () => {

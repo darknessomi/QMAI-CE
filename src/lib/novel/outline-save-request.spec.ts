@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
 import {
-  attachOutlineHtml,
   characterDraftsToSaveRequests,
   excludeEventOutlineSaveRequests,
   extractBodyContent,
@@ -8,22 +7,11 @@ import {
   formatOutlineSaveParseFeedback,
   mergeOutlineSaveRequests,
   parseOutlineSaveRequests,
-  renderOutlineHtmlForPath,
   saveOutlineSaveRequests,
   splitConfirmRequiredSaveRequests,
   type OutlineSaveRequest,
-  type OutlineSaveRequestFileType,
 } from "./outline-save-request"
 import { getDefaultFolderForOutlineFileType } from "./outline-save-classifier"
-
-/**
- * `attachOutlineHtml` 的入参形状，直接由生产签名推导（`Parameters<...>[0]`）。
- *
- * 该函数的返回类型就是泛型 T，所以必须显式标注调用点：直接传对象字面量时，
- * T 会被推成 `{ fileType: string; content: string }` 这类没有 htmlContent 的窄类型，
- * 测试就访问不到生产函数实际会补上的那个字段了。
- */
-type AttachOutlineHtmlInput = Parameters<typeof attachOutlineHtml>[0]
 
 const SAMPLE_CHAPTER_OUTLINE = [
   "# 章纲-第001章",

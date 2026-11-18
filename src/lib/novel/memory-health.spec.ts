@@ -24,7 +24,7 @@ const mockListSnapshots = vi.mocked(listSnapshots)
 
 const projectPath = "E:/Novel"
 
-function chapterFile(name: string, chapterNumber?: number) {
+function chapterFile(name: string) {
   return {
     name,
     path: `${projectPath}/wiki/chapters/${name}`,

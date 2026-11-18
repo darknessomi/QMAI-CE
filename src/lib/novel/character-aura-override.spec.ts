@@ -33,8 +33,8 @@ function createMemoryFs(initial: Record<string, string> = {}) {
     writeFileAtomic: vi.fn(async (path: string, content: string) => {
       files.set(path, content)
     }),
-    createDirectory: vi.fn(async () => undefined),
-    listDirectory: vi.fn(async () => []),
+    createDirectory: vi.fn(async (_path: string) => undefined),
+    listDirectory: vi.fn(async (_path: string) => []),
     exists: vi.fn(async (path: string) => files.has(path)),
     removeFile: vi.fn(async (path: string) => {
       files.delete(path)

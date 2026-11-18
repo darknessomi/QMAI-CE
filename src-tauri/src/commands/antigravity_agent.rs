@@ -1608,17 +1608,4 @@ mod tests {
         assert!(mcp_reply.contains("第三章正文") && mcp_reply.contains("isError\":false"));
         proxy.shutdown();
     }
-
-    /// 手动联调：`cargo test --lib live_proxy_for_manual_e2e -- --ignored --nocapture`
-    #[test]
-    #[ignore]
-    fn live_proxy_for_manual_e2e() {
-        let proxy = ensure_proxy().unwrap();
-        std::fs::write(
-            "/tmp/qmai-agy-proxy.json",
-            json!({"base": proxy.base_url(), "token": proxy.token}).to_string(),
-        )
-        .unwrap();
-        thread::sleep(Duration::from_secs(1500));
-    }
 }

@@ -4,6 +4,7 @@ import {
   classifyTaskIntent,
   parseTaskIntentClassification,
   TASK_INTENT_CLASSIFIER_SYSTEM,
+  type ClassifyTaskIntentInput,
 } from "./task-intent-classifier"
 
 const llmConfig = {
@@ -36,7 +37,7 @@ describe("parseTaskIntentClassification", () => {
 
 describe("classifyTaskIntent", () => {
   it("makes one structured call and parses the model JSON", async () => {
-    const stream = vi.fn(async (_config, _messages, callbacks) => {
+    const stream = vi.fn<NonNullable<ClassifyTaskIntentInput["streamChat"]>>(async (_config, _messages, callbacks) => {
       callbacks.onToken('{"intent":"foreshadowing_query","confidence":0.77}')
       callbacks.onDone()
     })

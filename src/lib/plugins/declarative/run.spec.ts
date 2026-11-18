@@ -190,7 +190,7 @@ describe("runDeclarativeAction", () => {
   it("生成过程中被中止：抛可识别错误，而不是笼统的失败", async () => {
     const controller = new AbortController()
     const llm: LlmCaller = {
-      call(_input, _onDelta, callSignal) {
+      call() {
         controller.abort()
         return Promise.reject(Object.assign(new Error("aborted"), { name: "AbortError" }))
       },
@@ -540,15 +540,16 @@ describe("action 指定模型（model.target）", () => {
    * 这条链路解决的是「同一个插件，用户切了模型，产出就变了」的问题：
    * 作者想固定用某个模型（起名要风格一致），而不是碰运气跟当前模型走。
    */
-  function captureLlm(): LlmCaller & { calls: Array<{ system: string; user: string; modelOverride?: string }> } {
-    const calls: Array<{ system: string; user: string; modelOverride?: string }> = []
+  function captureLlm() {
+    type Input = Parameters<LlmCaller["call"]>[0]
+    const calls: Input[] = []
     return {
       calls,
-      async call(input) {
-        calls.push(input as { system: string; user: string; modelOverride?: string })
+      async call(input: Input) {
+        calls.push(input)
         return { text: "ok" }
       },
-    } as never
+    }
   }
 
   const baseDeps = (llm: LlmCaller) =>

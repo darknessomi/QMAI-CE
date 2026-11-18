@@ -131,7 +131,7 @@ describe("outline save draft", () => {
     expect(isSaveableOutlineDeliverable("好的，我明白了。")).toBe(false)
   })
 
-  it("分类保存的章纲请求也会补上 HTML（此前只给卷纲补，导致章纲保存提示未生成 HTML）", () => {
+  it("分类保存的章纲保留模型提供的完整 HTML，纯 JSON 不生成网页", () => {
     const content = [
       "# 章纲-第46章：第一次冷处理",
       "",
@@ -153,15 +153,30 @@ describe("outline save draft", () => {
       "```",
     ].join("\n")
 
-    const built = buildClassifiedOutlineSaveRequest({
+    const input = {
       content,
       sourceIntent: "生成完成后自动保存",
       sourceHint: "编写第 46 章章纲",
+    }
+    const markdownOnly = buildClassifiedOutlineSaveRequest(input)
+    expect(markdownOnly?.classification.fileType).toBe("chapter-outline")
+    expect(markdownOnly?.request.htmlContent).toBeUndefined()
+
+    const built = buildClassifiedOutlineSaveRequest({
+      ...input,
+      content: [
+        content,
+        "",
+        "```html",
+        "<html><body><details><summary>第一次冷处理</summary><p>早会冲突</p></details></body></html>",
+        "```",
+      ].join("\n"),
     })
 
     expect(built?.classification.fileType).toBe("chapter-outline")
     expect(built?.request.htmlContent).toContain("<html")
     expect(built?.request.htmlContent).toContain("<details")
+    expect(built?.request.htmlContent).toContain("早会冲突")
   })
 })
 

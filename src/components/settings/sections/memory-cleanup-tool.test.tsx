@@ -7,8 +7,10 @@ import { DEFAULT_MEMORY_MAINTENANCE, loadMemoryMaintenanceSettings } from "@/lib
 
 const io = vi.hoisted(() => ({
   scan: vi.fn(), apply: vi.fn(async () => 1), undo: vi.fn(async () => {}), keep: vi.fn(async () => {}),
-  plan: vi.fn(async () => ({ issues: [], counts: { nonPositive: 0, unupdated: 0, stale: 0, total: 0 } })),
-  applyRules: vi.fn(async () => 0),
+  plan: vi.fn<typeof import("@/lib/novel/memory-cleanup-runner").planMemoryCleanupByRules>(async () => ({
+    issues: [], counts: { nonPositive: 0, unupdated: 0, stale: 0, total: 0 },
+  })),
+  applyRules: vi.fn<typeof import("@/lib/novel/memory-cleanup-runner").applyMemoryCleanupRules>(async () => 0),
   save: vi.fn(async (_path: string, patch: object) => ({ version: 1, lastRemindedAt: 0, ...patch })),
 }))
 vi.mock("@/lib/novel/memory-cleanup-runner", () => ({
@@ -68,9 +70,12 @@ it("一键清理预填推荐规则，确认后才删除", async () => {
   expect(container.querySelector<HTMLInputElement>('[data-testid="stale-chapter-gap"]')?.value).toBe(String(RECOMMENDED_MEMORY_CLEANUP_RULES.staleChapterGap))
   expect(container.querySelector<HTMLInputElement>('[data-testid="rule-non-positive"]')?.checked).toBe(true)
   expect(container.querySelector<HTMLInputElement>('[data-testid="unupdated-chapter-gap"]')?.value).toBe(String(RECOMMENDED_MEMORY_CLEANUP_RULES.unupdatedChapterGap))
-  io.plan.mockResolvedValue({ issues: [{}], counts: { nonPositive: 2, unupdated: 3, stale: 4, total: 9 } })
-  io.applyRules.mockImplementation(async (_path, _rules, log: (message: string) => void) => {
-    log("正在清除旧向量 1/3")
+  io.plan.mockResolvedValue({
+    issues: [{ id: "rule-issue", kind: "noise", removeIds: ["r"], reason: "符合清理规则", confidence: "high" }],
+    counts: { nonPositive: 2, unupdated: 3, stale: 4, total: 9 },
+  })
+  io.applyRules.mockImplementation(async (_path, _rules, log) => {
+    log?.("正在清除旧向量 1/3")
     return 9
   })
   await click("一键清理")

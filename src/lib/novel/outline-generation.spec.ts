@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({
   refreshProjectStateMock: vi.fn(),
   hasUsableLlmMock: vi.fn(() => true),
   listDirectoryMock: vi.fn(),
-  readFileMock: vi.fn(async () => ""),
+  readFileMock: vi.fn(async (_path: string) => ""),
   outlineSnapshotExistsMock: vi.fn(),
   outlineStore: {
     tasks: [] as Array<{ id: string; projectPath: string; outlinePath: string | null; status: string; message: string; error: string | null; updatedAt: number }>,

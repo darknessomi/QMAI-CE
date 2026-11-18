@@ -725,6 +725,14 @@ fn extract_dir_from_zip(
 /// Windows: 检查盘符是否存在（如 "D:\" 存在）。
 /// Unix: 根目录 "/" 始终可达。
 fn is_path_root_accessible(path: &str) -> bool {
+    // Unix 不会把 Windows 的盘符或反斜杠根路径识别为根。
+    #[cfg(unix)]
+    if path.starts_with('\\')
+        || matches!(path.as_bytes(), [drive, b':', ..] if drive.is_ascii_alphabetic())
+    {
+        return false;
+    }
+
     let p = Path::new(path);
     match p.components().next() {
         Some(std::path::Component::Prefix(prefix)) => {
@@ -2867,9 +2875,10 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn test_is_path_root_accessible_unix_root() {
-        // Unix 根目录始终可达
+    fn test_is_path_root_accessible_on_unix() {
         assert!(is_path_root_accessible("/home/user/project"));
+        assert!(!is_path_root_accessible(r"D:\books\project"));
+        assert!(!is_path_root_accessible(r"\\server\share\project"));
     }
 
     #[cfg(windows)]

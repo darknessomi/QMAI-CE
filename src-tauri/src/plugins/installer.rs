@@ -370,26 +370,22 @@ pub fn download_urls_with(
 
 /// zip 条目路径安全校验；不安全返回 None
 pub fn is_safe_entry(name: &str) -> Option<PathBuf> {
-    let path = std::path::Path::new(name);
-    // 绝对路径一律拒：`C:\evil.js` 在 Windows 上会被 `dest.join()` 整个替换掉，
-    // 结果就是往 dest 之外写文件
-    if path.is_absolute() {
-        return None;
-    }
-    // 先按两种分隔符粗查 `..`：在 Unix 语义下 `\` 只是普通字符，`..\..\x` 会被
-    // `components()` 当成一个 Normal 段放过；而 Windows 解压路径两种分隔符都生效。
-    // 所以这里不依赖 `Component` 的父目录判定，自己切一遍兜住跨平台差异。
-    if name.split(['/', '\\']).any(|seg| seg == "..") {
+    // 按两种分隔符校验。Windows 盘符即使出现在子段，也会影响 PathBuf::push。
+    if name.starts_with(['/', '\\'])
+        || name.split(['/', '\\']).any(|part| {
+            part == ".."
+                || matches!(part.as_bytes(), [drive, b':', ..] if drive.is_ascii_alphabetic())
+        })
+    {
         return None;
     }
     let mut normalized = PathBuf::new();
-    for comp in path.components() {
+    for comp in Path::new(name).components() {
         match comp {
             Component::Normal(part) => normalized.push(part),
             // `./a` 之类的写法无害，跳过即可
             Component::CurDir => {}
-            // RootDir / Prefix / ParentDir：上面两道闸已挡掉绝大多数，
-            // 这里是不依赖平台实现细节的最后一道，宁可错杀
+            // RootDir / Prefix / ParentDir 均不属于相对归档条目。
             _ => return None,
         }
     }
@@ -1235,8 +1231,9 @@ mod tests {
         assert!(is_safe_entry("../evil.js").is_none());
         assert!(is_safe_entry("/abs/evil.js").is_none());
         assert!(is_safe_entry("a/../../evil.js").is_none());
-        // 依赖 Windows 路径语义（`C:` 会被解析成 Prefix 组件）。本项目只出 Windows 构建。
         assert!(is_safe_entry("C:\\evil.js").is_none());
+        assert!(is_safe_entry(r"\root\index.js").is_none());
+        assert!(is_safe_entry("repo-main/C:index.js").is_none());
         assert_eq!(
             is_safe_entry("repo-main/index.js").unwrap(),
             PathBuf::from("repo-main/index.js")
@@ -1593,7 +1590,7 @@ mod tests {
     }
 
     // ------------------------------------------------------------------
-    // 默认分支：不能猜 main（真实网络实测见 real_github_* 的 #[ignore] 用例）
+    // 默认分支解析与下载回退
     // ------------------------------------------------------------------
 
     use std::io::Write;
@@ -1815,69 +1812,5 @@ mod tests {
             err.contains("分支") || err.contains('@'),
             "错误信息要给可操作提示，实际：{err}"
         );
-    }
-
-    /// 真实网络验收：不带 @ref 安装 octocat/Hello-World（默认分支是 master）。
-    ///
-    /// 默认 `#[ignore]`：CI/离线环境打不了 GitHub。本地用
-    /// `cargo test plugins::installer::tests::real_github -- --ignored --nocapture` 跑，
-    /// 它同时验证「猜 main 会让所有候选通道 404」和「查默认分支后能下载成功」。
-    #[tokio::test]
-    #[ignore = "真实网络：需要能访问 api.github.com / codeload.github.com"]
-    async fn real_github_resolves_master_and_downloads_without_explicit_ref() {
-        let client = reqwest::Client::builder()
-            .connect_timeout(Duration::from_secs(5))
-            .timeout(Duration::from_secs(120))
-            .build()
-            .expect("构造 reqwest client");
-        let spec = parse_source("https://github.com/octocat/Hello-World").unwrap();
-        assert!(spec.git_ref_defaulted, "没写 @ref 应标记为默认");
-
-        // 旧行为复现：猜 main 的候选全部 404。只走 codeload（不走代理），
-        // 免得这条演示为了两个必然连不上的代理白等 10 秒。
-        let main_urls: Vec<String> =
-            candidates_for_base("codeload.github.com/", &spec.owner, &spec.repo, &["main"])
-                .into_iter()
-                .map(|(url, _)| url)
-                .collect();
-        let main_err = download(&client, &main_urls).await.unwrap_err();
-        println!("猜 main 的旧行为（应有明确失败提示）：\n{main_err}");
-
-        let resolved = resolve_default_branch(&client, &spec.owner, &spec.repo).await;
-        println!("API 解析出的默认分支：{resolved:?}");
-        match resolved.as_deref() {
-            // 有 API 额度时必须拿到 master：这证明「查」而不是「猜」
-            Some(branch) => assert_eq!(
-                branch, "master",
-                "octocat/Hello-World 的默认分支实测是 master"
-            ),
-            // API 会限流（未认证 60 次/小时，按出口 IP 共用）、也可能被网络挡住。
-            // 这时必须靠 main + master 兜底把安装走通 —— 这正是生产会遇到的形态。
-            None => println!("API 不可用（限流/网络），走 main + master 兜底"),
-        }
-
-        let refs: Vec<&str> = match resolved.as_deref() {
-            Some(branch) => vec![branch],
-            None => vec!["main", "master"],
-        };
-        let direct = candidates_for_base("codeload.github.com/", &spec.owner, &spec.repo, &refs);
-        let mut proxied = candidates_for_base("gh-proxy.com/", &spec.owner, &spec.repo, &refs);
-        proxied.extend(candidates_for_base(
-            "ghproxy.net/",
-            &spec.owner,
-            &spec.repo,
-            &refs,
-        ));
-        let (bytes, used_ref) = download_racing(&client, &direct, &proxied)
-            .await
-            .expect("查默认分支后应能下载成功");
-        println!(
-            "实际使用 ref：{used_ref}，下载 {} 字节，zip 魔数：{:?}",
-            bytes.len(),
-            &bytes[..4]
-        );
-        assert_eq!(used_ref, "master");
-        assert!(bytes.starts_with(b"PK\x03\x04"), "下载结果应是真 zip");
-        assert!(bytes.len() > 100, "不应是空包或错误页");
     }
 }

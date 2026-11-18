@@ -1,5 +1,5 @@
-// 兼容回归：非 Gemini 搜索后端的上下文文本、工具结果、时间线显示必须与 main 上（接入 Gemini 之前）逐字节一致。
-// golden 由 origin/main 的代码生成（见 PR 描述），这里在当前代码上重新生成并逐项比较。
+// 兼容回归：非 Gemini 搜索保留有结果的上下文、工具结果和时间线格式。
+// 空搜索结果只留在时间线，不占用写作上下文。
 import { describe, expect, it, vi } from "vitest"
 import golden from "./__fixtures__/search-compat-golden.json"
 import { extractSearchDisplayDetail, splitToolResultForModel } from "@/lib/search-display"
@@ -12,8 +12,8 @@ const results = [
   { title: "黄蓉 - 维基百科", url: "https://zh.wikipedia.org/wiki/%E9%BB%84%E8%93%89", snippet: "黄蓉，金庸武侠小说《射雕英雄传》女主角。", source: "zh.wikipedia.org" },
   { title: "桃花岛", url: "https://example.com/taohuadao", snippet: "桃花岛位于东海。", source: "example.com" },
 ]
-describe("非 Gemini 搜索后端兼容（对照 main 生成的 golden）", () => {
-it("上下文、工具结果、工作流显示与 main 逐字节一致", async () => {
+describe("非 Gemini 搜索后端兼容", () => {
+it("上下文省略空结果，工具结果和工作流保留原有格式", async () => {
   const fetchMock = vi.fn(async () => new Response(JSON.stringify({ results: results.map(r => ({ title: r.title, url: r.url, content: r.snippet })) }), { status: 200 }))
   vi.stubGlobal("fetch", fetchMock)
   const cfg = { provider: "tavily" as const, apiKey: "k" }
@@ -36,6 +36,8 @@ it("上下文、工具结果、工作流显示与 main 逐字节一致", async (
     toolDescription: getWorkflowToolDescription({ id: "1", name: "web_search", status: "done", params: { query: "黄蓉" }, result: toolOut } as never),
   }
   expect(JSON.parse(JSON.stringify(out))).toEqual(golden)
+  expect(out.entityMarkdown).not.toContain("无可用结果")
+  expect(out.entityWorkflowText).toContain("无可用结果")
   // 没有附加信息：时间线不出结构化视图；发给模型的文本原样
   expect(extractSearchDisplayDetail(toolOut)).toBeNull()
   expect(extractSearchDisplayDetail(serialized)).toBeNull()

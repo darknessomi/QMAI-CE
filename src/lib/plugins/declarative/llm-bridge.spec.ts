@@ -21,7 +21,7 @@ function fakeStream(chunks: string[] = ["《长", "夜》"]) {
     messages: Array<{ role: string; content: unknown }>
     callbacks: unknown
     signal: AbortSignal | undefined
-    overrides: Record<string, unknown> | undefined
+    overrides: Parameters<StreamChatFn>[4]
   }> = []
 
   const stream: StreamChatFn = async (config, messages, callbacks, signal, overrides) => {

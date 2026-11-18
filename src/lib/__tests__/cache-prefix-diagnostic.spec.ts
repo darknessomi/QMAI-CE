@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest"
 import type { ChatMessage } from "@/lib/llm-providers"
-import { selectContextHistoryMessages } from "@/lib/context-hub/session-summary"
 import { trimChatMessagesToTokenBudget } from "@/lib/chat-request-budget"
 import { composeContext } from "@/lib/context-hub/composer"
 import { buildContextHubPromptParts, withContextHubTaskContent } from "@/lib/context-hub/prompt-content"

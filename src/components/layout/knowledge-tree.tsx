@@ -1498,7 +1498,7 @@ export function KnowledgeTree({
   /*
    * 历史版本：右键菜单只做「打开弹窗」，读写版本库的逻辑都在这里。
    *
-   * `project` 来自 wiki store，未打开项目时为 null。这里刻意不在 hook 依赖里判空就返回，
+   * `project` 来自 wiki store，尚无活动项目时为 null。这里刻意不在 hook 依赖里判空就返回，
    * 而是在 async 里读 `project?.path`：菜单是同步点击入口，拿不到项目时直接静默返回，
    * 免得 null 项目下的版本目录被拼成 "undefined/.qmai/versions"。
    */
@@ -1896,7 +1896,7 @@ export function KnowledgeTree({
               type="button"
               data-ui="tree-delete-confirm"
               className="mr-1 inline-flex shrink-0 items-center gap-1 rounded-md bg-destructive px-2 py-0.5 text-[0.625rem] font-semibold text-white"
-              title={`再次点击确认移入回收站：${page.title}`}
+              title={t("knowledgeTree.confirmDeleteTitle", { name: page.title })}
               onClick={(event) => {
                 event.stopPropagation()
                 void handleDeleteClick(normalizedPath)

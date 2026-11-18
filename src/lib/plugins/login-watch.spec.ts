@@ -10,7 +10,7 @@
 import { describe, expect, it, vi } from "vitest"
 
 import { LOGIN_WATCH_INTERVAL_MS, LOGIN_WATCH_TIMEOUT_MS, watchProviderLogin } from "./login-watch"
-import type { PluginProviderView } from "./types"
+import type { PluginProviderModel, PluginProviderView } from "./types"
 
 function view(overrides: Partial<PluginProviderView> = {}): PluginProviderView {
   return {
@@ -26,11 +26,13 @@ function view(overrides: Partial<PluginProviderView> = {}): PluginProviderView {
   }
 }
 
-const model = (id: string) => ({
+const model = (id: string): PluginProviderModel => ({
   id,
   name: id,
   maxInputTokens: 128000,
   maxOutputTokens: 8192,
+  supportsToolCall: false,
+  supportsVision: false,
 })
 
 /**
