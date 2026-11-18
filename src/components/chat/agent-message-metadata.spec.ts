@@ -45,7 +45,6 @@ describe("agentToolCallsToMessageReferences", () => {
       }),
       toolCall("read_outline", { path: "C:/Book/wiki/outlines/主线.md" }),
       toolCall("read_memory", { name: "主角记忆" }),
-      toolCall("read_deduction", { name: "framework_1" }),
       toolCall("write_memory", { name: "不会进入引用" }),
       toolCall("read_memory", { name: "失败记忆" }, "error"),
     ])
@@ -54,7 +53,6 @@ describe("agentToolCallsToMessageReferences", () => {
       { title: "第40章-三百人", path: "wiki/chapters/第40章-三百人.md" },
       { title: "主线", path: "wiki/outlines/主线.md" },
       { title: "主角记忆", path: "wiki/memory/主角记忆.md" },
-      { title: "framework_1", path: ".qmai/simulations/framework_1.json" },
     ])
   })
 

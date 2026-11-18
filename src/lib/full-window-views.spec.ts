@@ -13,15 +13,14 @@ import { FULL_WINDOW_VIEWS, isFullWindowView } from "./full-window-views"
  * 这里逐项钉住清单的成员，并钉住不该进来的视图。
  */
 describe("fullWindowViews（整窗视图清单）", () => {
-  it("技能库的六个视图都是整窗视图", () => {
+  it("技能库的五个视图都是整窗视图", () => {
     expect(isFullWindowView("skillLibrary")).toBe(true)
     expect(isFullWindowView("writingSkillLibrary")).toBe(true)
     expect(isFullWindowView("writingStyleLibrary")).toBe(true)
-    expect(isFullWindowView("characterSoulLibrary")).toBe(true)
     expect(isFullWindowView("skillFavorites")).toBe(true)
     /*
      * ⚠️ 「人物 Skill」是**补进来的**。它漏掉时，切到该 tab 会冒出一条
-     * 左侧章节列表（其余五个 tab 都是整窗、没有目录栏），这正是用户报的缺陷。
+     * 左侧章节列表（其余四个 tab 都是整窗、没有目录栏），这正是用户报的缺陷。
      * 它是唯一会改写 `activeView` 的技能库 tab，所以只在「新 view 名」
      * 这条路径上暴露 —— 同一张清单里它已经漏过一次。
      * 判别力：从 `FULL_WINDOW_VIEWS` 删掉它 ⇒ 本条红。
@@ -82,7 +81,7 @@ describe("fullWindowViews（整窗视图清单）", () => {
       expect(isFullWindowView(view)).toBe(true)
     }
     const admitted = [
-      "skillLibrary", "writingSkillLibrary", "writingStyleLibrary", "characterSoulLibrary", "personaSkillLibrary", "skillFavorites",
+      "skillLibrary", "writingSkillLibrary", "writingStyleLibrary", "personaSkillLibrary", "skillFavorites",
       "soul", "bookAnalysis", "lint", "wiki", "sources", "search",
       /*
        * `plugins` 是新入清单的一项：它的用例在上面（「插件」页是整窗视图）。

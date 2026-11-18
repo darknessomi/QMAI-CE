@@ -8,7 +8,6 @@ export type DataSourceCategory =
   | "foreshadowing"
   | "timeline"
   | "settings"
-  | "soul"
   | "memory"
   | "graph"
   | "plot_tools"
@@ -22,7 +21,6 @@ export const ALL_DATA_SOURCE_CATEGORIES: DataSourceCategory[] = [
   "foreshadowing",
   "timeline",
   "settings",
-  "soul",
   "memory",
   "graph",
   "plot_tools",
@@ -66,7 +64,6 @@ export const DATA_SOURCE_CATEGORY_LABELS: Record<DataSourceCategory, string> = {
   foreshadowing: "伏笔状态",
   timeline: "时间线",
   settings: "设定与正史",
-  soul: "作品灵魂",
   memory: "记忆中心",
   graph: "图谱检索",
   plot_tools: "剧情工具",

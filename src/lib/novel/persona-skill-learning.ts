@@ -34,9 +34,7 @@ import {
 } from "./persona-skill-types"
 import {
   applyPersonaProfileEdits,
-  parsePersonalitySection,
   readPersonaDocumentFields,
-  renderPersonalitySection,
 } from "./persona-skill-profile"
 import { projectPersonaToOutline } from "./persona-projection-writer"
 import {
@@ -190,8 +188,6 @@ function frontmatterTags(content: string): string[] {
 
 /**
  * 判断实体页是不是人物页：`type: entity` + `tags` 含 `character`。
- * 与仓库既有判据保持一致（`character-aura.ts` 的 `isCharacterEntityContent`
- * 用的是同一条，角色灵魂就靠它枚举可绑定人物）。
  */
 function isCharacterEntityPage(content: string): boolean {
   const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/)
@@ -1838,8 +1834,6 @@ export interface CreatePersonaSkillByUserOptions {
   fields: Record<string, string>
   /** 手工建档不需要模型；传 null 表示「只写用户给的内容」。 */
   llmConfig: unknown
-  /** 绑定的角色灵魂名（方案 B：只写进「性格」段，不接 CharacterAuraBinding）。 */
-  boundSoul?: string
   /**
    * 新建档案的来源。默认 "manual"（用户点「新建人物角色」）。
    * 大纲保存时抓到的角色必须显式传 "auto" —— 它决定「删大纲时会不会被连带删掉」，
@@ -1905,7 +1899,7 @@ export async function createPersonaSkillByUser(
     return { index: { version: 1, skills } }
   })
 
-  await writeUserProfileDocument(pp, id, characterName, options.fields, options.boundSoul)
+  await writeUserProfileDocument(pp, id, characterName, options.fields)
   // 建档后立刻落一份投影 MD（wiki/outlines/人物小传/<名>.md）。
   // 不做的话用户在大纲列表里看不到这个角色 —— 档案在 .qmai 下，大纲树只读 wiki/outlines。
   await projectPersonaToOutline(pp, id)
@@ -1918,16 +1912,12 @@ export async function createPersonaSkillByUser(
  * 只覆盖用户这次真的填了的字段：空值不覆盖已有内容
  * （用户新建时留空的格子，不该抹掉 AI 已经学到的）。
  *
- * 绑定灵魂走方案 B：只写进「性格」段的 `- 绑定灵魂：` 一行，不写 CharacterAuraBinding。
- * 原因是 bindCharacterAura 的门禁只认 wiki/entities 与 wiki/outlines，
- * 不认 .qmai/persona-skills，纯档案角色会被拒（核验见 spec §4.5）。
  */
 async function writeUserProfileDocument(
   pp: string,
   id: string,
   characterName: string,
   fields: Record<string, string>,
-  boundSoul?: string,
 ): Promise<void> {
   const existing = await readPersonaSkillDocument(pp, id)
   const base = existing.trim() ? existing : `# ${characterName} · 人物 Skill\n`
@@ -1935,14 +1925,6 @@ async function writeUserProfileDocument(
   for (const [name, value] of Object.entries(fields)) {
     if (!value.trim()) continue
     merged[name] = value.trim()
-  }
-  if (boundSoul?.trim()) {
-    const current = parsePersonalitySection(readPersonaDocumentFields(base)["性格"] ?? "")
-    merged["性格"] = renderPersonalitySection({
-      tags: current.tags,
-      boundSoul: current.boundSoul || `${boundSoul.trim()}（仅档案内参考，未接入角色灵魂库）`,
-      raw: current.raw || undefined,
-    })
   }
   if (Object.keys(merged).length === 0) {
     if (!existing.trim()) await writePersonaSkillDocument(pp, id, base)

@@ -33,9 +33,6 @@ function sourceResult(chapters: ExportDocument[] = [chapterDocument]): Record<Ex
   return {
     chapters,
     outlines: [],
-    "book-analysis": [],
-    "story-simulation": [],
-    "soul-works": [],
   }
 }
 
@@ -64,14 +61,14 @@ describe("设置中的统一导出中心", () => {
     vi.clearAllMocks()
   })
 
-  it("提供项目、五类来源和格式选择，缺失来源禁用且内容区可滚动", () => {
+  it("提供项目、章节与大纲来源和格式选择，缺失来源禁用且内容区可滚动", () => {
     expect(host.textContent).toContain("统一导出中心")
     expect(host.querySelectorAll("select option")).toHaveLength(2)
     expect(host.textContent).toContain("章节")
     expect(host.textContent).toContain("大纲")
-    expect(host.textContent).toContain("拆书库")
-    expect(host.textContent).toContain("剧情推演室")
-    expect(host.textContent).toContain("灵魂作品")
+    expect(host.textContent).not.toContain("拆书库")
+    expect(host.textContent).not.toContain("剧情推演室")
+    expect(host.textContent).not.toContain("灵魂作品")
     expect(host.textContent).toContain("UTF-8 TXT")
     expect(host.textContent).toContain("Word DOCX")
     expect((host.querySelector('input[value="outlines"]') as HTMLInputElement).disabled).toBe(true)

@@ -391,7 +391,7 @@ export interface NovelConfig {
   writingWebSearchEnabled: boolean
   /** 审稿（含六维审查）使用的 reasoning 档位。下调可省审稿推理 Token，但连贯性把关会变弱（默认 high）。 */
   reviewReasoningEffort: "low" | "medium" | "high"
-  /** 默认模型（工作流）：拆文库、剧情推演室、去重等。空字符串表示跟随 AI 会话模型。 */
+  /** 默认模型（工作流）：审稿、记忆提取、资料去重等。空字符串表示跟随 AI 会话模型。 */
   defaultLlmModel: string
   writingModel: string
   reviewModel: string
@@ -664,14 +664,11 @@ interface WikiState {
   /*
    * 合并说明：两侧各自追加了不同的技能库内部视图，取并集。
    *   main（人物 Skill）→ personaSkillLibrary
-   *   scratch-20261010（文风 skill 化）→ writingStyleLibrary、characterSoulLibrary
+   *   scratch-20261010（文风 skill 化）→ writingStyleLibrary
    */
-  activeView: "wiki" | "sources" | "search" | "lint" | "soul" | "skillLibrary" | "writingSkillLibrary" | "writingStyleLibrary" | "characterSoulLibrary" | "personaSkillLibrary" | "skillFavorites" | "bookAnalysis" | "settings" | "trash" | "reviewCenter" | "storySimulation" | "maintenance" | "plugins"
+  activeView: "wiki" | "sources" | "search" | "lint" | "soul" | "skillLibrary" | "writingSkillLibrary" | "writingStyleLibrary" | "personaSkillLibrary" | "skillFavorites" | "bookAnalysis" | "settings" | "trash" | "reviewCenter" | "storySimulation" | "maintenance" | "plugins"
   activeSettingsCategory: SettingsCategoryId | null
   activeModelSettingsTab: ModelSettingsTabId | null
-  selectedSoulId: string | null
-  selectedSoulTab: "project" | "character"
-  selectedSoulSection: "builtIn" | "custom"
   selectedSkillLibrarySkillId: string | null
   skillLibraryDraftDirty: boolean
   selectedWritingSkillLibrarySkillId: string | null
@@ -708,7 +705,7 @@ interface WikiState {
   aiChatReasoningDepth: ReasoningDepth
   /** Thinking depth for the outline chat model; applies to generation turns only. */
   aiOutlineReasoningDepth: ReasoningDepth
-  /** 默认模型（工作流）：拆文库、导入队列、去重、角色 aura 等。章节/大纲记忆摄取见 novelConfig.extractModel */
+  /** 默认模型（工作流）：导入队列、资料去重等。章节/大纲记忆摄取见 novelConfig.extractModel */
   defaultLlmModel: string
   /** Per-provider-preset stored overrides (API key, model, endpoint, …). */
   providerConfigs: ProviderConfigs
@@ -767,7 +764,6 @@ interface WikiState {
   visualStyle: VisualStyle
   sidebarNavConfig: SidebarNavConfig
   dataVersion: number
-  bindingVersion: number
 
   setProject: (project: WikiProject | null) => void
   setFileTree: (tree: FileNode[], options?: { syncPathIndex?: boolean }) => void
@@ -783,9 +779,6 @@ interface WikiState {
   setActiveView: (view: WikiState["activeView"]) => void
   setActiveSettingsCategory: (category: SettingsCategoryId | null) => void
   setActiveModelSettingsTab: (tab: ModelSettingsTabId | null) => void
-  setSelectedSoulId: (id: string | null) => void
-  setSelectedSoulTab: (tab: "project" | "character") => void
-  setSelectedSoulSection: (section: "builtIn" | "custom") => void
   setSelectedSkillLibrarySkillId: (id: string | null) => void
   setSkillLibraryDraftDirty: (dirty: boolean) => void
   setSelectedWritingSkillLibrarySkillId: (id: string | null) => void
@@ -842,7 +835,6 @@ interface WikiState {
   setVisualStyle: (visualStyle: VisualStyle) => void
   setSidebarNavConfig: (config: Partial<SidebarNavConfig>) => void
   bumpDataVersion: () => void
-  bumpBindingVersion: () => void
 }
 
 export const useWikiStore = create<WikiState>((set) => ({
@@ -860,9 +852,6 @@ export const useWikiStore = create<WikiState>((set) => ({
   activeView: "wiki",
   activeSettingsCategory: null,
   activeModelSettingsTab: null,
-  selectedSoulId: null,
-  selectedSoulTab: "character",
-  selectedSoulSection: "builtIn",
   selectedSkillLibrarySkillId: null,
   skillLibraryDraftDirty: false,
   selectedWritingSkillLibrarySkillId: null,
@@ -896,7 +885,6 @@ export const useWikiStore = create<WikiState>((set) => ({
   activePresetId: null,
 
   dataVersion: 0,
-  bindingVersion: 0,
 
   setProject: (project) => set({ project }),
   setFileTree: (fileTree, options) => {
@@ -957,9 +945,6 @@ export const useWikiStore = create<WikiState>((set) => ({
   }),
   setActiveSettingsCategory: (activeSettingsCategory) => set({ activeSettingsCategory }),
   setActiveModelSettingsTab: (activeModelSettingsTab) => set({ activeModelSettingsTab }),
-  setSelectedSoulId: (selectedSoulId) => set({ selectedSoulId }),
-  setSelectedSoulTab: (selectedSoulTab) => set({ selectedSoulTab }),
-  setSelectedSoulSection: (selectedSoulSection) => set({ selectedSoulSection }),
   setSelectedSkillLibrarySkillId: (selectedSkillLibrarySkillId) => set((state) => {
     if (state.selectedSkillLibrarySkillId === selectedSkillLibrarySkillId) return {}
     if (state.skillLibraryDraftDirty && !confirmDiscardSkillLibraryDraft()) return {}
@@ -1213,7 +1198,6 @@ export const useWikiStore = create<WikiState>((set) => ({
     set({ sidebarNavConfig: normalized })
   },
   bumpDataVersion: () => set((state) => ({ dataVersion: state.dataVersion + 1 })),
-  bumpBindingVersion: () => set((state) => ({ bindingVersion: state.bindingVersion + 1 })),
 }))
 
 export type { WikiState, LlmConfig, SearchApiConfig, EmbeddingConfig, MultimodalConfig, OutputLanguage, ProxyConfig, SourceWatchConfig }

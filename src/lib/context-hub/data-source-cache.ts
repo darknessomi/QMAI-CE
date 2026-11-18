@@ -57,8 +57,6 @@ const STATIC_SOURCES = new Set([
   "canonRules",
   "sourceCanon",
   "writingStyle",
-  "soulDoc",
-  "storyFrameworkBinding",
   "relatedSettings",
   // 以下源加载的是项目级数据（不依赖章节号），改用恒定 key 跨章节/跨消息复用
   "fallbackRecentSummaries",
@@ -77,7 +75,6 @@ const TASK_SCOPED_SOURCES = new Set([
   "cognitionText",
   "searchResults",
   "graphSearchResults",
-  "bookAnalysisReferences",
   "sectionBriefing",
 ])
 
@@ -94,6 +91,7 @@ const CHAPTER_SCOPED_SOURCES = new Set([
 // Bump only the affected data source when its extraction semantics change.
 // This prevents a previously cached wrong-chapter outline from surviving the fix.
 const SOURCE_CACHE_VERSIONS: Partial<Record<string, number>> = {
+  writingStyle: 2,
   cognitionText: 1,
   outline: 3,
   chapterOutline: 3,

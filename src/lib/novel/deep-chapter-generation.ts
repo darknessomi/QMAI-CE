@@ -1,6 +1,4 @@
 import type { LlmConfig } from "@/stores/wiki-store";
-import { checkPersonality, enforcePersonality } from "./personality-guard";
-import { renderBoundPersonalities, PersonalityConstraintError } from "./portable-personality";
 import {
   streamChat,
   type ChatMessage,
@@ -84,7 +82,6 @@ export interface DeepChapterGenerationInput {
   userRequest: string;
   chapterNumber?: number;
   goldenThreeChapter?: GoldenThreeChapterRequest;
-  dismantlingReferenceDirective?: string;
   llmConfig: LlmConfig;
   aiWorkflowMode?: AiWorkflowMode;
   resumeCheckpoint?: DeepChapterGenerationResumeCheckpoint;
@@ -860,7 +857,7 @@ export async function runDeepChapterGeneration(
   );
   // 只用**作品级**大纲：卷纲与本章章纲改由 contextPackToPrompt 的
   // chapterOutlineContext 字段承担（排在稳定字段之后）。这样跨章时
-  // 「作品大纲 + 灵魂/规则/设定/文风」全部逐字节相同，可直接命中缓存。
+  // 「作品大纲 + 规则/设定/文风」全部逐字节相同，可直接命中缓存。
   const outlineText = capOutlineSourcesToBudget(
     (contextPack.projectOutline ?? "").trim() || contextPack.outline || "",
     outlineCharCap,
@@ -892,36 +889,12 @@ export async function runDeepChapterGeneration(
       Math.ceil(outlineText.length / charsPerToken),
   );
 
-  /*
-   * 本次生成的临时文风覆盖（丁-2）。
-   *
-   * ── 为什么注入点**只能**在这里，不是风格偏好 ──
-   * `writingStyle` 在 context-hub 的 `STATIC_SOURCES` 里
-   * （`context-hub/data-source-cache.ts:56-71`），于是 `sourceRequestKey`（`:116-124`）
-   * 给它算出的 scope 是**空对象** `{}`、缓存 key 退化成常量
-   * `data-source:writingStyle:<sha256("{}")>` —— 不含 task、不含 chapterNumber、
-   * 更不可能含「本次覆盖了哪条文风」。所以若在数据源层
-   * （`context-data-sources.ts:382`）注入覆盖，第一次生成选的文风会被**永久缓存**：
-   * 第二次选了别的（或没选）也命中旧文本 ⇒ 覆盖静默失效，
-   * 且上一轮的文风会泄漏进之后所有生成。
-   * 这里是数据源**之后**（`contextPack` 已返回）的位置，浅拷贝只影响本次调用。
-   *
-   * ── `undefined` 与 `null` 必须分开（这一支被同类三态坑过）──
-   * `undefined` = 没有覆盖：**连渲染器都不调**，沿用 pack 里那份项目启用文风；
-   * `null` = 用户显式「本次不用文风」：走渲染器拿到 `""`，把 pack 里那份覆盖掉。
-   * 若把两者都当 falsy 混用，「不用文风」会退化成「用项目启用的文风」，正好相反。
-   *
-   * ── 覆盖文本的形状 ──
-   * 由 `buildWritingStyleContext` 同一个渲染器产出（本批选择 (a)：照现状接受不对称）。
-   * 结构化画像（`profile.workbenchStyle.styleFingerprint`）带 `【已启用文风画像】`
-   * 前缀 ⇒ 命中 `contextPackToPrompt` 的 fail-closed 守卫（预算不足则停机）；
-   * v1/旧画像不带前缀 ⇒ 与「已启用」路径一样是静默的（既有行为，本批不改变）。
-   */
+  // 本轮文风覆盖与项目默认文风共用同一渲染器。
   const styleOverrideText = input.writingStyleIdOverride === undefined
     ? undefined
     : await (deps.buildWritingStyleContext ?? buildWritingStyleContext)(
         input.projectPath,
-        { task: contextRequest, styleIdOverride: input.writingStyleIdOverride },
+        { styleIdOverride: input.writingStyleIdOverride },
       );
   /*
    * 浅拷贝，**不原地改** `contextPack`：它可能来自 context-hub 缓存，
@@ -938,7 +911,6 @@ export async function runDeepChapterGeneration(
     deps.contextPackToPrompt(promptContextPack, restContextTokenBudget, {
       excludeOutline: true,
     }),
-    input.dismantlingReferenceDirective,
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -947,62 +919,6 @@ export async function runDeepChapterGeneration(
   // 作为显式 prompt 缓存断点传入（Anthropic/MiniMax 走 cache_control；
   // OpenAI/DeepSeek 该断点被折叠回字符串、由其自动前缀缓存命中）。
   const cachePrefix = buildStableContextPrefix(outlinePrompt, contextPrompt);
-  const personalityBindings = contextPack.portablePersonalities ?? [];
-  const checkPersonalityModel = (prompt: string) => collectModelText(
-    workflowConfig, [{ role: "user", content: prompt }], deps, signal, undefined,
-    { max_tokens: 5000 }, undefined, callbacks.onRequestTrace,
-  );
-  if (personalityBindings.length) {
-    for (const binding of personalityBindings) {
-      if (!contextPrompt.includes(renderBoundPersonalities([binding]))) {
-        throw new PersonalityConstraintError("角色人格规则没有完整进入写作请求，已停止生成，请扩大上下文预算");
-      }
-    }
-    callbacks.onThinking?.("正在核对角色人格与目标小传；职业、经历不同不会被当作性格冲突。");
-    const conflicts = await checkPersonality(personalityBindings, cachePrefix, "", checkPersonalityModel);
-    if (conflicts.length) throw new PersonalityConstraintError(`角色人格与当前任务需要确认取舍，未生成正文：\n${conflicts.join("\n")}`);
-  }
-  const originalFinalCallback = callbacks.onFinalContent;
-  const originalActivityCallback = callbacks.onActivityEvent;
-  if (personalityBindings.length) {
-    const originalActivity = callbacks.onActivityEvent;
-    callbacks = {
-      ...callbacks, onFinalContent: undefined,
-      onActivityEvent: (event) => { if (event.kind !== "final_output") originalActivity?.(event); },
-    };
-  }
-  const finishPersonality = async (content: string, brief: string): Promise<string> => {
-    if (!personalityBindings.length) return content;
-    callbacks.onThinking?.("正在逐条核对角色人格、知识边界与原型身份迁移；未通过的正文不会自动完成。");
-    const checked = await enforcePersonality(personalityBindings, cachePrefix, content, checkPersonalityModel,
-      async (draft, issues) => {
-        const repaired = await collectModelText(writingConfig, [{
-          role: "user",
-          content: buildDeepChapterRevisionPrompt(outlinePrompt, contextPrompt, brief, draft,
-            issues.map((issue) => ({
-              severity: "error" as const, type: "角色人格规则", message: issue,
-              evidence: "", relatedMemory: renderBoundPersonalities(personalityBindings),
-              suggestion: "只修复规则偏离，不修改人物小传，不移植原作职业、能力或经历。",
-            })), input.userRequest, input.chapterNumber, input.goldenThreeChapter, input.skillsPrompt),
-        }], deps, signal, undefined, generationRequestOverrides, cachePrefix, callbacks.onRequestTrace);
-        callbacks.onCheckpoint?.(createCheckpoint("after_revision", {
-          taskBrief: brief, draftContent: content, currentContent: repaired, reviewResults: [],
-        }));
-        if (countChapterChars(repaired) < lengthSpec.minChars) {
-          throw new PersonalityConstraintError("人格返修正文不完整，已保留草稿，未自动完成");
-        }
-        return repaired;
-      });
-    assertNotAborted(signal);
-    callbacks.onThinking?.("角色人格逐条核验通过。");
-    emitDeepChapterActivity({ onActivityEvent: originalActivityCallback }, {
-      id: `deep_chapter:personality_final:${Date.now()}`, stageId: "final_output",
-      kind: "final_output", title: "最终正文", content: `角色人格核验通过，正文约 ${countChapterChars(checked)} 字。`,
-    });
-    originalFinalCallback?.(checked);
-    return checked;
-  };
-
   if (!resumeCheckpoint) {
     callbacks.onThinking?.(formatContextThinking(input, contextPack));
     callbacks.onCheckpoint?.(createCheckpoint("after_context"));
@@ -1334,7 +1250,7 @@ export async function runDeepChapterGeneration(
   }
 
   if (!workflowProfile.runPostDraftPlanAudits) {
-    const finalContent = await finishPersonality(draftContent, taskBrief);
+    const finalContent = draftContent;
     const isFastMode = workflowProfile.mode === "fast";
     callbacks.onThinking?.(
       formatStageThinking(
@@ -1876,7 +1792,7 @@ export async function runDeepChapterGeneration(
   /*
    * 插件钩子 · 润色后（设计 §5.5）：`patch.response.text` 非空 → 替换最终正文。
    *
-   * 放在阶段6之后、阶段7（人格核验）之前：这两者之间是"正文已经定稿"的位置，
+   * 放在阶段6之后、汇总生成结果之前。
    * 也正是作者说的"工作流钩子的落点"。
    */
   const afterPolishHooks = takeHooksFor("afterPolish");
@@ -1900,10 +1816,8 @@ export async function runDeepChapterGeneration(
   }
   callbacks.onThinking?.(
     formatStageThinking(
-      personalityBindings.length ? "阶段7：等待人格核验" : "阶段7：完成",
-      personalityBindings.length
-        ? "当前正文仍为待验收草稿，角色人格核验通过后才会完成。"
-        : polishFailureMessage
+      "阶段7：完成",
+      polishFailureMessage
         ? "简单审查与修改失败，已保留修改前的正文作为最终正文。"
         : reviewFailureMessage
           ? "AI 审稿失败；已保留正文作为最终正文，请在保存前手动复核。"
@@ -2232,9 +2146,6 @@ export async function runDeepChapterGeneration(
       }
     }
   }
-  const personalityCheckedContent = await finishPersonality(finalContent, taskBrief);
-  revised = revised || personalityCheckedContent !== finalContent;
-  finalContent = personalityCheckedContent;
   completeChapterWorkflowStep(
     callbacks,
     {
@@ -2957,7 +2868,6 @@ async function safeBuildChapterContextPack(
     );
   } catch (error) {
     rethrowIfUserAbort(error, signal);
-    if (error instanceof PersonalityConstraintError) throw error;
     return {
       task: userRequest,
       chapterGoal: "",
@@ -2965,9 +2875,6 @@ async function safeBuildChapterContextPack(
       recentSummaries: [],
       previousChapterEnding: "",
       characterStates: "",
-      soulDoc: "",
-      characterAuras: "",
-      storyFrameworkBinding: "",
       cognitionStates: "",
       foreshadowingStates: "",
       timeline: "",

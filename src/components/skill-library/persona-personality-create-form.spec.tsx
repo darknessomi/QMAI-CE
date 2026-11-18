@@ -87,7 +87,6 @@ describe("PersonaPersonalityCreateForm", () => {
       characterName: "林清越",
       roleType: "主角",
       fields: { 性别: "男", 势力组织: "青云宗" },
-      boundSoul: "",
     })
   })
 

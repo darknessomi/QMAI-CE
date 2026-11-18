@@ -6,13 +6,13 @@ export function inferUserMemorySurface(task: string): UserMemorySurface {
   if (/审稿|审查|检查|纠错|连贯性|一致性/.test(task)) return "review"
   if (/大纲|章纲|故事框架|情节规划/.test(task)) return "ai-outline"
   if (/写第|续写|生成.{0,8}章|改写.{0,8}章|章节正文/.test(task)) return "chapter-writing"
-  if (/拆书|角色\s*skill|文风提取|故事提取|作品分析/i.test(task)) return "book-analysis"
+  if (/角色\s*skill|文风提取|作品分析/i.test(task)) return "analysis"
   return "ai-chat"
 }
 
 function categoryAllowed(category: UserMemoryCategory, surface: UserMemorySurface): boolean {
   if (surface === "review") return category !== "writing_preference" && category !== "outline_preference" && category !== "output_style"
-  if (surface === "book-analysis" || surface === "analysis") {
+  if (surface === "analysis") {
     return category === "interaction_preference" || category === "format_preference" || category === "constraint" || category === "manual"
   }
   return true

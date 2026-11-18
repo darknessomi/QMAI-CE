@@ -30,14 +30,12 @@ const GROUPS: PersonalityTagGroup[] = ["语气", "怪癖", "关系", "反差"]
 
 export interface PersonaPersonalityTabProps {
   tags: readonly string[]
-  boundSoul: string
   raw: string
-  onChange: (next: { tags: string[]; boundSoul: string }) => void
+  onChange: (next: { tags: string[] }) => void
 }
 
 export function PersonaPersonalityTab({
   tags,
-  boundSoul,
   raw,
   onChange,
 }: PersonaPersonalityTabProps) {
@@ -50,7 +48,7 @@ export function PersonaPersonalityTab({
   const toggle = (label: string) => {
     if (tags.includes(label)) {
       setHint("")
-      onChange({ tags: tags.filter((tag) => tag !== label), boundSoul })
+      onChange({ tags: tags.filter((tag) => tag !== label) })
       return
     }
     if (full) {
@@ -58,7 +56,7 @@ export function PersonaPersonalityTab({
       return
     }
     setHint("")
-    onChange({ tags: [...tags, label], boundSoul })
+    onChange({ tags: [...tags, label] })
   }
 
   const addCustom = () => {
@@ -90,16 +88,6 @@ export function PersonaPersonalityTab({
         <p className="ui-test-persona-note">
           当前性格是一段手写文字，未按标签管理。改成标签会覆盖这段文字。
         </p>
-      )}
-
-      {boundSoul.trim() && (
-        <div className="ui-test-soul-row">
-          <span>已有角色绑定：{boundSoul}</span>
-          <button type="button" data-testid="persona-soul-clear" className="ui-test-skills-action"
-            onClick={() => onChange({ tags: [...tags], boundSoul: "" })}>
-            解绑
-          </button>
-        </div>
       )}
 
       {/* 2. 已选性格 + 预算 */}

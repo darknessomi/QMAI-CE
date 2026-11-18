@@ -85,10 +85,6 @@ function referenceFromReadTool(call: AgentRunRecord["toolCalls"][number]): Messa
       if (!name) return null
       return { title: name, path: `wiki/memory/${name.replace(/\.md$/i, "")}.md` }
     }
-    case "read_deduction": {
-      if (!name) return null
-      return { title: name, path: `.qmai/simulations/${name}.json` }
-    }
     default:
       return null
   }

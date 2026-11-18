@@ -14,8 +14,7 @@
     "build": "pnpm run typecheck && vite build",
     "preview": "vite preview",
     "test": "pnpm run test:mocks && pnpm run test:llm",
-    "test:mocks": "node scripts/lint-character-aura.mjs && vitest run --exclude='**/*.real-llm.test.ts' --exclude='**/.worktrees/**' --exclude='**/.claude/**' --exclude='**/.codex-temp/**' --exclude='**/superpowers-main/**' --exclude='**/SKILL/**' --exclude='**/superpowers/**' --exclude='**/nul' && node --test \"sdk/test/**/*.test.mjs\" \"samples/plugins/**/*.test.mjs\"",
-    "lint:character-aura": "node scripts/lint-character-aura.mjs",
+    "test:mocks": "vitest run --exclude='**/*.real-llm.test.ts' --exclude='**/.worktrees/**' --exclude='**/.claude/**' --exclude='**/.codex-temp/**' --exclude='**/superpowers-main/**' --exclude='**/SKILL/**' --exclude='**/superpowers/**' --exclude='**/nul' && node --test \"sdk/test/**/*.test.mjs\" \"samples/plugins/**/*.test.mjs\"",
     "test:llm": "vitest run real-llm --no-file-parallelism --reporter=verbose --exclude='**/.claude/**' --exclude='**/.worktrees/**' --exclude='**/.codex-temp/**'",
     "tauri": "tauri"
   },
@@ -45,7 +44,6 @@
     "jsonrepair": "^3.15.0",
     "lucide-react": "^1.74.0",
     "macos-traffic-lights": "^2.0.0",
-    "opencc-js": "^1.4.2",
     "pangu": "^10.4.1",
     "pinyin-pro": "^3.29.5",
     "react": "^19.3.1",

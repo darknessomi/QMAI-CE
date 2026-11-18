@@ -52,13 +52,12 @@ interface BuildAgentWorkflowStepsInput {
   contextTrace?: ContextTrace | null
 }
 
-const LIST_TOOLS = new Set(["list_chapters", "list_outlines", "list_memories", "list_deductions"])
+const LIST_TOOLS = new Set(["list_chapters", "list_outlines", "list_memories"])
 const WEB_RESEARCH_TOOLS = new Set(["web_search", "read_web_page", "summarize_search_results"])
 const READ_TOOLS = new Set([
   "read_chapter",
   "read_outline",
   "read_memory",
-  "read_deduction",
   "read_chat_history",
   "read_outline_history",
   "search_chapters",
@@ -226,10 +225,6 @@ export function getWorkflowToolDescription(call: WorkflowToolCall): string {
       const target = getStringParam(call.params, "name", "title", "path")
       return target ? `读取记忆「${getPathLabel(target)}」` : "读取记忆"
     }
-    case "read_deduction": {
-      const target = getStringParam(call.params, "name", "title", "path")
-      return target ? `读取推演「${getPathLabel(target)}」` : "读取推演"
-    }
     case "read_chat_history": {
       const target = getStringParam(call.params, "conversationTitle", "conversationId", "name")
       return target ? `读取 AI 会话「${target}」` : "读取 AI 会话"
@@ -253,7 +248,6 @@ export function getWorkflowToolDescription(call: WorkflowToolCall): string {
     case "list_chapters":
     case "list_outlines":
     case "list_memories":
-    case "list_deductions":
       return "整理资料范围"
     case "write_chapter": {
       const target = getStringParam(call.params, "name", "title", "path")

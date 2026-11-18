@@ -32,13 +32,6 @@
  *   · **配对判定**：两组都要更近、平均改善超过 ε 才保留（见 `resolvePairedVerdict`）。
  *     单段试写的波动远大于 ε，只比一组时结论接近随机。
  *
- * ── 关于 `workbenchStyle`：本功能明确**不产出**它 ──────────────────────
- * `writing-style-store.ts:356-373` 的结构化分支与旧分支是 if/else：一旦
- * `profile.workbenchStyle` 存在，`constitution` 与 `integratedDna` **都不再注入**。
- * 而 `compileStyleFingerprint` 是**消费者**（入参是 `WorkbenchItem`），要让它拼出
- * 有用文本得额外交付整套拆书工作台结构化产物。硬塞一个空 `rules` 的
- * `workbenchStyle` 会让注入内容缩成几行标题 —— 界面正常、内容悄悄变空。
- * 所以这里走旧画像路径，代价（无前缀、可能被预算整段裁掉）已在规格里认下。
  */
 import type { BookStyleProfile } from "./book-analysis/types"
 import { formatStyleMetricsForPrompt, computeStyleMetrics } from "./book-analysis/style-metrics"
@@ -66,6 +59,7 @@ import {
   loadWritingStyleStore,
   removeWritingStylePresetBySourceBook,
   upsertWritingStylePreset,
+  STYLE_EVOLUTION_SOURCE_PREFIX,
 } from "./writing-style-store"
 
 /** 至少要有这么多章才值得分析（2 章进 fit、1 章当 holdout）。 */
@@ -93,7 +87,6 @@ export const PROBE_PAIRS = 2
 const PROBE_PASSAGE_CHARS = 600
 
 /** 候选预设的来源前缀。**每轮都要带轮次号** —— 见文件头③。 */
-const SYNTHETIC_SOURCE_BOOK_PREFIX = "我的文风 · 自动进化"
 
 /** 探针与分析的提示词里都刻意出现的标记，便于测试区分几类调用。 */
 const PROBE_MARKER = "只输出正文"
@@ -427,7 +420,6 @@ export function normalizeCandidateProfile(raw: string, now: number): CandidatePr
       integratedDna,
       constitution,
       samples,
-      // ⚠️ 刻意不设 workbenchStyle —— 见文件头说明。
     },
   }
 }
@@ -563,7 +555,7 @@ async function runRound(
     const candidateProfile = normalized.profile
 
     const round = nextRoundNumber(state)
-    const sourceBook = `${SYNTHETIC_SOURCE_BOOK_PREFIX} · 第 ${round} 轮`
+    const sourceBook = `${STYLE_EVOLUTION_SOURCE_PREFIX} · 第 ${round} 轮`
     const name = `自动进化 · 第 ${round} 轮`
 
     const writeCandidate = async (): Promise<string> => {

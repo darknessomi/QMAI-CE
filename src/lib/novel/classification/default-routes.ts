@@ -3,7 +3,7 @@ import type { RouteRule, ClassificationConfig } from "./types"
 export const DEFAULT_CLASSIFICATION_ROUTES: RouteRule[] = [
   {
     intent: "write_chapter",
-    required: ["outline", "soul", "character_states", "foreshadowing"],
+    required: ["outline", "character_states", "foreshadowing"],
     optional: [
       "recent_summaries",
       "chapter_content",
@@ -17,7 +17,7 @@ export const DEFAULT_CLASSIFICATION_ROUTES: RouteRule[] = [
   },
   {
     intent: "continue_chapter",
-    required: ["outline", "chapter_content", "character_states", "soul"],
+    required: ["outline", "chapter_content", "character_states"],
     optional: [
       "recent_summaries",
       "foreshadowing",
@@ -31,7 +31,7 @@ export const DEFAULT_CLASSIFICATION_ROUTES: RouteRule[] = [
   },
   {
     intent: "rewrite_chapter",
-    required: ["outline", "chapter_content", "character_states", "soul"],
+    required: ["outline", "chapter_content", "character_states"],
     optional: [
       "recent_summaries",
       "foreshadowing",
@@ -45,7 +45,7 @@ export const DEFAULT_CLASSIFICATION_ROUTES: RouteRule[] = [
   },
   {
     intent: "polish_chapter",
-    required: ["chapter_content", "soul"],
+    required: ["chapter_content"],
     optional: [
       "outline",
       "recent_summaries",
@@ -63,7 +63,6 @@ export const DEFAULT_CLASSIFICATION_ROUTES: RouteRule[] = [
       "recent_summaries",
       "timeline",
       "settings",
-      "soul",
       "memory",
       "graph",
       "revision",
@@ -74,11 +73,11 @@ export const DEFAULT_CLASSIFICATION_ROUTES: RouteRule[] = [
     intent: "lint_chapter",
     required: ["chapter_content", "character_states", "foreshadowing", "timeline"],
     optional: ["outline", "recent_summaries", "settings", "memory", "graph"],
-    forbidden: ["plot_tools", "revision", "soul"],
+    forbidden: ["plot_tools", "revision"],
   },
   {
     intent: "generate_outline",
-    required: ["soul", "settings"],
+    required: ["settings"],
     optional: [
       "outline",
       "character_states",
@@ -102,13 +101,13 @@ export const DEFAULT_CLASSIFICATION_ROUTES: RouteRule[] = [
       "settings",
       "memory",
     ],
-    forbidden: ["plot_tools", "revision", "soul"],
+    forbidden: ["plot_tools", "revision"],
   },
   {
     intent: "extract_memory",
     required: ["chapter_content"],
     optional: ["outline", "character_states", "foreshadowing", "timeline", "settings"],
-    forbidden: ["soul", "memory", "graph", "plot_tools", "revision", "recent_summaries"],
+    forbidden: ["memory", "graph", "plot_tools", "revision", "recent_summaries"],
   },
   {
     intent: "character_query",
@@ -122,7 +121,7 @@ export const DEFAULT_CLASSIFICATION_ROUTES: RouteRule[] = [
       "settings",
       "graph",
     ],
-    forbidden: ["plot_tools", "revision", "soul"],
+    forbidden: ["plot_tools", "revision"],
   },
   {
     intent: "foreshadowing_query",
@@ -136,7 +135,7 @@ export const DEFAULT_CLASSIFICATION_ROUTES: RouteRule[] = [
       "memory",
       "graph",
     ],
-    forbidden: ["settings", "soul", "plot_tools", "revision"],
+    forbidden: ["settings", "plot_tools", "revision"],
   },
   {
     intent: "timeline_query",
@@ -150,12 +149,12 @@ export const DEFAULT_CLASSIFICATION_ROUTES: RouteRule[] = [
       "memory",
       "graph",
     ],
-    forbidden: ["settings", "soul", "plot_tools", "revision"],
+    forbidden: ["settings", "plot_tools", "revision"],
   },
   {
     intent: "setting_query",
     required: ["settings"],
-    optional: ["outline", "memory", "graph", "soul"],
+    optional: ["outline", "memory", "graph"],
     forbidden: [
       "recent_summaries",
       "chapter_content",
@@ -177,7 +176,6 @@ export const DEFAULT_CLASSIFICATION_ROUTES: RouteRule[] = [
       "foreshadowing",
       "timeline",
       "settings",
-      "soul",
       "memory",
       "graph",
       "plot_tools",

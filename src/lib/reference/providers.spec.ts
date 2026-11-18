@@ -4,7 +4,6 @@ import {
   createChatHistoryProvider,
   createOutlineHistoryProvider,
   createSkillProvider,
-  deductionProvider,
   memoryProvider,
   outlineProvider,
 } from "./providers"
@@ -93,20 +92,16 @@ describe("reference providers", () => {
     ])
   })
 
-  it("loads memory, outline, and deduction files from their project folders", async () => {
+  it("loads memory and outline files from their project folders", async () => {
     mocks.listDirectory
       .mockResolvedValueOnce([file("人物.md")])
       .mockResolvedValueOnce([file("主线.md")])
-      .mockResolvedValueOnce([file("推演.json")])
 
     await expect(memoryProvider.fetchItems("C:/Novel")).resolves.toMatchObject([
       { category: "memory", title: "人物", path: "C:/Novel/wiki/memory/人物.md" },
     ])
     await expect(outlineProvider.fetchItems("C:/Novel")).resolves.toMatchObject([
       { category: "outline", title: "主线", path: "C:/Novel/wiki/outlines/主线.md" },
-    ])
-    await expect(deductionProvider.fetchItems("C:/Novel")).resolves.toMatchObject([
-      { category: "deduction", title: "推演", path: "C:/Novel/.qmai/simulations/推演.json" },
     ])
   })
 
@@ -130,32 +125,6 @@ describe("reference providers", () => {
     await expect(memoryProvider.fetchItems("C:/Novel")).resolves.toMatchObject([
       { category: "memory", title: "角色/主角", path: "C:/Novel/wiki/memory/角色/主角.md" },
       { category: "memory", title: "记忆条目", path: "C:/Novel/wiki/memory/canon-facts.md" },
-    ])
-  })
-
-  it("loads deduction room frameworks and nested simulation results", async () => {
-    mocks.listDirectory.mockResolvedValue([
-      dir("frameworks", "C:/Novel/.qmai/simulations/frameworks", [
-        file("主线框架.md", "C:/Novel/.qmai/simulations/frameworks/主线框架.md"),
-      ]),
-      dir("results", "C:/Novel/.qmai/simulations/results", [
-        dir("framework-1", "C:/Novel/.qmai/simulations/results/framework-1", [
-          file("result-1.json", "C:/Novel/.qmai/simulations/results/framework-1/result-1.json"),
-        ]),
-      ]),
-    ])
-    mocks.readFile
-      .mockResolvedValueOnce("---\ntitle: \"旧城坠星框架\"\nshortTitle: \"坠星框架\"\n---\n\n# 旧城坠星框架")
-      .mockResolvedValueOnce(JSON.stringify({
-        report: {
-          createdAt: "2026-07-01T10:00:00.000Z",
-          branches: [{ title: "桥下追逃", recommendation: true }],
-        },
-      }))
-
-    await expect(deductionProvider.fetchItems("C:/Novel")).resolves.toMatchObject([
-      { category: "deduction", title: "旧城坠星框架", path: "C:/Novel/.qmai/simulations/frameworks/主线框架.md" },
-      { category: "deduction", title: "推演结果：桥下追逃", path: "C:/Novel/.qmai/simulations/results/framework-1/result-1.json" },
     ])
   })
 

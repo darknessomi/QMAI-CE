@@ -99,7 +99,7 @@ const NOVEL_CONTEXT_TOKEN_FLOOR = 4_000
 /**
  * Token budget for the novel context pack (`contextPackToPrompt`).
  *
- * The novel context (memory, settings, search hits, character souls) is
+ * The novel context (memory, settings, search hits) is
  * the bulk of the writing prompt and must scale with — and never exceed —
  * the model's context window, leaving room for the chapter output and
  * prompt scaffolding.

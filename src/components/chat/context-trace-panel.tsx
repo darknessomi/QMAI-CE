@@ -22,7 +22,6 @@ import {
   Sparkles,
   Clock as ClockIcon,
   Settings,
-  Heart,
   Brain,
   Network,
   Wand2,
@@ -184,8 +183,6 @@ function getDataSourceIcon(category: DataSourceCategory) {
       return ClockIcon
     case "settings":
       return Settings
-    case "soul":
-      return Heart
     case "memory":
       return Brain
     case "graph":

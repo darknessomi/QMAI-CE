@@ -83,7 +83,6 @@ describe("background MCP writing", () => {
 
   it.each([
     ["clarification_needed", "needs_input"],
-    ["soul_dialog_confirmation_required", "needs_input"],
     ["source_canon_overflow", "failed"],
   ])("handles pre-plugin stop reason %s without running the generator", async (stopReason, status) => {
     vi.mocked(runNovelPrePluginChain).mockResolvedValue({ shouldStop: true, stopReason, finalSystemPrompt: "秘密系统提示", errors: [], executedPlugins: [] })

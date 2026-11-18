@@ -10,14 +10,12 @@ export const OUTLINE_CONTEXT_REUSE_DISABLED_TOOLS = [
   "read_chapter",
   "read_outline",
   "read_memory",
-  "read_deduction",
   "read_chat_history",
   "read_outline_history",
   "search_chapters",
   "list_chapters",
   "list_outlines",
   "list_memories",
-  "list_deductions",
   "apply_skill",
 ] as const
 

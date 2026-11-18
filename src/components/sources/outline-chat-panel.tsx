@@ -249,19 +249,11 @@ import {
   createChatHistoryProvider,
   createOutlineHistoryProvider,
   createSkillProvider,
-  deductionProvider,
   memoryProvider,
   outlineProvider,
 } from "@/lib/reference/providers";
 import type { SkillSummary } from "@/lib/reference/providers";
-import type { ReferenceToken } from "@/lib/reference/types";
-import { collectReferencedSoulAuraIds, SOUL_SKILL_SUBTYPE } from "@/lib/reference/soul-reference";
-import {
-  beginMessageScopedSoulBinding,
-  releaseMessageScopedSoulBinding,
-  type MessageScopedSoulBinding,
-} from "@/lib/novel/message-scoped-soul-binding";
-import { useCharacterSoulReference, type CharacterSoulOption } from "@/components/chat/use-character-soul-reference";
+import { isSupportedReference, type ReferenceToken } from "@/lib/reference/types";
 import { useChatStore } from "@/stores/chat-store";
 import { AgentRunner } from "@/lib/agent/runner";
 import {
@@ -292,7 +284,6 @@ import {
 } from "@/lib/novel/user-skill-store";
 import type { UserSkill } from "@/lib/novel/skill-library";
 import { filterSkillsForSkillRoutes } from "@/lib/novel/skill-route";
-import { readSoulDoc } from "@/lib/novel/soul-doc";
 import {
   buildWebResearchContext,
   collectWebResearch,
@@ -586,8 +577,6 @@ function referenceCategoryLabel(category: ReferenceToken["category"]): string {
       return "记忆";
     case "outline":
       return "大纲";
-    case "deduction":
-      return "推演";
     case "chat_history":
       return "AI会话";
     case "outline_history":
@@ -622,7 +611,7 @@ function buildOutlineAgentUserContent(
     text,
     "",
     "## 本条消息附带的 @ 引用",
-    "请优先使用工具读取引用内容，不要只根据标题猜测。章节用 read_chapter，大纲用 read_outline，记忆用 read_memory，推演用 read_deduction，AI会话用 read_chat_history，AI大纲历史用 read_outline_history。",
+    "请优先使用工具读取引用内容，不要只根据标题猜测。章节用 read_chapter，大纲用 read_outline，记忆用 read_memory，AI会话用 read_chat_history，AI大纲历史用 read_outline_history。",
     ...tokens.map(describeReferenceForOutlineAgent),
   ].join("\n");
 }
@@ -671,7 +660,6 @@ const TWO_CHAPTER_OUTLINE_SUGGESTION_RULE =
 export function buildOutlineAgentSystemPrompt(options: {
   projectName?: string;
   webResearchContext?: string;
-  soulDoc?: string;
   mode?: OutlineWorkflowMode;
   /** 计划模式的目标模块；只有在要素盘点轮才传，正文生成轮不传。 */
   planModule?: string;
@@ -687,8 +675,8 @@ export function buildOutlineAgentSystemPrompt(options: {
     "不要假设引用内容已经注入上下文；不要跳过工具直接空泛回答。",
     "回答必须基于已读取内容进行分析，说明关键判断依据。",
     "## AI大纲固定分析流程",
-    "1. 先调用 list_outlines、list_chapters、list_memories、list_deductions 确认可用资料范围。",
-    "2. 再调用 read_outline、read_chapter、read_memory、read_deduction 读取用户 @ 引用和相关项目内容。",
+    "1. 先调用 list_outlines、list_chapters、list_memories 确认可用资料范围。",
+    "2. 再调用 read_outline、read_chapter、read_memory 读取用户 @ 引用和相关项目内容。",
     "3. 分析冲突、缺口、伏笔、角色动机和章节承接，明确哪些判断来自已读取资料。",
     "4. 最后再生成大纲建议；没有完成读取和分析前，不要直接给出结论。",
   ];
@@ -794,7 +782,7 @@ export function buildOutlineAgentSystemPrompt(options: {
       "如果系统标记本轮为意图分析或要素盘点，本节不适用，仍然只输出对应协议块。",
     ]),
     ...(mode === "fast" || discussTurn ? [] : [
-      "当用户要求生成、完善或续写任何大纲分项时，必须按 PRD 3.1 主流程执行：提取请求关键词，识别用户意图，按意图读取资料，提取对小说创作有用的关键内容，结合用户要用的 skill + soul.md 约束生成内容，再做结果强约束收敛。",
+      "当用户要求生成、完善或续写任何大纲分项时，必须按 PRD 3.1 主流程执行：提取请求关键词，识别用户意图，按意图读取资料，提取对小说创作有用的关键内容，结合用户要用的 skill 约束生成内容，再做结果强约束收敛。",
     ]),
     "关键内容提取必须服务于小说创作：只保留能帮助用户继续写小说的信息，例如章节目标、冲突推进、人物动机、伏笔状态、设定限制、时间线承接和结尾钩子。",
     // 章纲结构硬要求属于「产出正文」的契约，讨论轮带上会让模型直接开写章纲。
@@ -844,7 +832,6 @@ export function buildOutlineAgentSystemPrompt(options: {
       : "工具调用过程只应展示在工具调用 UI 中，不要混入最终正文。资料不足以生成完整正文时，先提出最少必要澄清问题，不要用流程说明冒充生成结果。",
     "所有面向用户的回复必须使用中文。",
     options.projectName ? `当前项目：${options.projectName}` : "",
-    options.soulDoc?.trim() ? `## 作品灵魂与总则\n${options.soulDoc}` : "",
     options.webResearchContext?.trim()
       ? `## 用户明确要求检索的网页资料\n${options.webResearchContext}`
       : "",
@@ -1209,7 +1196,7 @@ function buildGenerationPrompt(
     "## PRD 3.1 主流程要求",
     "本轮意图分析已经完成，直接使用已确认范围生成完整大纲正文；禁止再次输出 intent_clarity 标记，也不要重新进入意图分析。",
     "1. 提取请求关键词。2. 使用已确认范围。3. 读取资料。4. 提取关键内容。",
-    "5. 结合 skill + soul.md 生成可直接保存的大纲正文。6. 结果强约束收敛。",
+    "5. 结合 skill 生成可直接保存的大纲正文。6. 结果强约束收敛。",
     "",
     "## 本分项内容要求",
     requestHint,
@@ -1296,9 +1283,6 @@ function outlineToolCallsToSources(
         break;
       case "read_memory":
         sources.push(`记忆: ${String(target ?? "")}`.trim());
-        break;
-      case "read_deduction":
-        sources.push(`推演: ${String(target ?? "")}`.trim());
         break;
       case "read_chat_history":
         sources.push(`AI会话: ${String(target ?? "")}`.trim());
@@ -2242,30 +2226,10 @@ function OutlineGenerationMenu({
   );
 }
 
-/**
- * 大纲/细纲引用弹窗里「技能库」分类的全部条目（丁-3），含角色灵魂（丁-4）。
- *
- * ⚠️ **故意不产出 `subtype: "style"`（文风）条目**：本面板的 `buildAgentConfig`
- * 调用从不提供 `runDeepChapterGeneration` / `getWritingStyleIdOverride`，
- * 所以 `run_chapter_workflow` 这个工具根本不会被注册，`@` 一条文风在
- * **生成链上没有任何消费者** —— 加进来就是一个「看着接上、其实断开」的死条目，
- * 正是丁-3 存在的理由。大纲/细纲不写正文，文风覆盖对它也没有语义。
- * ⇒ 文风条目只在 `chat-panel.tsx` 的 getter 里注入（那里有覆盖通道的产出端）。
- *
- * ⚠️ **与文风相反，角色灵魂在这里有消费者**（丁-4）：`contextPack.characterAuras`
- * → `buildContextHubSystemContent` 与 `buildScopedOutlineSubAgentContext`，
- * 所以**必须**产出灵魂条目。注意「产出条目」≠「已绑定」：
- * 真正写盘那一步在 `handleSend` 里、用户确认之后（见 `message-scoped-soul-binding`）。
- *
- * 为什么抽成**具名导出**（而不是留成组件里的内联 getter）：这样「这里永远没有文风条目」
- * 才是一条**可被行为断言**的性质（`outline-chat-panel.spec.tsx` 直接调它、只看产出）。
- * 之前它只能靠对源码文本做正则来钉 —— 那既会因为**改注释**而假红，
- * 又会因为**冒号空格 / 别名导入 / 中转变量**等排版变化而假绿（实测过）。
- */
+/** 返回大纲和细纲生成能够使用的技能引用。 */
 export function buildOutlineReferenceSkillEntries(
   deAiSkillConfig: DeAiSkillConfig | null,
   writingSkills: UserSkill[],
-  characterSouls: CharacterSoulOption[],
 ): SkillSummary[] {
   const deAiSkills: SkillSummary[] = deAiSkillConfig
     ? resolveAvailableDeAiSkills(deAiSkillConfig).map((skill) => ({
@@ -2283,12 +2247,7 @@ export function buildOutlineReferenceSkillEntries(
     stages: skill.stages,
     modes: skill.modes,
   }));
-  const soulEntries = characterSouls.map((soul) => ({
-    id: soul.id,
-    name: soul.name,
-    subtype: SOUL_SKILL_SUBTYPE,
-  }));
-  return [...deAiSkills, ...writingSkillList, ...soulEntries];
+  return [...deAiSkills, ...writingSkillList];
 }
 
 export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
@@ -2513,22 +2472,6 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
     return routed.length > 0 ? routed : writingSkills;
   }, [writingSkills]);
 
-  /*
-   * 丁-4：角色灵魂引用。
-   *
-   * ⚠️ 与「文风」相反，本面板**有**灵魂的消费者：`contextHub.prepare` 建出的
-   * `contextPack.characterAuras` 会进 `buildContextHubSystemContent`，
-   * 也会进 `buildScopedOutlineSubAgentContext` 的 `character` 分支
-   * （那一支题名就是「角色气质」）。所以「@ 一条灵魂」在这里不是死条目，
-   * 它真的会改变本次大纲/细纲生成看到的东西 —— 代价是它同样会带上
-   * `portablePersonalities` 的 fail-closed 断言（见确认弹窗里的说明）。
-   */
-  const {
-    souls: characterSouls,
-    requestSoulBindingTarget,
-    soulBindingDialog,
-  } = useCharacterSoulReference({ projectPath: project?.path ?? undefined });
-
   useEffect(() => {
     if (pendingReferenceTokens.length === 0) return;
     const tokens = consumePendingReferenceTokens();
@@ -2540,13 +2483,7 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
       chapterProvider,
       memoryProvider,
       outlineProvider,
-      deductionProvider,
-      /*
-       * 技能库条目（丁-3 抽出具名函数 + 丁-4 的角色灵魂）：
-       * - **故意不**产出「文风」条目（见 `buildOutlineReferenceSkillEntries` 的说明）；
-       * - 角色灵魂**必须**产出 —— 它在本面板确有消费者。
-       */
-      createSkillProvider(() => buildOutlineReferenceSkillEntries(deAiSkillConfig, outlineWritingSkills, characterSouls)),
+      createSkillProvider(() => buildOutlineReferenceSkillEntries(deAiSkillConfig, outlineWritingSkills)),
       createChatHistoryProvider(() =>
         chatConversations.map((conversation) => ({
           id: conversation.id,
@@ -2560,7 +2497,7 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
         })),
       ),
     ],
-    [characterSouls, chatConversations, conversations, deAiSkillConfig, outlineWritingSkills],
+    [chatConversations, conversations, deAiSkillConfig, outlineWritingSkills],
   );
 
   // 加载持久化的历史记录
@@ -3305,7 +3242,7 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
   const handleSend = useCallback(
     async (
       inputText: string,
-      tokens: ReferenceToken[] = [],
+      referenceTokens: ReferenceToken[] = [],
       options: {
         disableWriteTools?: boolean;
         preferredSkillNames?: string[];
@@ -3332,6 +3269,7 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
       } = {},
     ): Promise<OutlineSendResult> => {
       let prompt = inputText.trim();
+      const tokens = referenceTokens.filter(isSupportedReference);
       if (!prompt || !project) return { started: false, sent: false };
       const requestedConversationId = options.conversationId ?? activeConversationId;
       const requestedRunState = requestedConversationId
@@ -3522,66 +3460,6 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
       if (forceRefreshNext) {
         setForceRefreshNext(false);
       }
-      /*
-       * 丁-4：本条消息 `@` 引用的**角色灵魂** → 本条消息的临时绑定。
-       *
-       * ⚠️ 位置是本段的关键：必须在 `addMessage(convId, userMsg)` **之前**。
-       * 确认弹窗可能在用户取消时结束，那时一条消息都还没落地 ——
-       * 若放在消息之后，取消会留下「有提问、没有回复」的残局。
-       *
-       * 顺序：先问（`requestSoulBindingTarget`）→ 再写（`beginMessageScopedSoulBinding`）
-       * → 再走下面真正读盘组装上下文的 `contextHub.prepare`。
-       * 写盘晚于 `contextHub.prepare` 是无效的：那个调用就是读
-       * `.qmai/character-aura.json` 的地方，晚一步这条灵魂进不了本次上下文。
-       *
-       * 释放统一放在本函数的 `finally`（覆盖成功、抛错、中止），不去逐条 return 打补丁。
-       */
-      const referencedSoulAuraIds = collectReferencedSoulAuraIds(tokens);
-      if (referencedSoulAuraIds.length > 1) {
-        toast.info(
-          `一条消息只能引用一条角色灵魂（本次引用了 ${referencedSoulAuraIds.length} 条）。请删掉多余的灵魂引用再发送。`,
-          { dedupeKey: `outline-soul-multi:${capturedConvId}` },
-        );
-        return { started: false, sent: false };
-      }
-      let messageSoulBinding: MessageScopedSoulBinding | null = null;
-      const releaseMessageSoulBinding = async () => {
-        const binding = messageSoulBinding;
-        messageSoulBinding = null;
-        if (!binding) return;
-        try {
-          await releaseMessageScopedSoulBinding(normalizePath(project.path), binding);
-          // 绑定表没有 zustand 镜像，界面只能靠 dataVersion 触发重新读盘。
-          useWikiStore.getState().bumpDataVersion();
-        } catch (error) {
-          // 没还回去是用户必须知道的状态，不静默吞。
-          toast.error(
-            error instanceof Error && error.message ? error.message : "还原临时角色灵魂绑定失败",
-            { title: "临时角色灵魂绑定未还原", persistent: true, dedupeKey: `outline-soul-release:${capturedConvId}` },
-          );
-        }
-      };
-      if (referencedSoulAuraIds.length === 1) {
-        const referencedAuraId = referencedSoulAuraIds[0];
-        const targetCharacterName = await requestSoulBindingTarget(referencedAuraId);
-        // `null` = 用户取消：直接中止，绝不用默认人物顶上。
-        if (!targetCharacterName) return { started: false, sent: false };
-        try {
-          messageSoulBinding = await beginMessageScopedSoulBinding(normalizePath(project.path), {
-            auraId: referencedAuraId,
-            characterName: targetCharacterName,
-          });
-        } catch (error) {
-          // 「请先在大纲中添加人物小传或人物设定，再绑定角色灵魂」这类原话原样转达。
-          toast.error(
-            error instanceof Error && error.message ? error.message : "绑定角色灵魂失败，请稍后重试",
-            { title: "角色灵魂绑定失败", persistent: true, dedupeKey: `outline-soul-bind:${capturedConvId}` },
-          );
-          return { started: false, sent: false };
-        }
-        // 角色灵魂列表随项目内容变化：绑定后让弹窗列表重新读盘。
-        useWikiStore.getState().bumpDataVersion();
-      }
       const userMsg: OutlineChatMessage = {
         id: crypto.randomUUID(),
         role: "user",
@@ -3709,7 +3587,6 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
         const skillConfig = await loadDeAiSkillConfig(project.path).catch(
           (): DeAiSkillConfig | null => null,
         );
-        const soulDoc = await readSoulDoc(project.path).catch(() => "");
         const planModule = options.planPhase ? planTargetModule : undefined;
         const discussModule = discussPhase ? planTargetModule : undefined;
         const baseSystemPrompt = buildOutlineAgentSystemPrompt({
@@ -3721,7 +3598,6 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
         const legacySystemPrompt = buildOutlineAgentSystemPrompt({
           projectName: project.name,
           webResearchContext: webResearchMarkdown,
-          soulDoc,
           mode: outlineMode,
           planModule,
           discussModule,
@@ -4801,13 +4677,6 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
       } finally {
         outlineConversationRunRegistry.remove(capturedConvId, controller);
         resetCapturedWorkflowStageToIdle();
-        /*
-         * 丁-4：本轮大纲生成无论成功、抛错还是被中止，都要还原临时角色灵魂绑定。
-         * 绑定是在本 try **之前**写入的，所以必须在这里兜底 —— 漏掉这一句，
-         * 一条「只对这一条消息生效」的绑定会永久留在项目里，静默改变之后所有章节的上下文。
-         * `releaseMessageSoulBinding` 幂等（先把引用置空再动盘），重复调用无害。
-         */
-        await releaseMessageSoulBinding();
       }
     },
     [
@@ -4831,7 +4700,6 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
       finishConversationRun,
       failConversationRun,
       outlineWorkflowStage,
-      requestSoulBindingTarget,
     ],
   );
 
@@ -5460,10 +5328,9 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
           console.warn("AI 大纲续传上下文中控准备失败，继续使用原有流程：", error);
         }
         const skillConfig = await loadDeAiSkillConfig(project.path).catch((): DeAiSkillConfig | null => null);
-        const soulDoc = await readSoulDoc(project.path).catch(() => "");
         const resumeOutlineMode = resolveOutlineWorkflowMode(useWikiStore.getState().outlineWorkflowMode);
         const baseSystemPrompt = buildOutlineAgentSystemPrompt({ projectName: project.name, mode: resumeOutlineMode });
-        const legacySystemPrompt = buildOutlineAgentSystemPrompt({ projectName: project.name, soulDoc, mode: resumeOutlineMode });
+        const legacySystemPrompt = buildOutlineAgentSystemPrompt({ projectName: project.name, mode: resumeOutlineMode });
         const buildResumeSystemContent = (extraRules: string): AgentMessage["content"] => (
           contextHubResult
             ? buildContextHubSystemContent(baseSystemPrompt, contextHubResult, [extraRules])
@@ -6178,7 +6045,6 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
         const skillConfig = await loadDeAiSkillConfig(project.path).catch(
           (): DeAiSkillConfig | null => null,
         );
-        const soulDoc = await readSoulDoc(project.path).catch(() => "");
         const registry = new ToolRegistry();
         const regenerationDiscussModule = regenerationDiscussPhase
           ? (intentContextsRef.current[capturedConvId]?.title || "大纲")
@@ -6191,7 +6057,6 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
         const legacySystemPrompt = buildOutlineAgentSystemPrompt({
           projectName: project.name,
           mode: regenerationOutlineMode,
-          soulDoc,
           discussModule: regenerationDiscussModule,
         });
         const regenerationPhaseRules = buildIntentPhaseSystemRules(regenerationIntentPhase);
@@ -7288,9 +7153,6 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
           }}
           onClose={() => setReferencePickerOpen(false)}
         />
-        {/* 丁-4：`@某人灵魂` 的确认步骤。打开时 `handleSend` 正 await 它，
-            所以在这里取消就等于中止本次发送（此时一条消息都还没落地）。 */}
-        {soulBindingDialog}
         <OutlineWizardDialog
           open={outlineWizardOpen}
           onOpenChange={setOutlineWizardOpen}

@@ -77,14 +77,12 @@ export function isWebSearchConfigured(
 type KnowledgePackFields = Pick<
   ContextPack,
   | "characterStates"
-  | "characterAuras"
   | "relatedSettings"
   | "canonRules"
   | "sourceCanon"
   | "cognitionStates"
   | "foreshadowingStates"
   | "searchResults"
-  | "soulDoc"
 >
 
 /**
@@ -95,7 +93,6 @@ type KnowledgePackFields = Pick<
 export function buildKnowledgeWritingCorpus(pack: KnowledgePackFields): string {
   return [
     pack.characterStates,
-    pack.characterAuras,
     pack.relatedSettings,
     pack.canonRules,
     // 同人项目：原作既有实体属于本作已知，不纳入会被当成待查并可能搜回冲突资料。
@@ -103,7 +100,6 @@ export function buildKnowledgeWritingCorpus(pack: KnowledgePackFields): string {
     pack.cognitionStates,
     pack.foreshadowingStates,
     pack.searchResults,
-    pack.soulDoc,
   ]
     .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
     .join("\n")

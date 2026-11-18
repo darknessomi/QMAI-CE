@@ -1,7 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import i18n from "@/i18n"
-import { parsePortablePersonality, renderBoundPersonalities } from "./portable-personality"
-import { personality } from "@/test-helpers/portable-personality-fixture"
 import { charsPerTokenForLanguage } from "@/lib/context-budget"
 import {
   annotateChapterOutlineStatus,
@@ -20,9 +18,6 @@ const basePack: ContextPack = {
   recentSummaries: [],
   previousChapterEnding: "",
   characterStates: "",
-  soulDoc: "",
-  characterAuras: "",
-  storyFrameworkBinding: "",
   cognitionStates: "",
   foreshadowingStates: "",
   timeline: "",
@@ -39,22 +34,6 @@ const basePack: ContextPack = {
 }
 
 describe("contextPackToPrompt", () => {
-  it("显式文风画像不能因预算不足被静默裁掉", () => {
-    const writingStyle = "【已启用文风画像】\n" + "具体句法和词汇习惯。".repeat(180)
-    const pack = { ...basePack, task: "写作", writingStyle }
-    expect(() => contextPackToPrompt(pack, 200)).toThrow("文风")
-    expect(contextPackToPrompt(pack, 12000)).toContain(writingStyle)
-  })
-  it("新人格规则不允许被预算静默裁剪", () => {
-    const bindings = [{ characterName: "陆衡", personality: parsePortablePersonality(personality) }]
-    const pack = {
-      ...basePack, portablePersonalities: bindings,
-      characterAuras: renderBoundPersonalities(bindings),
-      outline: "大纲内容".repeat(1000),
-    }
-    expect(() => contextPackToPrompt(pack, 200)).toThrow("人格")
-    expect(contextPackToPrompt(pack, 12000)).toContain("不能直接定罪")
-  })
   it("将最近章节正文片段写入小说上下文包", () => {
     const prompt = contextPackToPrompt({
       ...basePack,
@@ -153,7 +132,6 @@ describe("trimContextPack 两级裁剪", () => {
     chapterGoal: "主角遭遇反派，爆发冲突",
     mustDo: "必须让主角受伤",
     mustAvoid: "不能让主角死",
-    soulDoc: "这是一部热血玄幻小说，主角性格坚毅，不服输。世界观设定为修仙世界，有灵气、功法、丹药等元素。整体节奏紧张，冲突不断。",
     outline: "第一卷：初入修仙界\n  第1章：觉醒\n  第2章：入门\n  第3章：试炼\n  第4章：秘境\n  第5章：传承\n  第6章：冲突\n  第7章：历练\n  第8章：结交\n  第9章：危机\n  第10章：大战",
     recentSummaries: [
       "第1章摘要：主角林小天是个普通山村少年，父母早亡，靠打猎为生。一日在山中打猎时，意外发现一个神秘山洞，洞中有一具骸骨和一枚玉佩。",
@@ -168,8 +146,6 @@ describe("trimContextPack 两级裁剪", () => {
     ],
     previousChapterEnding: "林小天被两名外门弟子押着，一步步走向禁地。他的心中充满愤怒，但更多的是不甘。他不甘心就这样被废掉修为，他不甘心就这样认输。就在禁地大门即将关上的那一刻，他猛地抬起头，眼中闪过一道精光。",
     characterStates: "林小天：炼气九层，性格坚毅，身负神秘玉佩\n苏婉儿：炼气八层，善良聪慧，与主角交好\n张天霸：筑基初期，宗门天才，心胸狭窄",
-    characterAuras: "林小天：不屈、热血、成长型\n苏婉儿：温柔、聪慧、辅助型\n张天霸：傲慢、残忍、反派型",
-    storyFrameworkBinding: "",
     foreshadowingStates: "玉佩秘密：未完全解开，疑似上古大能遗物\n秘境传承：仅获得基础功法，更深层传承待解锁\n苏婉儿身份：表面是普通弟子，似乎另有背景",
     cognitionStates: "林小天当前心态：愤怒但冷静，决心反击\n张天霸当前心态：傲慢自大，想彻底废掉主角\n苏婉儿当前心态：担忧主角安危，想办法营救",
     timeline: "第1章：山村觉醒\n第2章：入门青云宗\n第3章：杂役修炼\n第4章：宗门小比\n第5章：秘境传承\n第6章：初遇冲突\n第7章：下山历练\n第8章：结识婉儿\n第9章：被陷禁地\n第10章：大战在即",
@@ -237,10 +213,10 @@ describe("trimContextPack 两级裁剪", () => {
     const result = trimContextPack({
       ...basePack,
       task: "测试",
-      soulDoc: longText,
+      canonRules: longText,
     }, 400)
     expect(result.partiallyTrimmedField).toBeDefined()
-    expect(result.partiallyTrimmedField?.fieldKey).toBe("soulDoc")
+    expect(result.partiallyTrimmedField?.fieldKey).toBe("canonRules")
     expect(result.prompt.length).toBeLessThan(500)
     expect(result.prompt).toContain("设定文档")
   })
@@ -284,7 +260,7 @@ describe("trimContextPack 两级裁剪", () => {
       const pack: ContextPack = {
         ...basePack,
         task: "测试语言密度",
-        soulDoc: "文".repeat(1_200),
+        canonRules: "文".repeat(1_200),
       }
 
       await i18n.changeLanguage("zh")

@@ -47,7 +47,6 @@ const FIELD_PRIORITY: Record<string, number> = {
    * 用 4.5 而不是整数，避免改动任何既有字段的序号与 token 预算边界。
    */
   sourceCanon: 4.5,
-  soulDoc: 5,
   outline: 6,
   /** 本章章纲：写作链路（excludeOutline）下替代 mergedOutline 里的章纲部分，
    *  让「作品大纲」可以稳定前置、章纲下沉。优先级紧贴 outline。 */
@@ -55,11 +54,7 @@ const FIELD_PRIORITY: Record<string, number> = {
   recentSummaries: 7,
   previousChapterEnding: 8,
   characterStates: 9,
-  characterAuras: 10,
-  /** 排在 characterAuras 之后：被裁掉只是降级，绝不能反过来挤掉人格规则。 */
   personaSkills: 10.5,
-  /** Keep with stable core fields; must not share a slot with characterAuras. */
-  storyFrameworkBinding: 5.5,
   foreshadowingStates: 11,
   recentChapterContents: 12,
   revisionDirectives: 13,
@@ -96,7 +91,6 @@ export interface TrimResult {
 }
 
 export interface ContextPack {
-  portablePersonalities?: import("./portable-personality").BoundPersonality[]
   task: string
   chapterGoal: string
   outline: string
@@ -112,12 +106,8 @@ export interface ContextPack {
   recentSummaries: string[]
   previousChapterEnding: string
   characterStates: string
-  soulDoc: string
-  characterAuras: string
-  /** 「人物 Skill」段。与角色灵魂分成两档：预算紧张时先牺牲它，人格规则不受影响。 */
+  /** 与当前任务匹配的人物 Skill。 */
   personaSkills?: string
-  /** Active story-framework binding text; empty when unbound. */
-  storyFrameworkBinding: string
   cognitionStates: string
   foreshadowingStates: string
   sectionBriefing?: string
@@ -214,7 +204,6 @@ async function buildContextPackFromRawData(
 ): Promise<ContextPack> {
   const searchResults = joinNonEmpty([
     rawData.searchResults || "",
-    rawData.bookAnalysisReferences || "",
   ], "\n\n")
   // retrieval 源返回项目级原始条目，按当前章节在此过滤
   interface RetrievalEntryShape {
@@ -343,8 +332,7 @@ async function buildContextPackFromRawData(
   // 构建修订指令
   const revisionDirectives = buildRevisionDirectives(rawData.revisionFeedback)
   
-  // 构建角色氛围上下文（依赖其他数据）。
-  // 人物 Skill 与角色灵魂共用同一段匹配文本，保证两块注入的命中口径一致。
+  // 按章纲与人物状态匹配人物 Skill。
   const personaMatchingText = joinNonEmpty([
     chapterGoal,
     rawData.chapterOutline,
@@ -352,12 +340,7 @@ async function buildContextPackFromRawData(
     rawData.snapshots.characterStates,
     rawData.cognitionText,
   ], "\n\n")
-  const { buildCharacterSoulContext } = await import("./character-aura")
-  const [soulContext, personaSkillContext] = await Promise.all([
-    buildCharacterSoulContext(context.projectPath, context.task, { matchingText: personaMatchingText }),
-    // 注入失败绝不能弄挂写作：这里兜住一切
-    buildPersonaSkillContext(context.projectPath, personaMatchingText).catch(() => ""),
-  ])
+  const personaSkillContext = await buildPersonaSkillContext(context.projectPath, personaMatchingText).catch(() => "")
 
   return {
     task: context.task,
@@ -385,14 +368,8 @@ async function buildContextPackFromRawData(
     recentSummaries,
     previousChapterEnding,
     characterStates,
-    soulDoc: rawData.soulDoc,
     sectionBriefing: rawData.sectionBriefing || "",
-    characterAuras: soulContext.text,
     ...(personaSkillContext ? { personaSkills: personaSkillContext } : {}),
-    ...(soulContext.portablePersonalities.length ? { portablePersonalities: soulContext.portablePersonalities } : {}),
-    storyFrameworkBinding: typeof rawData.storyFrameworkBinding === "string"
-      ? rawData.storyFrameworkBinding
-      : "",
     cognitionStates: rawData.cognitionText,
     foreshadowingStates,
     timeline,
@@ -569,9 +546,6 @@ function emptyPack(task: string): ContextPack {
     recentSummaries: [],
     previousChapterEnding: "",
     characterStates: "",
-    soulDoc: "",
-    characterAuras: "",
-    storyFrameworkBinding: "",
     cognitionStates: "",
     foreshadowingStates: "",
     sectionBriefing: "",
@@ -890,7 +864,7 @@ async function readCanonRules(pp: string): Promise<string> {
 
 // @ts-expect-error - 函数通过动态导入在 context-data-sources.ts 中使用
 async function readWritingStyle(pp: string): Promise<string> {
-  // 优先：已启用的拆书作品文风预设（feature/book-style-extraction）。
+  // 优先：已启用的文风预设。
   // buildWritingStyleContext 内部已做长度上限与"只学文风不借剧情"硬约束。
   try {
     const { buildWritingStyleContext } = await import("./writing-style-store")
@@ -1138,8 +1112,6 @@ const FIELD_CONFIGS: FieldConfig[] = [
   { titleKey: "novel.contextPack.mustDo.title", fieldKey: "mustDo" },
   { titleKey: "novel.contextPack.mustAvoid.title", fieldKey: "mustAvoid" },
   { titleKey: "novel.contextPack.nextChapterAdvice.title", fieldKey: "nextChapterAdvice" },
-  { titleKey: "novel.contextPack.soulDoc", fieldKey: "soulDoc" },
-  { titleKey: "novel.contextPack.storyFrameworkBinding", fieldKey: "storyFrameworkBinding" },
   { titleKey: "novel.contextPack.recentRevisionDirectives", fieldKey: "revisionDirectives" },
   { titleKey: "novel.contextPack.requiredOutline", fieldKey: "outline" },
   { titleKey: "novel.contextPack.chapterOutline", fieldKey: "chapterOutlineContext" },
@@ -1147,7 +1119,6 @@ const FIELD_CONFIGS: FieldConfig[] = [
   { titleKey: "novel.contextPack.recentPlotSummaries", fieldKey: "recentSummaries" },
   { titleKey: "novel.contextPack.previousChapterEnding", fieldKey: "previousChapterEnding" },
   { titleKey: "novel.contextPack.characterStates", fieldKey: "characterStates" },
-  { titleKey: "novel.contextPack.characterAuras", fieldKey: "characterAuras" },
   { titleKey: "novel.contextPack.personaSkills", fieldKey: "personaSkills" },
   { titleKey: "novel.contextPack.cognitionStates", fieldKey: "cognitionStates" },
   { titleKey: "novel.contextPack.foreshadowingStates", fieldKey: "foreshadowingStates" },
@@ -1172,8 +1143,6 @@ const FIELD_CONFIGS: FieldConfig[] = [
  */
 const FIELD_EMIT_ORDER: string[] = [
   // 作品级稳定：整本书内逐字节不变
-  "soulDoc",
-  "storyFrameworkBinding",
   "sourceCanon",
   "canonRules",
   "writingStyle",
@@ -1191,7 +1160,6 @@ const FIELD_EMIT_ORDER: string[] = [
   "previousChapterEnding",
   "characterStates",
   "personaSkills",
-  "characterAuras",
   "foreshadowingStates",
   "cognitionStates",
   "timeline",
@@ -1238,12 +1206,6 @@ export function contextPackToPrompt(
   options?: { excludeOutline?: boolean; maxContextSize?: number },
 ): string {
   const result = trimContextPack(pack, tokenBudget, options)
-  if (pack.portablePersonalities?.length && (!pack.characterAuras || !result.prompt.includes(pack.characterAuras))) {
-    throw new Error("上下文预算不足，角色人格规则未完整保留。请缩小本次章节范围或选择更大上下文模型，已停止生成。")
-  }
-  if (pack.writingStyle?.startsWith("【已启用文风画像】") && !result.prompt.includes(pack.writingStyle)) {
-    throw new Error("上下文预算不足，已启用的文风画像未完整保留。请减少本次参考内容或选择更大上下文模型，已停止生成。")
-  }
   assertSourceCanonPreserved(pack, result.prompt)
   return result.prompt
 }

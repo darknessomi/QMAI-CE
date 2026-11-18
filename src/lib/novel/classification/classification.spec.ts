@@ -38,10 +38,9 @@ beforeEach(() => {
 })
 
 describe("classification types", () => {
-  it("ALL_DATA_SOURCE_CATEGORIES 包含所有 12 个分类", () => {
-    expect(ALL_DATA_SOURCE_CATEGORIES.length).toBe(12)
+  it("ALL_DATA_SOURCE_CATEGORIES 包含所有 11 个分类", () => {
+    expect(ALL_DATA_SOURCE_CATEGORIES.length).toBe(11)
     expect(ALL_DATA_SOURCE_CATEGORIES).toContain("outline")
-    expect(ALL_DATA_SOURCE_CATEGORIES).toContain("soul")
     expect(ALL_DATA_SOURCE_CATEGORIES).toContain("memory")
     expect(ALL_DATA_SOURCE_CATEGORIES).toContain("graph")
   })
@@ -62,7 +61,6 @@ describe("default-routes", () => {
     expect(route).toBeDefined()
     expect(route?.intent).toBe("write_chapter")
     expect(route?.required).toContain("outline")
-    expect(route?.required).toContain("soul")
   })
 
   it("getDefaultRoute 对不存在的意图返回 undefined", () => {
@@ -75,9 +73,9 @@ describe("default-routes", () => {
     expect(hasDefaultRoute("nonexistent")).toBe(false)
   })
 
-  it("write_chapter 必载包含 outline, soul, character_states, foreshadowing", () => {
+  it("write_chapter 必载包含 outline, character_states, foreshadowing", () => {
     const route = getDefaultRoute("write_chapter")!
-    expect(route.required).toEqual(["outline", "soul", "character_states", "foreshadowing"])
+    expect(route.required).toEqual(["outline", "character_states", "foreshadowing"])
   })
 
   it("general_chat 必载为空，所有都是选载", () => {
@@ -96,14 +94,12 @@ describe("route-applier", () => {
     recentChapterContents: ["章节内容1"],
     previousChapterEnding: "上一章结尾",
     characterStates: "人物状态",
-    characterAuras: [],
     cognitionStates: [],
     foreshadowingStates: "伏笔状态",
     timeline: "时间线",
     relatedSettings: "相关设定",
     canonRules: "正史规则",
     sourceCanon: "原作正典",
-    soulDoc: "作品灵魂",
     searchResults: [],
     graphSearchResults: [],
     nextChapterAdvice: "下一章建议",
@@ -114,15 +110,15 @@ describe("route-applier", () => {
 
   it("getAllCategories 返回所有分类", () => {
     const categories = getAllCategories()
-    expect(categories.length).toBe(12)
+    expect(categories.length).toBe(11)
     expect(categories).toContain("outline")
-    expect(categories).toContain("soul")
+    expect(categories).toContain("revision")
   })
 
   it("getCategoryFields 返回正确的字段映射", () => {
     expect(getCategoryFields("outline")).toContain("outline")
     expect(getCategoryFields("outline")).toContain("chapterGoal")
-    expect(getCategoryFields("soul")).toEqual(["soulDoc"])
+    expect(getCategoryFields("revision")).toEqual(["revisionDirectives"])
     expect(getCategoryFields("nonexistent" as any)).toEqual([])
   })
 
@@ -130,7 +126,7 @@ describe("route-applier", () => {
     const pack = createFullPack()
     const rule: RouteRule = {
       intent: "write_chapter",
-      required: ["outline", "soul"],
+      required: ["outline", "revision"],
       optional: [],
       forbidden: [],
     }
@@ -138,9 +134,8 @@ describe("route-applier", () => {
     const result = applyRouteRules(pack, rule)
 
     expect(result.keptSources).toContain("outline")
-    expect(result.keptSources).toContain("soul")
     expect(result.pack.outline).toBe("大纲内容")
-    expect(result.pack.soulDoc).toBe("作品灵魂")
+    expect(result.pack.revisionDirectives).toBe("修订指引")
   })
 
   it("applyRouteRules 清除禁载数据源", () => {
@@ -165,16 +160,15 @@ describe("route-applier", () => {
     const rule = {
       intent: "general_chat",
       required: ["outline"],
-      optional: ["soul", "memory"],
+      optional: ["revision", "memory"],
       forbidden: [],
     } as RouteRule
 
     const result = applyRouteRules(pack, rule)
 
     expect(result.keptSources).toContain("outline")
-    expect(result.keptSources).toContain("soul")
     expect(result.keptSources).toContain("memory")
-    expect(result.pack.soulDoc).toBe("作品灵魂")
+    expect(result.pack.revisionDirectives).toBe("修订指引")
   })
 
   it("applyRouteRules 未分类的数据源默认被阻止", () => {
@@ -189,7 +183,7 @@ describe("route-applier", () => {
     const result = applyRouteRules(pack, rule)
 
     expect(result.blockedSources.length).toBeGreaterThan(0)
-    expect(result.blockedSources).toContain("soul")
+    expect(result.blockedSources).toContain("revision")
     expect(result.blockedSources).toContain("memory")
   })
 
@@ -199,7 +193,6 @@ describe("route-applier", () => {
     const result = applyRouteRules(pack, rule)
 
     expect(result.keptSources).toContain("outline")
-    expect(result.keptSources).toContain("soul")
     expect(result.keptSources).toContain("character_states")
     expect(result.keptSources).toContain("foreshadowing")
     expect(result.blockedSources).toContain("revision")
@@ -244,7 +237,7 @@ describe("markdown-serializer", () => {
       routes: [
         {
           intent: "write_chapter",
-          required: ["outline", "soul"],
+          required: ["outline", "revision"],
           optional: ["memory"],
           forbidden: ["revision"],
         },
@@ -272,7 +265,6 @@ describe("markdown-serializer", () => {
     const writeChapter = parsed?.routes.find((r) => r.intent === "write_chapter")
     expect(writeChapter).toBeDefined()
     expect(writeChapter?.required).toContain("outline")
-    expect(writeChapter?.required).toContain("soul")
     expect(writeChapter?.required).toContain("character_states")
     expect(writeChapter?.required).toContain("foreshadowing")
     expect(writeChapter?.forbidden).toContain("revision")
@@ -306,7 +298,7 @@ describe("classification-loader", () => {
         { intent: "write_chapter", required: ["outline"], optional: [], forbidden: [] },
       ]
       const featureRoutes: RouteRule[] = [
-        { intent: "lint_chapter", required: ["soul"], optional: [], forbidden: [] },
+        { intent: "lint_chapter", required: ["revision"], optional: [], forbidden: [] },
       ]
 
       const merged = mergeRoutes(projectRoutes, featureRoutes)
@@ -335,19 +327,19 @@ describe("classification-loader", () => {
         { intent: "write_chapter", required: ["outline"], optional: ["memory"], forbidden: ["graph"] },
       ]
       const featureRoutes: RouteRule[] = [
-        { intent: "write_chapter", required: [], optional: ["graph", "soul"], forbidden: [] },
+        { intent: "write_chapter", required: [], optional: ["graph", "revision"], forbidden: [] },
       ]
 
       const merged = mergeRoutes(projectRoutes, featureRoutes)
       const writeChapter = merged.find((r) => r.intent === "write_chapter")!
 
       expect(writeChapter.optional).not.toContain("graph")
-      expect(writeChapter.optional).toContain("soul")
+      expect(writeChapter.optional).toContain("revision")
     })
 
     it("项目级必载始终保留", () => {
       const projectRoutes: RouteRule[] = [
-        { intent: "write_chapter", required: ["outline", "soul"], optional: [], forbidden: [] },
+        { intent: "write_chapter", required: ["outline", "revision"], optional: [], forbidden: [] },
       ]
       const featureRoutes: RouteRule[] = [
         { intent: "write_chapter", required: [], optional: [], forbidden: ["outline"] },
@@ -357,14 +349,14 @@ describe("classification-loader", () => {
       const writeChapter = merged.find((r) => r.intent === "write_chapter")!
 
       expect(writeChapter.required).toContain("outline")
-      expect(writeChapter.required).toContain("soul")
+      expect(writeChapter.required).toContain("revision")
     })
   })
 
   describe("validateFeatureRoutes", () => {
     it("分支级禁载包含项目级必载时返回错误", () => {
       const projectRoutes: RouteRule[] = [
-        { intent: "write_chapter", required: ["outline", "soul"], optional: [], forbidden: [] },
+        { intent: "write_chapter", required: ["outline", "revision"], optional: [], forbidden: [] },
       ]
       const featureRoutes: RouteRule[] = [
         { intent: "write_chapter", required: [], optional: [], forbidden: ["outline"] },
@@ -379,7 +371,7 @@ describe("classification-loader", () => {
 
     it("分支级必载不在项目级必载或选载中时返回错误", () => {
       const projectRoutes: RouteRule[] = [
-        { intent: "write_chapter", required: ["outline"], optional: ["soul"], forbidden: [] },
+        { intent: "write_chapter", required: ["outline"], optional: ["revision"], forbidden: [] },
       ]
       const featureRoutes: RouteRule[] = [
         { intent: "write_chapter", required: ["graph"], optional: [], forbidden: [] },
@@ -393,10 +385,10 @@ describe("classification-loader", () => {
 
     it("合法的分支路由通过验证", () => {
       const projectRoutes: RouteRule[] = [
-        { intent: "write_chapter", required: ["outline"], optional: ["soul", "memory"], forbidden: [] },
+        { intent: "write_chapter", required: ["outline"], optional: ["revision", "memory"], forbidden: [] },
       ]
       const featureRoutes: RouteRule[] = [
-        { intent: "write_chapter", required: ["soul"], optional: [], forbidden: ["memory"] },
+        { intent: "write_chapter", required: ["revision"], optional: [], forbidden: ["memory"] },
       ]
 
       const result = validateFeatureRoutes(projectRoutes, featureRoutes)
@@ -410,7 +402,7 @@ describe("classification-loader", () => {
         { intent: "write_chapter", required: ["outline"], optional: [], forbidden: [] },
       ]
       const featureRoutes: RouteRule[] = [
-        { intent: "lint_chapter", required: ["soul"], optional: [], forbidden: [] },
+        { intent: "lint_chapter", required: ["revision"], optional: [], forbidden: [] },
       ]
 
       const result = validateFeatureRoutes(projectRoutes, featureRoutes)
@@ -481,7 +473,7 @@ describe("classification-loader", () => {
           {
             intent: "write_chapter",
             required: ["outline"],
-            optional: ["soul"],
+            optional: ["revision"],
             forbidden: ["memory"],
           },
         ],
@@ -491,7 +483,7 @@ describe("classification-loader", () => {
       const writeChapter = upgraded.routes.find((r) => r.intent === "write_chapter")!
 
       expect(writeChapter.required).toEqual(["outline"])
-      expect(writeChapter.optional).toEqual(["soul"])
+      expect(writeChapter.optional).toEqual(["revision"])
       expect(writeChapter.forbidden).toEqual(["memory"])
     })
   })

@@ -206,7 +206,7 @@ export function DataManagementSection() {
         </h2>
         <p className="mt-1 text-sm text-muted-foreground">
           {t("settings.sections.dataManagement.description", {
-            defaultValue: "备份和恢复你的所有数据，包括模型配置、AI对话、小说内容、大纲、记忆库、拆书结果等。",
+            defaultValue: "备份和恢复你的所有数据，包括模型配置、AI对话、小说内容、大纲、记忆库等。",
           })}
         </p>
       </div>

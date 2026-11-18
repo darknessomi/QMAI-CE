@@ -13,8 +13,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import i18n from "@/i18n"
 import type { BookStyleProfile } from "./book-analysis/types"
-import { STYLE_FACETS, parseStyleFingerprintItem } from "./book-analysis/style-fingerprint"
-import { buildEvidenceCandidates } from "./book-analysis/workbench-core"
 
 const mem = new Map<string, string>()
 /**
@@ -87,38 +85,6 @@ function makeProfile(overrides: Partial<BookStyleProfile> = {}): BookStyleProfil
   }
 }
 
-/** 结构化画像（v2 拆书工作台发布的那种）：带 `workbenchStyle.styleFingerprint`。 */
-async function makeStructuredWorkbenchStyle() {
-  const evidence = await buildEvidenceCandidates([{
-    chapterId: "c1",
-    order: 1,
-    start: 0,
-    sourceHash: "a".repeat(64),
-    text: "他略一沉吟，继而抬起头。她反问了一句。场景随后转到庭院。",
-  }])
-  const rules = Object.keys(STYLE_FACETS).map((dimension) => ({
-    dimension,
-    observation: "语言观察",
-    condition: "场景需要时",
-    action: `具体${dimension}写法。`,
-    boundary: "不机械套用",
-    evidenceIds: [evidence[0].id],
-  }))
-  return parseStyleFingerprintItem({
-    subject: "文风",
-    positioning: "克制白话叙事",
-    limitations: "范围有限",
-    coverage: Object.keys(STYLE_FACETS).map((dimension) => ({
-      dimension,
-      status: "observed",
-      reason: "用于覆盖测试",
-    })),
-    rules,
-    lexicon: [],
-    scenes: [],
-  }, evidence)
-}
-
 async function seedPreset(name: string, sourceBook: string, profile: BookStyleProfile) {
   return upsertWritingStylePreset(PROJECT, { name, sourceBook, profile })
 }
@@ -140,9 +106,6 @@ const basePack: ContextPack = {
   recentSummaries: [],
   previousChapterEnding: "",
   characterStates: "",
-  soulDoc: "",
-  characterAuras: "",
-  storyFrameworkBinding: "",
   cognitionStates: "",
   foreshadowingStates: "",
   timeline: "",
@@ -164,12 +127,8 @@ beforeEach(() => {
 })
 
 describe("文风覆盖：渲染器三态（undefined / null / string）", () => {
-  it("undefined = 没有覆盖：与「读项目启用项」逐字节一致，且带前缀的是结构化画像", async () => {
-    const workbenchStyle = await makeStructuredWorkbenchStyle()
-    const { b } = await seedTwoStyles(
-      makeProfile(),
-      makeProfile({ schemaVersion: 2, workbenchStyle }),
-    )
+  it("undefined = 没有覆盖：与「读项目启用项」逐字节一致", async () => {
+    const { b } = await seedTwoStyles(makeProfile(), makeProfile({ schemaVersion: 2 }))
 
     const enabled = await buildWritingStyleContext(PROJECT)
     const noOverride = await buildWritingStyleContext(PROJECT, { styleIdOverride: undefined })
@@ -177,7 +136,6 @@ describe("文风覆盖：渲染器三态（undefined / null / string）", () => 
     expect(await resolveWritingStylePreset(PROJECT, undefined)).toMatchObject({ id: b.id })
     expect(noOverride).toBe(enabled)
     expect(noOverride).toContain("《乙书B》")
-    expect(noOverride.startsWith("【已启用文风画像】")).toBe(true)
   })
 
   it("string = 用指定预设渲染：启用项的来源字样完全不出现在文本里", async () => {
@@ -231,26 +189,9 @@ describe("文风覆盖：渲染器三态（undefined / null / string）", () => 
   })
 })
 
-describe("覆盖文本的形状：与「已启用」路径同形（选择 (a) 的不对称被显式钉住）", () => {
-  it("结构化画像的覆盖带 `【已启用文风画像】` 前缀 ⇒ 命中 contextPackToPrompt 的守卫", async () => {
-    const workbenchStyle = await makeStructuredWorkbenchStyle()
-    const { a } = await seedTwoStyles(makeProfile(), makeProfile())
-    // 把 A 换成结构化画像（同 id 覆盖写入）
-    await upsertWritingStylePreset(PROJECT, {
-      name: "甲书 · 文风",
-      sourceBook: "甲书A",
-      profile: makeProfile({ schemaVersion: 2, workbenchStyle }),
-    })
+describe("覆盖文本与项目启用文风采用同一格式", () => {
 
-    const override = await buildWritingStyleContext(PROJECT, { styleIdOverride: a.id })
-
-    expect(override.startsWith("【已启用文风画像】")).toBe(true)
-    // 守卫真的看得见它：预算不足时停机（与「已启用」路径同一条闸门）
-    expect(() => contextPackToPrompt({ ...basePack, writingStyle: override }, 200)).toThrow("文风")
-    expect(contextPackToPrompt({ ...basePack, writingStyle: override }, 12000)).toContain(override)
-  })
-
-  it("v1/旧画像的覆盖**不带**前缀 ⇒ 与「已启用」路径一样不被守卫拦（既有行为，本批不改变）", async () => {
+  it("旧版自定义预设可以用于项目启用和单轮覆盖", async () => {
     const legacy = makeProfile({ constitution: "冷峻克制、短句推进" })
     const { a, b } = await seedTwoStyles(legacy, legacy)
 
@@ -258,19 +199,16 @@ describe("覆盖文本的形状：与「已启用」路径同形（选择 (a) �
     const enabled = await buildWritingStyleContext(PROJECT, { styleIdOverride: b.id })
 
     expect(override).toContain("风格硬约束：")
-    expect(override).not.toContain("【已启用文风画像】")
     // 两条路径**同形**：除来源书名那一行外逐字节一致 ⇒ 覆盖不会比启用路径更严格
     const shapeOf = (text: string) => text.split("\n").slice(1).join("\n")
     expect(shapeOf(override)).toBe(shapeOf(enabled))
-    expect(enabled.startsWith("【已启用文风画像】")).toBe(false)
-    // 预算极小时两者都不停机（这就是 (a) 选择接受的那条静默路径）
     expect(() => contextPackToPrompt({ ...basePack, writingStyle: override }, 120)).not.toThrow()
     expect(() => contextPackToPrompt({ ...basePack, writingStyle: enabled }, 120)).not.toThrow()
   })
 })
 
 describe("测量 3：「不用文风」（空 writingStyle）不产生空标题", () => {
-  it("空 writingStyle 既不出标题也不触发守卫；非空时有标题（正向对照，防恒真）", () => {
+  it("只有非空文风才生成对应标题", () => {
     const withStyle = contextPackToPrompt({ ...basePack, writingStyle: "悬疑、克制" }, 12000)
     expect(withStyle).toContain(styleHeading())
     expect(withStyle).toContain("悬疑、克制")
@@ -507,7 +445,7 @@ describe("测量 1 + 2：覆盖生效且不并存 / 项目设置未被写盘", (
     expect(pack.writingStyle).toBe("缓存里的项目启用文风")
   })
 
-  it("覆盖渲染器收到的是 input.projectPath 与本次任务描述", async () => {
+  it("覆盖渲染器收到的是项目路径与预设 ID", async () => {
     const pack: ContextPack = { ...basePack, writingStyle: "x" }
     const { deps } = createDeps(pack)
     const renderer = vi.fn(async () => "覆盖文本")
@@ -528,7 +466,6 @@ describe("测量 1 + 2：覆盖生效且不并存 / 项目设置未被写盘", (
     )
 
     expect(renderer).toHaveBeenCalledWith(PROJECT, {
-      task: expect.stringContaining("生成第三章"),
       styleIdOverride: "style-a",
     })
   })

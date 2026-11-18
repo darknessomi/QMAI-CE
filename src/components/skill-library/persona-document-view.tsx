@@ -43,7 +43,7 @@ interface SectionSpec {
  */
 const SECTIONS: ReadonlyArray<SectionSpec> = [
   { title: "基本信息", fields: ["性别", "年龄", "势力组织", "外貌"] },
-  { title: "性格与灵魂", fields: ["性格"] },
+  { title: "性格", fields: ["性格"] },
   { title: "语言与行为", fields: ["怎么说话", "怎么想", "怎么判断", "什么不做", "知道局限"] },
   { title: "关系与状态", fields: ["关系网", "当前状态", "出场组织", "认知变化", "关系变化", "备注"] },
 ]
@@ -76,7 +76,7 @@ export function PersonaDocumentView(props: PersonaDocumentViewProps) {
               />
             </p>
           ))}
-          {section.title === "性格与灵魂" ? (
+          {section.title === "性格" ? (
             <p className="ui-test-pdoc-row is-static">
               <b>注入预览：</b>
               <span className="ui-test-pdoc-readonly">{injectPreview}</span>

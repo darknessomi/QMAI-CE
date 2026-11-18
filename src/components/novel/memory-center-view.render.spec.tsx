@@ -73,7 +73,6 @@ function makeData(): MemoryCenterData {
         sections: [{ title: "主角", items: ["许七安：警觉"], groups: [] }],
       },
     ],
-    dismantlingProjects: [],
   }
 }
 

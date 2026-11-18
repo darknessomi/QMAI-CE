@@ -16,9 +16,7 @@ export function createLoadContextTool(
     execute: async () => {
       try {
         const pack = await buildContextPack(projectPath, userMessage, taskRoute?.chapterNumber)
-        const contextStr = pack.soulDoc
-          ? `【作品灵魂】\n${pack.soulDoc}\n\n【上下文数据源】\n共加载 ${Object.keys(pack).length} 个数据源`
-          : `【上下文数据源】\n共加载 ${Object.keys(pack).length} 个数据源`
+        const contextStr = `已加载 ${Object.keys(pack).length} 个上下文数据源`
         return contextStr
       } catch (e) {
         return `错误：加载上下文失败 - ${e instanceof Error ? e.message : String(e)}`

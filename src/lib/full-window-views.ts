@@ -15,7 +15,6 @@ export const FULL_WINDOW_VIEWS = [
   "skillLibrary",
   "writingSkillLibrary",
   "writingStyleLibrary",
-  "characterSoulLibrary",
   /*
    * ⚠️ `personaSkillLibrary`（「人物 Skill」）是**补进来的**，不是一开始就有。
    *
@@ -43,7 +42,7 @@ export const FULL_WINDOW_VIEWS = [
    * 它既不属于某一章，页面上也没有"在插件页里选章"这种动作。
    *
    * 漏项的症状与技能库那次一模一样：进插件页时左侧多冒出一条章节列表，
-   * 而其余顶层页（灵魂 / 拆书库 / 剧情推演室…）都是整窗、没有目录栏。
+   * 技能库等整窗页面也不显示目录栏。
    *
    * ⚠️ 这一条**只影响 UI 测试壳**（`ui-test-shell.tsx` 的 `hasDirectory`，
    * 它是本清单唯一的消费方）：生产界面的目录栏由 `SidebarPanel` 自己的判断决定，

@@ -30,7 +30,7 @@ export function comparePersonaSkillMeta(a: PersonaSkillMeta, b: PersonaSkillMeta
 /**
  * 名字匹配：精确相等 / 别名命中 / 双向包含。
  * 包含匹配要求两边都 ≥ 2 个字，否则单姓（「林」）会把全库都匹配上。
- * 故意不做拼音与繁简归一：那会把 pinyin-pro / opencc-js 拖过 bundle 边界。
+ * 故意不做拼音与繁简归一：那会把 pinyin-pro 拖过 bundle 边界。
  */
 export function matchesPersonaName(normalizedQuery: string, names: readonly string[]): boolean {
   for (const name of names) {
@@ -111,7 +111,6 @@ export function renderPersonaSkillBlock(meta: PersonaSkillMeta, document: string
   const order = meta.tier === "major" ? PERSONA_MAJOR_FIELDS : PERSONA_MINOR_FIELDS
   const parts: string[] = []
   // 性格段必须排在最前：它是「演成什么样」的指令，比「怎么演」的演技字段更强。
-  // 用户拍板的口径是性格优先于灵魂基线，这个优先级只能靠**位置 + 明确措辞**表达，
   // 不能靠后面补一句「请注意性格优先」—— 模型对靠前指令的服从度明显更高。
   // 档位不裁剪：次要人物也带性格，否则「戏份少但性格强」的配角写不出味道。
   const personality = parsePersonalitySection(sections.get("性格") ?? "")
@@ -123,7 +122,7 @@ export function renderPersonaSkillBlock(meta: PersonaSkillMeta, document: string
       byChars.push(tag)
     }
     if (byChars.length > 0) {
-      parts.push(`人物性格：${byChars.join("、")}（性格优先于灵魂基线：灵魂只决定"怎么演"，性格决定"演成什么样"）`)
+      parts.push(`人物性格：${byChars.join("、")}`)
     }
   } else if (personality.raw) {
     parts.push(`人物性格：${truncate(personality.raw.replace(/\s*\n\s*/g, " "), PERSONA_INJECT_PERSONALITY_MAX_CHARS)}`)

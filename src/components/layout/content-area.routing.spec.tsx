@@ -38,7 +38,6 @@ async function renderWithView(
     | "soul" | "bookAnalysis" | "storySimulation"
     | "writingStyleLibrary"
     | "writingSkillLibrary"
-    | "characterSoulLibrary"
     | "personaSkillLibrary"
     | "skillFavorites"
     | "skillLibrary",
@@ -92,15 +91,6 @@ describe("ContentArea 技能库视图路由", () => {
     cleanup(root, container)
   })
 
-  it("renders the unified skill library for the 角色灵魂 view", async () => {
-    const { container, root } = await renderWithView("characterSoulLibrary")
-
-    expect(container.querySelector('[data-testid="stub-unified-skill-library"]')).not.toBeNull()
-    expect(container.querySelector('[data-testid="stub-ai-chat-tab"]')).toBeNull()
-
-    cleanup(root, container)
-  })
-
   /*
    * 人物 Skill 已从技能库移出，必须**直接**渲染人物页。
    * 走 UnifiedSkillLibraryView 会在它内部 resolveActiveTab 抛错
@@ -147,12 +137,11 @@ describe("ContentArea 技能库视图路由", () => {
     const renderPoints = source.match(/<UnifiedSkillLibraryView\s*\/>/g) ?? []
     expect(renderPoints).toHaveLength(1)
 
-    // 六个视图名必须都挂在同一个 switch 分组里（漏一个就掉进 default → AI 会话）
+    // 保留各个受支持的技能库和人物管理路由。
     for (const view of [
       "skillLibrary",
       "writingSkillLibrary",
       "writingStyleLibrary",
-      "characterSoulLibrary",
       "personaSkillLibrary",
       "skillFavorites",
     ]) {

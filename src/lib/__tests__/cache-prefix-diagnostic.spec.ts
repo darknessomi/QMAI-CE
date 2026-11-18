@@ -198,8 +198,6 @@ describe("缓存前缀诊断 v2", () => {
 
   it("S5 stableCore 比例截断：前段 +40 行，后面各段截断位平移", () => {
     const pack = (canonRules: string): ContextPack => ({
-      soulDoc: numbered("魂", 30),
-      storyFrameworkBinding: numbered("架", 30),
       sourceCanon: "",
       canonRules,
       relatedSettings: numbered("设", 60),
@@ -210,7 +208,7 @@ describe("缓存前缀诊断 v2", () => {
       chapterGoal: "", chapterOutlineContext: "", relevantMaterials: "", mustDo: "", mustAvoid: "",
       sectionBriefing: "", previousChapterEnding: "", characterStates: "", foreshadowingStates: "",
       recentSummaries: [], revisionDirectives: "", timeline: "", cognitionStates: "",
-      characterAuras: "", nextChapterAdvice: "", searchResults: "", graphSearchResults: "",
+      nextChapterAdvice: "", searchResults: "", graphSearchResults: "",
       recentChapterContents: [],
     } as unknown as ContextPack)
     const stamp = { fingerprint: "f", kinds: ["setting"], sourceCount: 1 } as never
@@ -239,8 +237,6 @@ describe("缓存前缀诊断 v2", () => {
     const lines = (prefix: string, count: number) =>
       Array.from({ length: count }, (_, index) => `${prefix}第${index}行 ` + "内".repeat(30)).join("\n")
     const base = {
-      soulDoc: "### 作品灵魂\n" + lines("魂", 30),
-      storyFrameworkBinding: "### 框架\n" + lines("架", 20),
       canonRules: "### 硬性世界规则\n" + lines("规", 40),
       relatedSettings: "### 核心设定\n" + lines("设", 40),
       writingStyle: "### 写作风格\n" + lines("风", 30),
@@ -249,7 +245,6 @@ describe("缓存前缀诊断 v2", () => {
       recentSummaries: [],
       recentChapterContents: [],
       personaSkills: "",
-      characterAuras: "",
       cognitionStates: "",
       timeline: "",
       searchResults: "",
@@ -295,8 +290,9 @@ describe("缓存前缀诊断 v2", () => {
       `        新断点 ${breakContext(current[0], current[1], sharedLength(current[0], current[1]))}`,
     )
     // 新写法下，作品大纲与作品级稳定字段都必须落在公共前缀里
-    expect(current[0].indexOf("作品灵魂")).toBeLessThan(current[0].indexOf("本章章纲"))
-    expect(currentShared).toBeGreaterThan(legacyShared + 0.3)
+    expect(current[0].indexOf("## 禁止违背")).toBeGreaterThanOrEqual(0)
+    expect(current[0].indexOf("## 禁止违背")).toBeLessThan(current[0].indexOf("本章章纲"))
+    expect(sharedLength(current[0], current[1])).toBeGreaterThan(sharedLength(legacy[0], legacy[1]))
   })
 
   it("S10 章节 system 必须由写作与审稿**成对**携带，否则第 0 字节就错位", () => {

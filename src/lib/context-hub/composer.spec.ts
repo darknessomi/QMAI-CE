@@ -15,9 +15,6 @@ function pack(overrides: Partial<ContextPack> = {}): ContextPack {
     recentSummaries: [],
     previousChapterEnding: "列车驶入黑暗。",
     characterStates: "林默：保持怀疑",
-    soulDoc: "克制、现实主义悬疑",
-    characterAuras: "",
-    storyFrameworkBinding: "",
     cognitionStates: "",
     foreshadowingStates: "旧车票尚未解释",
     timeline: "第二天清晨",
@@ -41,19 +38,8 @@ describe("composeContext", () => {
     const second = composeContext(input)
 
     expect(first.stableCore).toBe(second.stableCore)
-    expect(first.stableCore.indexOf("作品灵魂")).toBeLessThan(first.stableCore.indexOf("大纲骨架"))
+    expect(first.stableCore.indexOf("硬性世界规则")).toBeLessThan(first.stableCore.indexOf("大纲骨架"))
     expect(first.stableCore).not.toContain("updatedAt")
-  })
-
-  it("injects story framework binding into the stable core when present", () => {
-    const result = composeContext({
-      contextPack: pack({
-        storyFrameworkBinding: "# 故事框架绑定\n- 框架标题：测试框架\n- 目标章节数：100",
-      }),
-      dependencyStamp,
-    })
-    expect(result.stableCore).toContain("故事框架绑定")
-    expect(result.stableCore).toContain("测试框架")
   })
 
   it("injects fanfic source canon into the stable core ahead of self-owned settings", () => {
@@ -104,8 +90,6 @@ describe("composeContext", () => {
       composeContext({
         contextPack: pack({
           sourceCanon: canon,
-          soulDoc: "灵魂文档".repeat(1500),
-          storyFrameworkBinding: "框架绑定".repeat(1500),
           outline: "大纲骨架".repeat(1500),
           canonRules: "硬规则".repeat(1500),
           relatedSettings: "核心设定".repeat(1500),
@@ -220,7 +204,6 @@ describe("composeContext", () => {
   it("稳定核心和必需片段都不能突破总 Token 预算", () => {
     const result = composeContext({
       contextPack: pack({
-        soulDoc: "作品灵魂".repeat(1000),
         canonRules: "硬规则".repeat(1000),
         relatedSettings: "设定".repeat(1000),
         outline: "大纲".repeat(2000),

@@ -734,18 +734,15 @@ describe("streamChat usage", () => {
 
 
 describe("实际外发请求的离线稳定前缀验收（非供应商命中率）", () => {
-  it.each(["chat", "outline", "style"] as const)("%s 稳定材料占多数时，任务变化不破坏前面至少95%的可复用输入", async (surface) => {
+  it.each(["chat", "outline"] as const)("%s 稳定材料占多数时，任务变化不破坏前面至少95%的可复用输入", async (surface) => {
     const { buildAgentRequestMessages } = await import("./agent/cache-aware-messages")
-    const { buildLanguageAndRhythmPrompt } = await import("./novel/book-analysis/writing-dna-prompts")
-    const { computeStyleMetrics } = await import("./novel/book-analysis/style-metrics")
     const material = "长篇小说的稳定作品资料与章节原文。".repeat(1000)
     const build = (target: string): ChatMessage[] => {
-      if (surface === "chat" || surface === "outline") return buildAgentRequestMessages([
-        { role: "system", content: [{ type: "text", text: "固定规则及作品资料\n" + material, cacheControl: true }, { type: "text", text: `本轮参考：${target}` }] },
-        { role: "user", content: "已确认故事目标" }, { role: "assistant", content: "此前方案" },
+      return buildAgentRequestMessages([
+        { role: "system", content: [{ type: "text", text: "固定规则及作品资料\n" + surface + "\n" + material, cacheControl: true }, { type: "text", text: `本轮参考：${target}` }] },
+        { role: "user", content: "已确认写作目标" }, { role: "assistant", content: "此前方案" },
         { role: "user", content: `继续处理${target}` },
       ], `目标契约：${target}`)
-      return [{ role: "user", content: [{ type: "text", text: buildLanguageAndRhythmPrompt(computeStyleMetrics([material]), material, "测试作品"), cacheControl: true }] }]
     }
     mocks.fetch.mockReset()
     mocks.fetch.mockImplementation(async () => new Response('data: {"choices":[{"delta":{"content":"完成"}}]}\ndata: [DONE]\n', { status: 200 }))

@@ -35,7 +35,6 @@ export interface PersonaCreateInput {
   characterName: string
   roleType: string
   fields: Record<string, string>
-  boundSoul: string
 }
 
 export interface PersonaPersonalityCreateFormProps {
@@ -79,9 +78,9 @@ export function PersonaPersonalityCreateForm({
       if (value.trim()) next[key] = value.trim()
     }
     if (tags.length > 0) {
-      next["性格"] = renderPersonalitySection({ tags, boundSoul: "" })
+      next["性格"] = renderPersonalitySection({ tags })
     }
-    onSubmit({ characterName: trimmed, roleType, fields: next, boundSoul: "" })
+    onSubmit({ characterName: trimmed, roleType, fields: next })
   }
 
   // 新建时没有既有内容，不需要保留 raw。
@@ -193,7 +192,6 @@ export function PersonaPersonalityCreateForm({
             </span>
             <PersonaPersonalityTab
               tags={tags}
-              boundSoul=""
               raw={personalityView.raw}
               onChange={(next) => setTags(next.tags)}
             />

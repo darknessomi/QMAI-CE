@@ -74,66 +74,13 @@ function extractMarkdownTitle(content: string): string | null {
   return extractFrontmatterField(content, "title") || extractMarkdownHeading(content)
 }
 
-function extractSimulationMarkdownTitle(content: string): string | null {
-  const title = extractMarkdownTitle(content)
-  if (title && title !== "推演结果") return title
-
-  const recommendedBranch = content.match(/^###\s+(.+?)\s*$(?=[\s\S]*?^- 推荐：是\s*$)/m)
-  if (recommendedBranch?.[1]) return `推演结果：${recommendedBranch[1].trim()}`
-
-  const firstBranch = content.match(/^##\s+分支\s*$[\s\S]*?^###\s+(.+?)\s*$/m)
-  if (firstBranch?.[1]) return `推演结果：${firstBranch[1].trim()}`
-
-  return title
-}
-
-function formatDateTitle(value: unknown): string | null {
-  if (typeof value !== "string" || !value.trim()) return null
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleString("zh-CN", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  })
-}
-
-function extractSimulationJsonTitle(content: string): string | null {
-  try {
-    const parsed = JSON.parse(content) as {
-      title?: unknown
-      shortTitle?: unknown
-      frameworkTitle?: unknown
-      report?: {
-        createdAt?: unknown
-        branches?: Array<{ title?: unknown; recommendation?: unknown }>
-      }
-    }
-    if (typeof parsed.shortTitle === "string" && parsed.shortTitle.trim()) return parsed.shortTitle.trim()
-    if (typeof parsed.title === "string" && parsed.title.trim()) return parsed.title.trim()
-    if (typeof parsed.frameworkTitle === "string" && parsed.frameworkTitle.trim()) {
-      return `当前绑定：${parsed.frameworkTitle.trim()}`
-    }
-    const branches = Array.isArray(parsed.report?.branches) ? parsed.report.branches : []
-    const branchTitle = branches.find((branch) => branch.recommendation === true)?.title ?? branches[0]?.title
-    if (typeof branchTitle === "string" && branchTitle.trim()) return `推演结果：${branchTitle.trim()}`
-    const createdAt = formatDateTitle(parsed.report?.createdAt)
-    return createdAt ? `推演结果：${createdAt}` : null
-  } catch {
-    return null
-  }
-}
-
 function hasAsciiLetter(value: string): boolean {
   return /[A-Za-z]/.test(value)
 }
 
 function fallbackDisplayTitle(
-  category: Extract<ReferenceCategory, "chapter" | "memory" | "outline" | "deduction">,
+  category: Extract<ReferenceCategory, "chapter" | "memory" | "outline">,
   rawTitle: string,
-  path: string,
 ): string {
   const stem = rawTitle.split("/").pop() || rawTitle
   if (!hasAsciiLetter(rawTitle)) return rawTitle
@@ -144,35 +91,24 @@ function fallbackDisplayTitle(
   }
 
   if (category === "memory") return "记忆条目"
-  if (category === "outline") return "大纲条目"
-
-  const normalizedPath = normalizeProjectPath(path)
-  if (normalizedPath.includes("/bindings/")) return "当前绑定"
-  if (normalizedPath.includes("/frameworks/")) return "故事框架"
-  if (normalizedPath.includes("/results/")) return "推演结果"
-  return "推演资料"
+  return "大纲条目"
 }
 
 async function resolveDisplayTitle(
-  category: Extract<ReferenceCategory, "chapter" | "memory" | "outline" | "deduction">,
+  category: Extract<ReferenceCategory, "chapter" | "memory" | "outline">,
   file: { title: string; path: string },
 ): Promise<string> {
   try {
     const content = await readFile(file.path)
     if (typeof content === "string" && content.trim()) {
-      const lowerPath = file.path.toLowerCase()
-      const parsedTitle = lowerPath.endsWith(".json")
-        ? extractSimulationJsonTitle(content)
-        : category === "deduction"
-          ? extractSimulationMarkdownTitle(content)
-          : extractMarkdownTitle(content)
+      const parsedTitle = extractMarkdownTitle(content)
       if (parsedTitle?.trim()) return parsedTitle.trim()
     }
   } catch {
     // 文件内容读取失败时使用中文兜底名，避免把技术文件名暴露为主标题。
   }
 
-  return fallbackDisplayTitle(category, file.title, file.path)
+  return fallbackDisplayTitle(category, file.title)
 }
 
 async function collectReferenceFiles(
@@ -214,7 +150,7 @@ async function collectReferenceFiles(
 }
 
 function createFileProvider(
-  category: Extract<ReferenceCategory, "chapter" | "memory" | "outline" | "deduction">,
+  category: Extract<ReferenceCategory, "chapter" | "memory" | "outline">,
   relativeDir: string,
   extensions: Array<".md" | ".json">,
 ): ReferenceProvider {
@@ -262,12 +198,6 @@ export const outlineProvider = createFileProvider(
   "outline",
   "wiki/outlines",
   [".md"],
-)
-
-export const deductionProvider = createFileProvider(
-  "deduction",
-  ".qmai/simulations",
-  [".md", ".json"],
 )
 
 export function createSkillProvider(getSkills: () => SkillSummary[]): ReferenceProvider {

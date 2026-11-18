@@ -446,7 +446,6 @@ export function PersonaSkillView({ paneMode = false }: PersonaSkillViewProps = {
     characterName: string
     roleType: string
     fields: Record<string, string>
-    boundSoul: string
   }) {
     if (!projectPath) return
     setBusy(true)
@@ -457,7 +456,6 @@ export function PersonaSkillView({ paneMode = false }: PersonaSkillViewProps = {
         roleType: input.roleType,
         fields: input.fields,
         llmConfig: null,
-        boundSoul: input.boundSoul || undefined,
       })
       await reload()
       setCreating(false)

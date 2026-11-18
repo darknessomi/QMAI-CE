@@ -1,7 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
 import { createBuildContextPackPlugin } from "./build-context-pack-plugin"
-import { createSoulDialogPlugin } from "./soul-dialog-plugin"
-import { createPrePluginChain } from "../pipeline"
 import type { ContextPack } from "@/lib/novel/context-engine"
 
 const mockContextPack: ContextPack = {
@@ -11,9 +9,6 @@ const mockContextPack: ContextPack = {
   recentSummaries: ["第4章摘要"],
   previousChapterEnding: "上一章结尾",
   characterStates: "人物状态",
-  soulDoc: "灵魂文档",
-  characterAuras: "",
-  storyFrameworkBinding: "",
   cognitionStates: "认知状态",
   foreshadowingStates: "伏笔状态",
   timeline: "时间线",
@@ -117,7 +112,7 @@ describe("BuildContextPackPlugin", () => {
         routes: [
           {
             intent: "generate_outline",
-            required: ["soul", "settings"],
+            required: ["settings"],
             optional: ["outline"],
             forbidden: ["chapter_content", "recent_summaries"],
           },
@@ -128,7 +123,7 @@ describe("BuildContextPackPlugin", () => {
     const mockApplyRouteRules = vi.fn().mockReturnValue({
       pack: mockContextPack,
       blockedSources: ["chapter_content", "recent_summaries"],
-      keptSources: ["soul", "settings", "outline"],
+      keptSources: ["settings", "outline"],
     })
     const plugin = createBuildContextPackPlugin({
       buildContextPack: mockBuild,
@@ -147,136 +142,9 @@ describe("BuildContextPackPlugin", () => {
 
     expect(mockLoadClassification).toHaveBeenCalledWith("/test-project", undefined)
     expect(mockBuild).toHaveBeenCalledWith("/test-project", "生成大纲", undefined, {
-      categories: ["soul", "settings", "outline"],
+      categories: ["settings", "outline"],
     })
     expect(result.routeSource).toBe("project")
     expect(result.blockedSources).toEqual(["chapter_content", "recent_summaries"])
-  })
-})
-
-describe("SoulDialogPlugin", () => {
-  it("stops chain when characterAuras present", async () => {
-    const plugin = createSoulDialogPlugin()
-
-    const result = await plugin.run({
-      userMessage: "写第5章",
-      projectPath: "/test-project",
-      agentConfig: {} as any,
-      novelMode: true,
-      contextPack: { ...mockContextPack, characterAuras: "角色光环内容" },
-    })
-
-    expect(result.shouldStop).toBe(true)
-    expect(result.stopReason).toBe("soul_dialog_confirmation_required")
-  })
-
-  it("does not stop when characterAuras empty", async () => {
-    const plugin = createSoulDialogPlugin()
-
-    const result = await plugin.run({
-      userMessage: "写第5章",
-      projectPath: "/test-project",
-      agentConfig: {} as any,
-      novelMode: true,
-      contextPack: { ...mockContextPack, characterAuras: "" },
-    })
-
-    expect(result.shouldStop).toBeUndefined()
-  })
-
-  it("does nothing when not in novel mode", async () => {
-    const plugin = createSoulDialogPlugin()
-
-    const result = await plugin.run({
-      userMessage: "写第5章",
-      projectPath: "/test-project",
-      agentConfig: {} as any,
-      novelMode: false,
-      contextPack: { ...mockContextPack, characterAuras: "角色光环内容" },
-    })
-
-    expect(result.shouldStop).toBeUndefined()
-  })
-
-  it("does nothing when no context pack", async () => {
-    const plugin = createSoulDialogPlugin()
-
-    const result = await plugin.run({
-      userMessage: "写第5章",
-      projectPath: "/test-project",
-      agentConfig: {} as any,
-      novelMode: true,
-    })
-
-    expect(result.shouldStop).toBeUndefined()
-  })
-
-  it("supports custom shouldRequest function", async () => {
-    const customShould = vi.fn().mockReturnValue(true)
-    const plugin = createSoulDialogPlugin({ shouldRequestSoulDialog: customShould })
-
-    const result = await plugin.run({
-      userMessage: "写第5章",
-      projectPath: "/test-project",
-      agentConfig: {} as any,
-      novelMode: true,
-      contextPack: mockContextPack,
-    })
-
-    expect(customShould).toHaveBeenCalledWith(mockContextPack)
-    expect(result.shouldStop).toBe(true)
-  })
-})
-
-describe("Task3: Plugin Chain Integration", () => {
-  it("chains build_context_pack -> soul_dialog correctly", async () => {
-    const mockBuild = vi.fn().mockResolvedValue({
-      ...mockContextPack,
-      characterAuras: "需要确认的角色光环",
-      storyFrameworkBinding: "",
-    })
-
-    const chain = createPrePluginChain([
-      createBuildContextPackPlugin({ buildContextPack: mockBuild }),
-      createSoulDialogPlugin(),
-    ])
-
-    const result = await chain.run({
-      userMessage: "写第5章",
-      projectPath: "/test-project",
-      agentConfig: {} as any,
-      novelMode: true,
-      taskRoute: { intent: "write_chapter", confidence: 0.9, chapterNumber: 5, extractedParams: {} },
-    })
-
-    expect(result.contextPack).toBeDefined()
-    expect(result.shouldStop).toBe(true)
-    expect(result.stopReason).toBe("soul_dialog_confirmation_required")
-    expect(result.errors).toHaveLength(0)
-  })
-
-  it("continues chain when soul dialog not needed", async () => {
-    const mockBuild = vi.fn().mockResolvedValue({
-      ...mockContextPack,
-      characterAuras: "",
-      storyFrameworkBinding: "",
-    })
-
-    const chain = createPrePluginChain([
-      createBuildContextPackPlugin({ buildContextPack: mockBuild }),
-      createSoulDialogPlugin(),
-    ])
-
-    const result = await chain.run({
-      userMessage: "写第5章",
-      projectPath: "/test-project",
-      agentConfig: {} as any,
-      novelMode: true,
-      taskRoute: { intent: "write_chapter", confidence: 0.9, chapterNumber: 5, extractedParams: {} },
-    })
-
-    expect(result.contextPack).toBeDefined()
-    expect(result.shouldStop).toBeUndefined()
-    expect(result.errors).toHaveLength(0)
   })
 })

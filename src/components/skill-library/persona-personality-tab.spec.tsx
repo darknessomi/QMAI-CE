@@ -27,7 +27,6 @@ async function render(props: Partial<Parameters<typeof PersonaPersonalityTab>[0]
     root.render(
       <PersonaPersonalityTab
         tags={props.tags ?? []}
-        boundSoul={props.boundSoul ?? ""}
         raw={props.raw ?? ""}
         onChange={onChange}
       />,
@@ -70,7 +69,7 @@ describe("PersonaPersonalityTab（T2 精简版：无题材包）", () => {
   it("点未选中的标签把它加进去", async () => {
     const onChange = await render()
     await click("毒舌")
-    expect(onChange).toHaveBeenCalledWith({ tags: ["毒舌"], boundSoul: "" })
+    expect(onChange).toHaveBeenCalledWith({ tags: ["毒舌"] })
   })
 
   it("选满 4 条后再选第 5 条会被拦住并提示", async () => {
@@ -95,23 +94,4 @@ describe("PersonaPersonalityTab（T2 精简版：无题材包）", () => {
     await render({ raw: "他是那种一言不合就动手的人。" })
     expect(host.textContent).toContain("未按标签管理")
   })
-
-  it("已有角色可以查看和解除旧绑定", async () => {
-    const onChange = await render({
-      boundSoul: "严肃沉稳",
-    })
-    expect(host.textContent).toContain("严肃沉稳")
-    expect(host.textContent).not.toContain("更换灵魂")
-
-    const clear = host.querySelector<HTMLElement>('[data-testid="persona-soul-clear"]')!
-    await act(async () => clear.click())
-    expect(onChange).toHaveBeenCalledWith({ tags: [], boundSoul: "" })
-  })
-
-  it("新角色不显示灵魂库入口", async () => {
-    await render({ boundSoul: "" })
-    expect(host.querySelector('[data-testid="persona-soul-open"]')).toBeNull()
-    expect(host.querySelector('[data-testid="persona-soul-clear"]')).toBeNull()
-  })
-
 })

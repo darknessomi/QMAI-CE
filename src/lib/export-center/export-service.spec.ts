@@ -5,8 +5,8 @@ import { assertExportByteLength, encodeExportBytesBase64, exportDocuments, MAX_E
 import type { ExportDocument } from "./types"
 
 const documents: ExportDocument[] = [
-  { title: '作品<>:"一', source: "book-analysis", blocks: [{ title: "正文", paragraphs: ["甲"] }] },
-  { title: "作品二", source: "book-analysis", blocks: [{ title: "正文", paragraphs: ["乙"] }] },
+  { title: '作品<>:"一', source: "chapters", blocks: [{ title: "正文", paragraphs: ["甲"] }] },
+  { title: "作品二", source: "chapters", blocks: [{ title: "正文", paragraphs: ["乙"] }] },
 ]
 
 function deps(paths: Array<string | null>): ExportServiceDeps & {

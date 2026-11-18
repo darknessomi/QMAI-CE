@@ -326,48 +326,6 @@ export function computeStyleMetrics(chapterBodies: string[]): StyleMetrics {
   }
 }
 
-/** 多分片合并：计数相加后重新派生，词频表相加后重新取 top。 */
-export function mergeStyleMetrics(items: StyleMetrics[]): StyleMetrics {
-  const present = items.filter(Boolean)
-  if (present.length === 0) return computeStyleMetrics([])
-  if (present.length === 1) return present[0]
-
-  const counts = emptyCounts()
-  const wordFreq = new Map<string, number>()
-  const bigramFreq = new Map<string, number>()
-  const openerFreq = new Map<string, number>()
-
-  for (const item of present) {
-    counts.chapters += item.counts.chapters
-    counts.chars += item.counts.chars
-    counts.latinChars += item.counts.latinChars
-    counts.sentences += item.counts.sentences
-    counts.shortSentences += item.counts.shortSentences
-    counts.longSentences += item.counts.longSentences
-    counts.sentenceCharTotal += item.counts.sentenceCharTotal
-    counts.paragraphs += item.counts.paragraphs
-    counts.oneSentenceParagraphs += item.counts.oneSentenceParagraphs
-    counts.longParagraphs += item.counts.longParagraphs
-    counts.dialogueParagraphs += item.counts.dialogueParagraphs
-    for (const key of Object.keys(counts.punctuation) as Array<keyof StyleMetricCounts["punctuation"]>) {
-      counts.punctuation[key] += item.counts.punctuation[key]
-    }
-    for (const entry of item.topWords) bump(wordFreq, entry.word, entry.count)
-    for (const entry of item.topBigrams) bump(bigramFreq, entry.word, entry.count)
-    for (const entry of item.topSentenceOpeners) bump(openerFreq, entry.word, entry.count)
-  }
-
-  return {
-    schemaVersion: 1,
-    segmenterAvailable: present.every((item) => item.segmenterAvailable),
-    counts,
-    derived: deriveStyleMetrics(counts),
-    topWords: topEntries(wordFreq, TOP_WORD_LIMIT),
-    topBigrams: topEntries(bigramFreq, TOP_BIGRAM_LIMIT),
-    topSentenceOpeners: topEntries(openerFreq, TOP_OPENER_LIMIT),
-  }
-}
-
 function formatFrequencies(items: WordFrequency[], limit: number): string {
   const sliced = items.slice(0, limit)
   if (sliced.length === 0) return "（无）"
@@ -402,37 +360,4 @@ export function formatStyleMetricsForPrompt(metrics: StyleMetrics): string {
       ? ""
       : "注意：本次运行环境缺少中文分词能力，上面的词频表来自相邻汉字二元窗口，属近似结果，请只用作参考，不要把它当成精确词表。",
   ].filter(Boolean).join("\n")
-}
-
-/** 把统计结果渲染成人类可读 markdown 表格（写入语言DNA.md 与排版节奏指南.md）。 */
-export function formatStyleMetricsForMarkdown(metrics: StyleMetrics): string {
-  const { counts, derived } = metrics
-  const percent = (value: number): string => `${(value * 100).toFixed(1)}%`
-  const rows: Array<[string, string]> = [
-    ["样本章数", String(counts.chapters)],
-    ["样本字数", String(counts.chars)],
-    ["平均句长", `${derived.avgSentenceChars} 字`],
-    [`短句占比（≤${SHORT_SENTENCE_MAX_CHARS}字）`, percent(derived.shortSentenceRatio)],
-    [`长句占比（≥${LONG_SENTENCE_MIN_CHARS}字）`, percent(derived.longSentenceRatio)],
-    ["平均段落字数", `${derived.avgParagraphChars} 字`],
-    ["平均每段句数", `${derived.avgParagraphSentences} 句`],
-    ["一句一段占比", percent(derived.oneSentenceParagraphRatio)],
-    [`长段占比（≥${LONG_PARAGRAPH_MIN_CHARS}字）`, percent(derived.longParagraphRatio)],
-    ["含对白段落占比", percent(derived.dialogueParagraphRatio)],
-    ["破折号（每千字）", String(derived.punctuationPerThousand.dash)],
-    ["省略号（每千字）", String(derived.punctuationPerThousand.ellipsis)],
-    ["感叹号（每千字）", String(derived.punctuationPerThousand.exclamation)],
-    ["问号（每千字）", String(derived.punctuationPerThousand.question)],
-    ["逗号（每千字）", String(derived.punctuationPerThousand.comma)],
-    ["分号（每千字）", String(derived.punctuationPerThousand.semicolon)],
-    ["拉丁字符占比", percent(derived.latinCharRatio)],
-  ]
-  const lines = ["| 指标 | 数值 |", "| - | - |", ...rows.map(([key, value]) => `| ${key} | ${value} |`)]
-  lines.push("", `**高频实词**：${formatFrequencies(metrics.topWords, 30)}`)
-  lines.push("", `**高频二元搭配**：${formatFrequencies(metrics.topBigrams, 20)}`)
-  lines.push("", `**高频句首词**：${formatFrequencies(metrics.topSentenceOpeners, 15)}`)
-  if (!metrics.segmenterAvailable) {
-    lines.push("", "> 本次运行环境缺少中文分词能力，词频表为相邻汉字二元窗口的近似结果。")
-  }
-  return lines.join("\n")
 }

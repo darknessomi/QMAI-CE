@@ -451,8 +451,8 @@ describe("独立UI测试版外壳", () => {
     expect(host.querySelector("#ui-test-directory"), "「人物 Skill」不应有左侧目录栏").toBeNull()
 
     // 再对照技能库里一个**本来就在**整窗清单里的 tab，行为应当一致
-    await act(async () => { useWikiStore.setState({ activeView: "characterSoulLibrary" }) })
-    expect(host.querySelector("#ui-test-directory"), "「角色灵魂」不应有左侧目录栏").toBeNull()
+    await act(async () => { useWikiStore.setState({ activeView: "writingSkillLibrary" }) })
+    expect(host.querySelector("#ui-test-directory"), "「写作 Skill」不应有左侧目录栏").toBeNull()
   })
   it("替换当前功能时同步切换页面，替换其他功能时保持页面", async () => {
     await render()

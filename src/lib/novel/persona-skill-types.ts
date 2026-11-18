@@ -1,7 +1,6 @@
 /**
  * 「人物 Skill」的类型与阈值单点。
  *
- * 与「角色灵魂」CharacterAura 完全隔离：不共用 store、不共用绑定、不共用 SKILL.md 目录。
  * 这里只放纯数据与纯判定；读写盘在 persona-skill-store.ts，编排在 persona-skill-learning.ts。
  */
 
@@ -74,7 +73,7 @@ export const PERSONA_INJECT_FIELD_CHARS = 260
  * 性格标签的注入预算。
  *
  * 为什么单独给它一份小预算、而不是并进 PERSONA_INJECT_FIELD_CHARS：
- * 性格是最强的表演指令（「性格优先于灵魂基线」是用户拍板的口径），
+ * 性格是人物 Skill 的写作指令，
  * 它必须**最靠前**出现；但一个人物多占 20 字，12 人同场就是 240 字，
  * 所以条数与字数都要硬夹住，不能吃 PERSONA_INJECT_CHAR_BUDGET 的余量。
  */

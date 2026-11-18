@@ -302,29 +302,6 @@ describe("候选画像校验（垃圾一律作废，不落盘）", () => {
     expect(result.status).toBe("incomplete")
     expect((await loadStyleEvolutionState(PROJECT)).openDayCount).toBeGreaterThanOrEqual(3)
   })
-
-  /*
-   * ★ 挡住「顺手补个 workbenchStyle」这个更糟的做法。
-   *
-   * writing-style-store 的两个注入分支是 if/else：一旦 profile.workbenchStyle
-   * 存在，constitution 与 integratedDna **都不再注入**。所以一个 rules 为空的
-   * workbenchStyle 会让注入内容缩成几行标题 —— 界面一切正常，内容却悄悄变空。
-   * 本功能明确不产出它（见规格 01 节）。
-   */
-  it("写出的候选不携带空 rules 的 workbenchStyle（否则会静默丢掉正文）", async () => {
-    await primeDueState()
-    await runStyleEvolutionRound(PROJECT, deps())
-
-    const styles = await loadWritingStyleStore(PROJECT)
-    const profile = styles.styles[0].profile as unknown as Record<string, unknown>
-    if (profile.workbenchStyle !== undefined) {
-      const wb = profile.workbenchStyle as { rules?: unknown[]; styleFingerprint?: unknown }
-      const usable = Array.isArray(wb.rules) && wb.rules.length > 0 && Boolean(wb.styleFingerprint)
-      expect(usable, "workbenchStyle 必须要么真的可用，要么完全不设").toBe(true)
-    }
-    // 无论哪种情况，进化出来的正文都必须能注入
-    expect(String(profile.integratedDna ?? "")).not.toBe("")
-  })
 })
 
 describe("棘轮：keep / revert", () => {

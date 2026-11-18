@@ -20,7 +20,6 @@ const wikiState = {
   },
   providerConfigs: {},
   searchApiConfig: { provider: "none", providerConfigs: {} },
-  bindingVersion: 0,
   aiChatModel: "openai/gpt-4o",
   chatEditModeEnabled: false,
   selectedFile: null,
@@ -31,7 +30,6 @@ const wikiState = {
   setAiWorkflowMode: vi.fn(),
   setChatEditModeEnabled: vi.fn(),
   setSelectedFile: vi.fn(),
-  // 丁-4：临时角色灵魂绑定写入/还原后靠 dataVersion 触发重新读盘。
   // chat-panel 会直接调它，缺了这个属性就是一条 TypeError（不是断言失败）。
   bumpDataVersion: vi.fn(),
 }
@@ -114,13 +112,7 @@ vi.mock("@/components/chat/chat-shared", () => ({
   getLastQueryPages: () => [],
 }))
 
-vi.mock("@/lib/novel/story-simulation/framework-binding", () => ({
-  loadBinding: vi.fn(async () => null),
-}))
 
-vi.mock("@/lib/novel/story-simulation/framework-store", () => ({
-  loadFrameworks: vi.fn(async () => []),
-}))
 
 vi.mock("@/lib/agent/task-breakpoint", () => ({
   loadTaskBreakpoint: vi.fn(async () => mockTaskBreakpoint),

@@ -4,14 +4,12 @@ import type { AiWorkflowMode } from "@/lib/agent/workflow-mode"
 import { createReadChapterTool } from "./read-chapter"
 import { createReadOutlineTool } from "./read-outline"
 import { createReadMemoryTool } from "./read-memory"
-import { createReadDeductionTool } from "./read-deduction"
 import { createReadChatHistoryTool } from "./read-chat-history"
 import { createReadOutlineHistoryTool } from "./read-outline-history"
 import { createSearchChaptersTool } from "./search-chapters"
 import { createListChaptersTool } from "./list-chapters"
 import { createListOutlinesTool } from "./list-outlines"
 import { createListMemoriesTool } from "./list-memories"
-import { createListDeductionsTool } from "./list-deductions"
 import { createWriteChapterTool } from "./write-chapter"
 import { createWriteOutlineNodeTool } from "./write-outline-node"
 import { createWriteMemoryTool } from "./write-memory"
@@ -73,7 +71,6 @@ export function registerAllBuiltInTools(registry: ToolRegistry, options: ToolFac
   const chaptersDir = `${options.wikiPath}/chapters`
   const memoryDir = `${options.wikiPath}/memory`
   const outlinesDir = `${options.wikiPath}/outlines`
-  const simDir = `${options.wikiPath}/../.qmai/simulations`
   const disabledTools = new Set(options.disabledTools ?? [])
   const enabledToolNames = options.enabledToolNames ? new Set(options.enabledToolNames) : null
   const shouldRegister = (name: string) =>
@@ -82,7 +79,6 @@ export function registerAllBuiltInTools(registry: ToolRegistry, options: ToolFac
   if (shouldRegister("read_chapter")) registry.register(createReadChapterTool(chaptersDir, options.readTextFile))
   if (shouldRegister("read_outline")) registry.register(createReadOutlineTool(outlinesDir, options.readTextFile))
   if (shouldRegister("read_memory")) registry.register(createReadMemoryTool(memoryDir, options.readTextFile))
-  if (shouldRegister("read_deduction")) registry.register(createReadDeductionTool(simDir, options.readTextFile))
   if (shouldRegister("read_chat_history")) registry.register(createReadChatHistoryTool(options.getChatConversations()))
   if (shouldRegister("read_outline_history")) registry.register(createReadOutlineHistoryTool(options.getOutlineConversations()))
   if (shouldRegister("search_chapters")) registry.register(createSearchChaptersTool(chaptersDir, options.readTextFile))
@@ -96,7 +92,6 @@ export function registerAllBuiltInTools(registry: ToolRegistry, options: ToolFac
     )
   }
   if (shouldRegister("list_memories")) registry.register(createListMemoriesTool(memoryDir))
-  if (shouldRegister("list_deductions")) registry.register(createListDeductionsTool(simDir))
   if (shouldRegister("write_chapter")) {
     registry.register(createWriteChapterTool(chaptersDir, {
       draftMode: options.draftMode,

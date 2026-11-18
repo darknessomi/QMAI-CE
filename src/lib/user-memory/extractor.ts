@@ -5,7 +5,7 @@ const VALID_CATEGORIES = new Set<UserMemoryCategory>([
   "interaction_preference", "format_preference", "constraint", "manual",
 ])
 const VALID_SURFACES = new Set<UserMemorySurface>([
-  "all", "ai-chat", "ai-outline", "chapter-writing", "book-analysis", "review", "analysis",
+  "all", "ai-chat", "ai-outline", "chapter-writing", "review", "analysis",
 ])
 const SPECIFIC_TASK_PATTERN = /第\s*[一二三四五六七八九十百千万零〇两\d、,，~～\-至到]+\s*章|(?:生成|续写|改写|参考|根据)[^。；]{0,24}[一二三四五六七八九十百千万零〇两\d]+\s*章/
 const SENSITIVE_PATTERN = /(?:api\s*key|密钥|密码|口令|token\s*[：:=]|sk-[a-z0-9_-]{6,}|身份证|银行卡|真实姓名|家庭住址|住址|详细地址|患有|病史|诊断|医疗信息|月收入|工资|资产|负债|财务信息|[\w.+-]+@[\w.-]+\.[a-z]{2,}|\b(?:\+?86[-\s]?)?1[3-9]\d{9}\b)/i

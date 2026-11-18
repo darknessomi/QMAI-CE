@@ -1,6 +1,5 @@
 import { useWikiStore } from "@/stores/wiki-store"
 import { resolveDefaultModel, resolveModelConfig } from "@/lib/novel/model-resolver"
-import type { BookAnalysisPipelineTask } from "./analysis-pipeline-types"
 
 /**
  * 解析某个任务实际要用的模型。
@@ -8,7 +7,7 @@ import type { BookAnalysisPipelineTask } from "./analysis-pipeline-types"
  * 选定的 key 解析不出可用配置时也照样返回，由 hasUsableLlm 在启动前拦下来并报错，
  * 而不是静默换成另一个模型跑完一整本书。
  */
-export function resolveTaskLlmConfig(task: Pick<BookAnalysisPipelineTask, "modelKey">) {
+export function resolveTaskLlmConfig(task: { modelKey?: string }) {
   const { llmConfig, providerConfigs } = useWikiStore.getState()
   const modelKey = task.modelKey?.trim()
   if (!modelKey) return resolveDefaultModel(llmConfig)

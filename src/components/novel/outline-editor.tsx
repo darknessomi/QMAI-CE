@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { FilePlus, Loader2 } from "lucide-react";
 import {
@@ -15,8 +15,6 @@ import { useWikiStore } from "@/stores/wiki-store";
 import { writeFile, readFile, listDirectory, createDirectory } from "@/commands/fs";
 import { normalizePath } from "@/lib/path-utils";
 import type { OutlineType } from "@/lib/novel/chapter-meta";
-import { loadPlotFrameworkLibrary } from "@/lib/novel/plot-framework-library";
-import type { PlotFramework } from "@/lib/novel/plot-framework";
 import { runVolumeOutlineQualityCheck, type QualityCheckItem } from "@/lib/novel/outline-quality-check";
 import { buildPureOutlineMarkdown } from "@/lib/novel/outline-markdown";
 
@@ -29,14 +27,11 @@ const OUTLINE_TYPES: { value: OutlineType; labelKey: string }[] = [
 interface OutlineCreatorDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** 关联的剧情框架 ID（可选，创建章纲时显示来源） */
-  frameworkId?: string;
 }
 
 export function OutlineCreatorDialog({
   open,
   onOpenChange,
-  frameworkId,
 }: OutlineCreatorDialogProps) {
   const { t } = useTranslation();
   const project = useWikiStore((s) => s.project);
@@ -49,34 +44,16 @@ export function OutlineCreatorDialog({
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
-  const [frameworks, setFrameworks] = useState<PlotFramework[]>([]);
-  const [selectedFrameworkId, setSelectedFrameworkId] = useState<string>("");
   const [qualityCheckResults, setQualityCheckResults] = useState<QualityCheckItem[] | null>(null);
   const [qualityCheckLoading, setQualityCheckLoading] = useState(false);
   const [showQualityCheck, setShowQualityCheck] = useState(false);
   const [createdFilePath, setCreatedFilePath] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!open || !project) return;
-    let cancelled = false;
-    void loadPlotFrameworkLibrary(project.path).then((lib) => {
-      if (cancelled) return;
-      setFrameworks(lib.frameworks);
-      if (frameworkId) {
-        setSelectedFrameworkId(frameworkId);
-      }
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [open, project, frameworkId]);
 
   function reset() {
     setOutlineType("story-outline");
     setTitle("");
     setVolumeNumber("");
     setChapterNumber("");
-    setSelectedFrameworkId("");
     setError(null);
     setDone(false);
     setQualityCheckResults(null);
@@ -101,8 +78,6 @@ export function OutlineCreatorDialog({
       const outlinesDir = `${pp}/wiki/outlines`;
       await createDirectory(outlinesDir);
 
-      const effectiveFrameworkId = selectedFrameworkId || frameworkId;
-      const framework = frameworks.find((item) => item.id === effectiveFrameworkId);
 
       let fileName = title
         .trim()
@@ -117,12 +92,7 @@ export function OutlineCreatorDialog({
       }
 
       const filePath = `${outlinesDir}/${fileName}.md`;
-      const fullContent = buildPureOutlineMarkdown(
-        title.trim(),
-        framework && outlineType === "chapter-outline"
-          ? `> 关联剧情框架：${framework.title}`
-          : "",
-      );
+      const fullContent = buildPureOutlineMarkdown(title.trim(), "");
       await writeFile(filePath, fullContent);
 
       const tree = await listDirectory(pp);
@@ -269,25 +239,6 @@ export function OutlineCreatorDialog({
                   ))}
                 </select>
               </div>
-
-              {outlineType === "chapter-outline" && frameworks.length > 0 && (
-                <div className="flex flex-col gap-1.5">
-                  <Label className="text-xs">关联剧情框架（可选）</Label>
-                  <select
-                    value={selectedFrameworkId}
-                    onChange={(e) => setSelectedFrameworkId(e.target.value)}
-                    disabled={generating}
-                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                  >
-                    <option value="">无关联</option>
-                    {frameworks.map((fw) => (
-                      <option key={fw.id} value={fw.id}>
-                        {fw.title}（{fw.line === "main" ? "主线" : "支线"}）
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
 
               <div className="flex flex-col gap-1.5">
                 <Label>{t("novel.outline.title")}</Label>

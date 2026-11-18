@@ -25,9 +25,6 @@ const mocks = vi.hoisted(() => ({
     recentSummaries: ["第6章：主角得到旧钥匙。", "第7章：主角抵达村口。"],
     previousChapterEnding: "祠堂门缝里透出一线冷光。",
     characterStates: "主角谨慎，小晴仍然隐瞒她知道族谱。 ",
-    soulDoc: "项目灵魂：悬疑、克制、现实压力。",
-    characterAuras: "主角表达克制，不会突然热血喊口号。",
-    storyFrameworkBinding: "",
     cognitionStates: "主角不知道族谱已经被人换过。",
     foreshadowingStates: "旧钥匙、族谱缺页、门缝冷光都未回收。",
     timeline: "雨夜，进入祠堂前后不超过一小时。",
@@ -70,9 +67,7 @@ vi.mock("./model-resolver", () => ({
   resolveNovelModel: (config: LlmConfig) => config,
 }))
 
-vi.mock("./character-aura", () => ({
-  buildCharacterAuraContext: vi.fn(async () => ""),
-}))
+
 
 vi.mock("./context-engine", () => ({
   buildContextPack: vi.fn(async () => mocks.contextPack),
@@ -179,7 +174,7 @@ describe("review-adapter staged review", () => {
     }])
   })
 
-  it("buildReviewPrompt 传入 cachePrefix 时用它替换自建上下文段，并保留增量补充", () => {
+  it("buildReviewPrompt 传入 cachePrefix 时用它替换自建上下文段", () => {
     const cachePrefix = "# 写作稳定前缀\n大纲与上下文逐字节相同"
     const prompt = buildReviewPrompt(
       contextPack,
@@ -188,11 +183,9 @@ describe("review-adapter staged review", () => {
       undefined,
       undefined,
       cachePrefix,
-      "## 初稿新增角色光环\n新角色：更夫",
     )
 
     expect(prompt.startsWith(cachePrefix)).toBe(true)
-    expect(prompt).toContain("## 初稿新增角色光环")
     expect(prompt).toContain("阶段式深度审查工作流")
     // 自建上下文段被替换，不能把大纲再拼一遍
     expect(prompt).not.toContain("### 大纲" + "\n" + cachePrefix)

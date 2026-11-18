@@ -58,7 +58,7 @@ type BuildContextPack = (
   options?: { categories?: DataSourceCategory[]; loadAdapter?: DataSourceLoadAdapter },
 ) => Promise<ContextPack>
 
-const STABLE_SOURCE_KINDS: ContextSourceKind[] = ["soul", "setting", "entity", "outline", "deduction"]
+const STABLE_SOURCE_KINDS: ContextSourceKind[] = ["setting", "entity", "outline"]
 
 interface ContextHubControllerDependencies {
   registry?: HubRegistry

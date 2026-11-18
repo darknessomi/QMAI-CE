@@ -15,14 +15,11 @@ const DATA_SOURCE_KINDS: Record<string, ContextSourceKind[]> = {
   canonRules: ["setting"],
   sourceCanon: ["setting"],
   writingStyle: ["setting"],
-  bookAnalysisReferences: ["book-analysis"],
   searchResults: ["chapter", "outline", "memory", "setting", "entity", "snapshot"],
   graphSearchResults: ["chapter", "outline", "memory", "setting", "entity", "snapshot"],
   revisionFeedback: ["chapter", "snapshot"],
   cognitionText: ["entity", "outline"],
-  soulDoc: ["soul"],
   sectionBriefing: ["outline", "snapshot", "entity", "memory"],
-  storyFrameworkBinding: ["outline", "setting", "deduction"],
   retrieval: ["retrieval"],
 }
 
@@ -38,8 +35,6 @@ export function classifyContextSourcePath(projectPath: string, path: string): Co
 
   if (relative === ".qmai/context-cache" || relative.startsWith(".qmai/context-cache/")) return "ignored"
   if (relative === ".qmai/writing-style.json") return "setting"
-  if (relative === ".qmai/book-analysis-context.json") return "book-analysis"
-  if (relative === ".qmai/character-aura.json") return "entity"
   if (relative.startsWith("wiki/chapters/")) return "chapter"
   if (relative.startsWith("wiki/outlines/")) return "outline"
   if (relative.startsWith("wiki/memory/")) return "memory"
@@ -47,7 +42,6 @@ export function classifyContextSourcePath(projectPath: string, path: string): Co
   if (relative.startsWith("wiki/tracking/")) return "memory"
   if (relative.startsWith("wiki/entities/") || relative.startsWith("wiki/characters/")) return "entity"
   if (relative.startsWith("wiki/settings/") || relative === "wiki/canon.md" || relative === "wiki/writing-style.md") return "setting"
-  if (relative === "soul.md" || relative === "wiki/soul.md") return "soul"
   if (relative === ".novel/cognition-state.json") return "entity"
   if (relative === ".novel/character-states.json") return "entity"
   if (relative === ".novel/foreshadowing-tracker.json") return "memory"
@@ -55,7 +49,6 @@ export function classifyContextSourcePath(projectPath: string, path: string): Co
   if (relative === ".novel/revision-feedback.json") return "snapshot"
   if (relative === ".novel/timeline.json") return "memory"
   if (relative.startsWith(".novel/snapshots/") || relative.startsWith(".novel/community-summaries/")) return "snapshot"
-  if (relative.startsWith(".qmai/simulations/")) return "deduction"
   if (relative.startsWith("retrieval/")) return "retrieval"
   return "other"
 }
@@ -71,7 +64,6 @@ export function getDataSourceKinds(sourceName: string): ContextSourceKind[] {
  * 原则：宁可过覆盖、不可漏（漏了会命中过时缓存）。
  */
 export const SOURCE_DEPENDENCY_PREFIXES: Record<string, string[]> = {
-  soulDoc: ["soul.md", "wiki/soul.md"],
   cognitionText: [".novel/cognition-state.json", "wiki/outlines/"],
   writingStyle: ["wiki/settings/", "wiki/canon.md", "wiki/writing-style.md", ".qmai/writing-style.json"],
   relatedSettings: [
@@ -83,10 +75,6 @@ export const SOURCE_DEPENDENCY_PREFIXES: Record<string, string[]> = {
     "wiki/memory/", "wiki/entities/", "wiki/characters/",
   ],
   sourceCanon: [".novel/fanfic-canon.md"],
-  storyFrameworkBinding: [
-    "wiki/outlines/", "wiki/settings/", "wiki/canon.md", "wiki/writing-style.md",
-    ".qmai/simulations/",
-  ],
   outline: ["wiki/outlines/"],
   chapterOutline: ["wiki/outlines/"],
   volumeContext: ["wiki/outlines/", "wiki/settings/", "wiki/canon.md"],

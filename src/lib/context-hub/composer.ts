@@ -59,8 +59,6 @@ function stableFragments(pack: ContextPack): ContextFragment[] {
     // 顺序即缓存前缀的顺序：作品级不变的内容在前，随章变化的内容在后。
     // 「核心设定」是按本章相关度挑出来的，换章就变，所以必须排在最后，
     // 否则它一变，排在它后面的「写作风格 / 大纲骨架」全部够不着缓存。
-    { title: "作品灵魂", text: pack.soulDoc, layer: "stable" },
-    { title: "故事框架绑定", text: pack.storyFrameworkBinding, layer: "stable" },
     // 同人正典排在自有设定之前：原作的既成事实优先于本作新设定。
     { title: "原作正典", text: pack.sourceCanon ?? "", layer: "stable" },
     { title: "硬性世界规则", text: pack.canonRules, layer: "stable" },
@@ -99,7 +97,6 @@ function dynamicFragments(input: ComposeContextInput, expanded: boolean): Contex
   const optional: ContextFragment[] = [
     { title: "时间线", text: pack.timeline, layer: "dynamic" },
     { title: "人物认知", text: pack.cognitionStates, layer: "dynamic" },
-    { title: "人物气质", text: pack.characterAuras, layer: "dynamic" },
     { title: "下一章建议", text: pack.nextChapterAdvice, layer: "dynamic" },
     { title: "任务检索命中", text: pack.searchResults, layer: "dynamic" },
     { title: "关系图检索命中", text: pack.graphSearchResults, layer: "dynamic" },

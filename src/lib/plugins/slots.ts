@@ -29,7 +29,6 @@ export const SLOT_IDS = [
   "inspiration-browser",
   "editor-context-menu",
   "outline-toolbar",
-  "analysis-toolbar",
   "plugin-center",
 ] as const
 
@@ -56,7 +55,6 @@ export const SLOT_API_VERSIONS: Record<SlotId, number> = {
   "inspiration-browser": 1,
   "editor-context-menu": 1,
   "outline-toolbar": 1,
-  "analysis-toolbar": 1,
   "plugin-center": 1,
 }
 
@@ -66,7 +64,6 @@ export const SLOT_LABELS: Record<SlotId, string> = {
   "inspiration-browser": "灵感库",
   "editor-context-menu": "编辑器右键菜单",
   "outline-toolbar": "大纲工具栏",
-  "analysis-toolbar": "拆书库工具栏",
   "plugin-center": "插件中心",
 }
 

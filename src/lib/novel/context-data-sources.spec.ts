@@ -3,15 +3,13 @@ import { getDataSourceNamesForCategories, getAllDataSources } from "./context-da
 
 describe("getDataSourceNamesForCategories", () => {
   it("returns only data sources that belong to allowed classification categories", () => {
-    const names = getDataSourceNamesForCategories(["soul", "settings", "outline"])
+    const names = getDataSourceNamesForCategories(["settings", "outline"])
 
-    expect(names).toContain("soulDoc")
     expect(names).toContain("relatedSettings")
     expect(names).toContain("canonRules")
     expect(names).toContain("sourceCanon")
     expect(names).toContain("outline")
     expect(names).toContain("chapterOutline")
-    expect(names).toContain("bookAnalysisReferences")
     expect(names).not.toContain("recentChapterContents")
     expect(names).not.toContain("searchResults")
     expect(names).not.toContain("graphSearchResults")

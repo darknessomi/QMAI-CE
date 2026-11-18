@@ -55,7 +55,6 @@ const SLOT_IDS = [
   "inspiration-browser",
   "editor-context-menu",
   "outline-toolbar",
-  "analysis-toolbar",
   "plugin-center",
 ];
 /** `SLOT_API_VERSIONS`：插槽语义变了就 bump。 */
@@ -64,7 +63,6 @@ const SLOT_API_VERSIONS = {
   "inspiration-browser": 1,
   "editor-context-menu": 1,
   "outline-toolbar": 1,
-  "analysis-toolbar": 1,
   "plugin-center": 1,
 };
 /** `KNOWN_INJECT`。 */

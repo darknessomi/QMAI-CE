@@ -13,13 +13,10 @@ import { listSnapshots, loadSnapshot, type ChapterSnapshot } from "./chapter-ing
 import { loadRevisionFeedbackForContext, createEmptyRevisionFeedback } from "./revision-feedback"
 import { loadCognitionState } from "./character-cognition"
 import { relevantCognitionContext } from "./cognition-context"
-import { readSoulDoc } from "./soul-doc"
 import { buildWritingStyleContext } from "./writing-style-store"
 import { buildSectionBriefing } from "./section-briefing"
 import { loadFanficCanonBody } from "./fanfic-canon"
 import type { DataSource, ContextLoadContext } from "./context-data-source"
-import { loadFrameworks } from "./story-simulation/framework-store"
-import { loadBinding, buildBindingContext } from "./story-simulation/framework-binding"
 import { RetrievalStore, type RetrievalEntry } from "./retrieval"
 import { writeFileAtomic, fileExists, listDirectory, createDirectory } from "@/commands/fs"
 import type { DataSourceCategory } from "./classification"
@@ -56,13 +53,10 @@ const DATA_SOURCE_CATEGORY_MAP: Record<string, DataSourceCategory[]> = {
   canonRules: ["settings"],
   sourceCanon: ["settings"],
   writingStyle: ["settings"],
-  bookAnalysisReferences: ["memory", "plot_tools", "settings", "character_states"],
   searchResults: ["memory", "plot_tools"],
   graphSearchResults: ["graph"],
   revisionFeedback: ["revision"],
   cognitionText: ["character_states"],
-  soulDoc: ["soul"],
-  storyFrameworkBinding: ["settings", "outline"],
 }
 
 function selectRecentChapterNumbersForContent(chapterNumber: number | undefined, count: number): number[] {
@@ -399,9 +393,9 @@ const writingStyleDataSource: DataSource<string> = {
   name: "writingStyle",
   priority: 12,
   async load(context: ContextLoadContext): Promise<string> {
-    // 优先级1: 已启用的拆书作品文风预设（传 task 以按题材检索最接近的原文片段）
+    // 优先级1: 已启用的文风预设
     try {
-      const enabledStyle = await buildWritingStyleContext(context.projectPath, { task: context.task })
+      const enabledStyle = await buildWritingStyleContext(context.projectPath)
       if (enabledStyle.trim()) return enabledStyle
     } catch {}
 
@@ -424,15 +418,6 @@ const writingStyleDataSource: DataSource<string> = {
       }
     } catch {}
     return ""
-  },
-}
-
-const bookAnalysisReferencesDataSource: DataSource<string> = {
-  name: "bookAnalysisReferences",
-  priority: 19,
-  async load(context: ContextLoadContext): Promise<string> {
-    const { searchBookAnalysisContext } = await import("./book-analysis/analysis-context-index")
-    return searchBookAnalysisContext(context.projectPath, context.task)
   },
 }
 
@@ -502,17 +487,6 @@ const cognitionTextDataSource: DataSource<string> = {
 }
 
 /**
- * 灵魂文档数据源
- */
-const soulDocDataSource: DataSource<string> = {
-  name: "soulDoc",
-  priority: 17,
-  async load(context: ContextLoadContext): Promise<string> {
-    return await readSoulDoc(context.projectPath)
-  },
-}
-
-/**
  * 本节速记数据源
  * 根据细纲筛选角色状态、伏笔和世界观约束，priority=0（最优先）
  */
@@ -528,24 +502,6 @@ const sectionBriefingDataSource: DataSource<string> = {
       chapterOutlineContent,
       context.task,
     )
-  },
-}
-
-/**
- * 故事框架绑定数据源
- * 加载当前激活的框架绑定，构建注入 AI 会话的上下文文本。
- * 无绑定 / 框架缺失 → 空字符串（由缓存层记 empty）；真实 I/O 异常上抛。
- */
-const storyFrameworkBindingDataSource: DataSource<string> = {
-  name: "storyFrameworkBinding",
-  priority: 19,
-  async load(context: ContextLoadContext): Promise<string> {
-    const binding = await loadBinding(context.projectPath)
-    if (!binding) return ""
-    const frameworks = await loadFrameworks(context.projectPath)
-    const framework = frameworks.find((f) => f.id === binding.frameworkId)
-    if (!framework) return ""
-    return buildBindingContext(binding, framework)
   },
 }
 
@@ -612,13 +568,10 @@ export function getAllDataSources(): DataSource<any>[] {
     canonRulesDataSource,
     sourceCanonDataSource,
     writingStyleDataSource,
-    bookAnalysisReferencesDataSource,
     searchResultsDataSource,
     graphSearchResultsDataSource,
     revisionFeedbackDataSource,
     cognitionTextDataSource,
-    soulDocDataSource,
-    storyFrameworkBindingDataSource,
   ]
 }
 

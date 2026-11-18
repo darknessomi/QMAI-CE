@@ -1,5 +1,6 @@
 {
   "bundle": {
+    "copyright": "© 2026 青幕AI写作 CE 社区贡献者\n基于 LLM Wiki · © 2024–2026 Yong Su",
     "macOS": {
       "minimumSystemVersion": "13.0"
     }

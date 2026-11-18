@@ -171,7 +171,7 @@ describe("弹窗宽度：每个 DialogContent 都要有宽度来源", () => {
     )
 
   it("扫描到的使用点数量合理（防止守卫空转）", () => {
-    expect(uses.length).toBeGreaterThanOrEqual(25)
+    expect(uses.length).toBeGreaterThanOrEqual(24)
     expect(widthClasses.size).toBeGreaterThan(0)
     expect([...widthClasses]).toContain("ui-test-activity-dialog")
     expect([...widthClasses]).toContain("ui-test-outline-wizard")

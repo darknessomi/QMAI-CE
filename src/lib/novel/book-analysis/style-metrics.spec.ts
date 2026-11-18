@@ -2,9 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import {
   computeStyleMetrics,
   deriveStyleMetrics,
-  formatStyleMetricsForMarkdown,
   formatStyleMetricsForPrompt,
-  mergeStyleMetrics,
   resetSegmenterCache,
   splitSentences,
 } from "./style-metrics"
@@ -126,45 +124,6 @@ describe("computeStyleMetrics", () => {
   })
 })
 
-describe("mergeStyleMetrics", () => {
-  it("sums raw counts and re-derives ratios instead of averaging them", () => {
-    const first = computeStyleMetrics(["他走了。"])
-    const second = computeStyleMetrics([`${"这是一个很长的句子用来测试长句判定".repeat(4)}。`])
-    const merged = mergeStyleMetrics([first, second])
-
-    expect(merged.counts.chapters).toBe(2)
-    expect(merged.counts.sentences).toBe(2)
-    expect(merged.derived.shortSentenceRatio).toBe(0.5)
-    expect(merged.derived.longSentenceRatio).toBe(0.5)
-    expect(merged.derived.avgSentenceChars).toBe(
-      Number(((first.counts.sentenceCharTotal + second.counts.sentenceCharTotal) / 2).toFixed(2)),
-    )
-  })
-
-  it("merges word frequency tables by summing counts", () => {
-    const merged = mergeStyleMetrics([
-      computeStyleMetrics(["他没有回头。"]),
-      computeStyleMetrics(["他没有回头。"]),
-    ])
-    expect(merged.topWords.find((item) => item.word === "回头")?.count).toBe(2)
-  })
-
-  it("returns the single item unchanged", () => {
-    const only = computeStyleMetrics(["他走了。"])
-    expect(mergeStyleMetrics([only])).toBe(only)
-  })
-
-  it("returns empty metrics for an empty list", () => {
-    expect(mergeStyleMetrics([]).counts.chapters).toBe(0)
-  })
-
-  it("marks the segmenter unavailable when any chunk lacked it", () => {
-    const good = computeStyleMetrics(["他没有回头。"])
-    const degraded = { ...good, segmenterAvailable: false }
-    expect(mergeStyleMetrics([good, degraded]).segmenterAvailable).toBe(false)
-  })
-})
-
 describe("deriveStyleMetrics", () => {
   it("never divides by zero", () => {
     const derived = deriveStyleMetrics({
@@ -200,11 +159,5 @@ describe("formatting", () => {
   it("warns in the prompt when the segmenter was unavailable", () => {
     const metrics = { ...computeStyleMetrics(["他走了。"]), segmenterAvailable: false }
     expect(formatStyleMetricsForPrompt(metrics)).toContain("缺少中文分词能力")
-  })
-
-  it("renders a markdown table", () => {
-    const markdown = formatStyleMetricsForMarkdown(computeStyleMetrics(["他走了。"]))
-    expect(markdown).toContain("| 指标 | 数值 |")
-    expect(markdown).toContain("平均句长")
   })
 })

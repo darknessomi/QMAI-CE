@@ -10,7 +10,6 @@ const ALL_PLUGIN_NAMES = [
   "build_context_pack",
   "select_skills",
   "select_capabilities",
-  "soul_dialog",
   "trim_context",
   "build_system_prompt",
 ]
@@ -64,20 +63,9 @@ describe("plugin-scenarios", () => {
       expect(names).toEqual(ALL_PLUGIN_NAMES)
     })
 
-    it("outline_gen: disables soul_dialog", () => {
-      const config = getScenarioConfig("outline_gen")
-      const filtered = filterPluginsByConfig(allPlugins, config)
-      const names = getPluginNames(filtered)
-      expect(names).not.toContain("soul_dialog")
-      expect(names).toContain("route_task")
-      expect(names).toContain("confidence_gate")
-      expect(names).toContain("resolve_chapter")
-      expect(names).toContain("build_context_pack")
-      expect(names).toContain("select_skills")
-      expect(names).toContain("select_capabilities")
-      expect(names).toContain("trim_context")
-      expect(names).toContain("build_system_prompt")
-      expect(names).toHaveLength(8)
+    it("outline_gen: all plugins enabled", () => {
+      const filtered = filterPluginsByConfig(allPlugins, getScenarioConfig("outline_gen"))
+      expect(getPluginNames(filtered)).toEqual(ALL_PLUGIN_NAMES)
     })
 
     it("chapter_gen: all plugins enabled", () => {
@@ -87,11 +75,10 @@ describe("plugin-scenarios", () => {
       expect(names).toEqual(ALL_PLUGIN_NAMES)
     })
 
-    it("review: disables soul_dialog and confidence_gate", () => {
+    it("review: disables confidence_gate", () => {
       const config = getScenarioConfig("review")
       const filtered = filterPluginsByConfig(allPlugins, config)
       const names = getPluginNames(filtered)
-      expect(names).not.toContain("soul_dialog")
       expect(names).not.toContain("confidence_gate")
       expect(names).toContain("route_task")
       expect(names).toContain("resolve_chapter")

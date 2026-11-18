@@ -10,9 +10,6 @@ const mockContextPack: ContextPack = {
   recentSummaries: ["第4章摘要"],
   previousChapterEnding: "上一章结尾",
   characterStates: "人物状态",
-  soulDoc: "灵魂文档",
-  characterAuras: "",
-  storyFrameworkBinding: "",
   cognitionStates: "认知状态",
   foreshadowingStates: "伏笔状态",
   timeline: "时间线",
@@ -28,9 +25,9 @@ const mockContextPack: ContextPack = {
 }
 
 describe("createNovelPrePluginChain", () => {
-  it("creates 9 plugins in correct priority order", () => {
+  it("creates 8 plugins in correct priority order", () => {
     const plugins = createNovelPrePluginChain()
-    expect(plugins).toHaveLength(9)
+    expect(plugins).toHaveLength(8)
 
     const names = plugins.map((p) => p.name)
     expect(names).toEqual([
@@ -40,7 +37,6 @@ describe("createNovelPrePluginChain", () => {
       "build_context_pack",
       "select_skills",
       "select_capabilities",
-      "soul_dialog",
       "trim_context",
       "build_system_prompt",
     ])
@@ -59,7 +55,7 @@ describe("createNovelPrePluginChain", () => {
       onError,
     })
 
-    expect(plugins).toHaveLength(9)
+    expect(plugins).toHaveLength(8)
   })
 
   it("enables classification routing for the context pack plugin by default", async () => {
@@ -69,7 +65,7 @@ describe("createNovelPrePluginChain", () => {
         routes: [
           {
             intent: "generate_outline",
-            required: ["soul", "settings"],
+            required: ["settings"],
             optional: [],
             forbidden: ["chapter_content", "recent_summaries", "graph"],
           },
@@ -80,7 +76,7 @@ describe("createNovelPrePluginChain", () => {
     const mockApplyRouteRules = vi.fn().mockReturnValue({
       pack: { ...mockContextPack, recentSummaries: [], graphSearchResults: "" },
       blockedSources: ["recent_summaries", "graph"],
-      keptSources: ["soul", "settings"],
+      keptSources: ["settings"],
     })
     const buildPlugin = createNovelPrePluginChain({
       buildContextPack: mockBuild,
@@ -144,35 +140,6 @@ describe("runNovelPrePluginChain", () => {
     expect(result.contextPack).toBeDefined()
     expect(result.novelSystemPrompt).toBe("裁剪后的上下文")
     expect(result.errors).toHaveLength(0)
-  })
-
-  it("stops chain when soul dialog required", async () => {
-    const mockBuild = vi.fn().mockResolvedValue({
-      ...mockContextPack,
-      characterAuras: "需要确认的角色光环",
-      storyFrameworkBinding: "",
-    })
-    const mockShouldRequest = vi.fn().mockReturnValue(true)
-
-    const { createBuildContextPackPlugin } = await import("./plugins/build-context-pack-plugin")
-    const { createSoulDialogPlugin } = await import("./plugins/soul-dialog-plugin")
-
-    const chain = createPrePluginChain([
-      createBuildContextPackPlugin({ buildContextPack: mockBuild }),
-      createSoulDialogPlugin({ shouldRequestSoulDialog: mockShouldRequest }),
-    ])
-
-    const result = await chain.run({
-      userMessage: "写第5章",
-      projectPath: "/test-project",
-      agentConfig: {} as any,
-      novelMode: true,
-      taskRoute: { intent: "write_chapter", confidence: 0.9, chapterNumber: 5, extractedParams: {} },
-    })
-
-    expect(result.contextPack).toBeDefined()
-    expect(result.shouldStop).toBe(true)
-    expect(result.stopReason).toBe("soul_dialog_confirmation_required")
   })
 
   it("collects errors from plugins without stopping", async () => {

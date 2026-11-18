@@ -433,7 +433,6 @@ pub const SLOT_IDS: &[&str] = &[
     "inspiration-browser",
     "editor-context-menu",
     "outline-toolbar",
-    "analysis-toolbar",
     "plugin-center",
 ];
 
@@ -453,7 +452,6 @@ pub const SLOT_API_VERSIONS: &[(&str, u32)] = &[
     ("inspiration-browser", 1),
     ("editor-context-menu", 1),
     ("outline-toolbar", 1),
-    ("analysis-toolbar", 1),
     ("plugin-center", 1),
 ];
 

@@ -188,7 +188,7 @@ export function UiTestShell({ project, onOpenProject, onSelectProject, onSwitchP
   const writing = Boolean(project && (activeView === "wiki" || activeView === "sources"))
   const assistantOpen = activeView === "sources" ? outlineExpanded : chatExpanded
   const requestedWidth = Number.isFinite(preference.aiWidth) ? preference.aiWidth! : UI_TEST_AI_DEFAULT_WIDTH
-  // 技能库、灵魂改为整窗卡片画廊，不再占用左侧目录栏。
+  // 技能库使用整窗布局，不再占用左侧目录栏。
   // 判定抽到 `@/lib/full-window-views`：这样「哪些视图是整窗」有**行为测试**
   // （`full-window-views.spec.ts`），而不是靠源码里一行的子串比对。
   const fullWindowViews = isFullWindowView(activeView)

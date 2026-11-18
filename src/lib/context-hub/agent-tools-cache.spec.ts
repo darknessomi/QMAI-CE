@@ -17,7 +17,7 @@ describe("context hub read tools", () => {
     listDirectory.mockResolvedValue([])
   })
 
-  it("routes chapter, outline, memory and deduction reads through the injected reader", async () => {
+  it("routes chapter, outline and memory reads through the injected reader", async () => {
     const readTextFile = vi.fn(async (path: string) => `缓存内容:${path}`)
     const registry = new ToolRegistry()
     registerAllBuiltInTools(registry, {
@@ -26,19 +26,17 @@ describe("context hub read tools", () => {
       getChatConversations: () => [],
       getOutlineConversations: () => [],
       readTextFile,
-      enabledToolNames: ["read_chapter", "read_outline", "read_memory", "read_deduction"],
+      enabledToolNames: ["read_chapter", "read_outline", "read_memory"],
     })
 
     await registry.get("read_chapter")!.execute({ path: "/project/wiki/chapters/1.md" })
     await registry.get("read_outline")!.execute({ path: "/project/wiki/outlines/main.md" })
     await registry.get("read_memory")!.execute({ path: "/project/wiki/memory/clue.md" })
-    await registry.get("read_deduction")!.execute({ path: "/project/.qmai/simulations/run.json" })
 
     expect(readTextFile.mock.calls.map(([path]) => path)).toEqual([
       "/project/wiki/chapters/1.md",
       "/project/wiki/outlines/main.md",
       "/project/wiki/memory/clue.md",
-      "/project/.qmai/simulations/run.json",
     ])
   })
 

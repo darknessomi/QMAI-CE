@@ -49,18 +49,17 @@ export interface BuiltinPlugin {
 /**
  * 顺序即插件页里的显示顺序：能力类在前，界面类在后。
  *
- * 剧情搜索 / 审查中心 / 剧情推演 之所以只能做成内置插件（而不是外部插件），
+ * 剧情搜索 / 审查中心 之所以只能做成内置插件（而不是外部插件），
  * 是因为它们都依赖宿主独有能力：
  *   · 剧情搜索 用**向量检索**（需要 embedding 模型）+ 点结果要跳转章节；
  *   · 审查中心 读写 `reviewRun` / `selectedFile` 这些 store 状态；
- *   · 剧情推演 按 `project.path` 存取推演结果，还要读大纲与人物。
  * 插件进程拿不到这些东西，硬拆会让功能断掉。
  */
 export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
   {
     id: "web-search",
     name: "网页搜索",
-    description: "让 AI 联网查外部资料；也可供角色光环、写作实体搜索等功能使用。",
+    description: "让 AI 联网查外部资料；也可供写作实体搜索等功能使用。",
     kind: "capability",
     offEffect: "关闭后所有联网搜索都会停用：AI 对话不再调用搜索工具，相关功能会跳过联网这一步。",
     defaultEnabled: true,

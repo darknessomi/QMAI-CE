@@ -60,6 +60,35 @@ fn restore_macos_window_frame(window: tauri::WebviewWindow) {
     }
 }
 
+#[cfg(target_os = "macos")]
+fn macos_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
+    use tauri::menu::{AboutMetadata, Menu, MenuItemKind, PredefinedMenuItem};
+
+    let menu = Menu::default(app)?;
+    // Tauri 默认菜单的第一项是应用菜单，首项为原生「关于」。
+    if let Some(MenuItemKind::Submenu(app_menu)) = menu.items()?.first() {
+        let icon = image::load_from_memory(include_bytes!("../icons/128x128@2x.png"))
+            .map_err(std::io::Error::other)?
+            .into_rgba8();
+        let (width, height) = icon.dimensions();
+        let package = app.package_info();
+        let about = PredefinedMenuItem::about(
+            app,
+            Some(&format!("关于 {}", package.name)),
+            Some(AboutMetadata {
+                name: Some(package.name.clone()),
+                version: Some(package.version.to_string()),
+                copyright: app.config().bundle.copyright.clone(),
+                icon: Some(tauri::image::Image::new_owned(icon.into_raw(), width, height)),
+                ..Default::default()
+            }),
+        )?;
+        app_menu.remove_at(0)?;
+        app_menu.insert(&about, 0)?;
+    }
+    Ok(menu)
+}
+
 pub fn run() {
     if mcp::stdio_requested() {
         mcp::run_stdio();
@@ -67,7 +96,10 @@ pub fn run() {
     }
     // 必须在 build() 之前：wry 建窗失败只走 log::error!，不装接收器就永远查不到原因。
     commands::reader_window::init_diagnostics();
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    #[cfg(target_os = "macos")]
+    let builder = builder.menu(macos_menu);
+    builder
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             use tauri::Manager;
             if let Some(window) = app.get_webview_window("main") {

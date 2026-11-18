@@ -145,7 +145,7 @@ pub struct BackupProgressPayload {
     pub message: String,
 }
 
-const PROJECT_FILES: &[&str] = &["soul.md", "schema.md", "purpose.md"];
+const PROJECT_FILES: &[&str] = &["schema.md", "purpose.md"];
 
 // 知识目录的可能名称（新版用 QM，旧版用 wiki），导出时统一以 wiki 名称存入 zip
 const KNOWLEDGE_DIR_CANDIDATES: &[&str] = &["QM", "wiki"];
@@ -156,11 +156,11 @@ const KNOWLEDGE_ZIP_NAME: &str = "wiki";
  *
  * ── 为什么要把它们从「分析」里择出来 ──
  * 原实现只看 `.qmai/` 下一级条目名：`lancedb` 算索引，**其余一律算「分析」**。
- * 于是用户只勾「正文」「记忆」、不勾「拆书、推演与 AI 工作数据」时，
+ * 于是用户只勾「正文」「记忆」、不勾「AI 工作数据」时，
  * 下面这些全都不会进备份 —— 恢复出来的项目少了自己的配置与手工记录，
  * 行为与备份前不一致，而用户在备份对话框里看不到任何提示。
  *
- * 这些文件本质是**项目自身的一部分**（和 soul.md 同级），不属于"分析产物"，
+ * 这些文件本质是**项目自身的一部分**，不属于"分析产物"，
  * 所以判定改成：只要这个项目被备份了，它们就跟上，与勾了哪些 section 无关。
  * 它们的**凭据字段**另受 include_credentials 控制（见 add_project_meta_dir_to_zip）。
  *
@@ -171,8 +171,7 @@ const KNOWLEDGE_ZIP_NAME: &str = "wiki";
  *                            projectRevisionFeedbackWindowConfigs 全部按这个 id 索引 ——
  *                            也就是说恢复后的书所有按项目保存的设置会一起失联。
  *   · writing-style.json     用户建立的写作风格预设（范文、DNA、章程），纯手工资产。
- *   · project-soul-styles.json 用户建立的灵魂风格预设，同上。
- *   · bindable-characters-ignore.json / foreshadowing-keep.json /
+ *   · foreshadowing-keep.json /
  *     dedup-not-duplicates.json  用户在界面里逐条点出来的"忽略/保留/不是重复"决定。
  *                            这些是**人的判断**，任何扫描都推不出来。
  *   · novel-config.json / source-watch-config.json /
@@ -186,8 +185,6 @@ const KNOWLEDGE_ZIP_NAME: &str = "wiki";
 const PROJECT_OWNED_FILES: &[&str] = &[
     "project.json",
     "writing-style.json",
-    "project-soul-styles.json",
-    "bindable-characters-ignore.json",
     "foreshadowing-keep.json",
     "dedup-not-duplicates.json",
     "novel-config.json",
@@ -449,6 +446,39 @@ fn add_dir_to_zip(
     Ok(())
 }
 
+const RETIRED_PROJECT_META_ENTRIES: &[&str] = &[
+    "bindable-characters.json",
+    "bindable-characters-ignore.json",
+    "book-analysis-context.json",
+    "character-aura.json",
+    "character-auras",
+    "dismantling",
+    "plot-frameworks",
+    "project-soul-styles.json",
+    "simulations",
+];
+
+fn is_retired_project_meta_entry(name: &str) -> bool {
+    RETIRED_PROJECT_META_ENTRIES
+        .iter()
+        .any(|entry| name.eq_ignore_ascii_case(entry))
+}
+
+fn is_retired_project_entry(relative: &str) -> bool {
+    let relative = relative.replace('\\', "/");
+    let mut components = relative
+        .split('/')
+        .filter(|part| !part.is_empty() && *part != ".");
+    match components.next().map(str::to_ascii_lowercase).as_deref() {
+        Some("soul.md" | "book-analysis") => true,
+        Some("qm" | "wiki") => components
+            .next()
+            .is_some_and(|name| name.eq_ignore_ascii_case("soul.md")),
+        Some(".qmai") => components.next().is_some_and(is_retired_project_meta_entry),
+        _ => false,
+    }
+}
+
 fn add_project_meta_dir_to_zip(
     zip: &mut ZipWriter<fs::File>,
     base_dir: &Path,
@@ -462,7 +492,10 @@ fn add_project_meta_dir_to_zip(
     let options =
         zip::write::SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
 
-    for entry in WalkDir::new(base_dir).into_iter() {
+    let entries = WalkDir::new(base_dir).into_iter().filter_entry(|entry| {
+        entry.depth() != 1 || !is_retired_project_meta_entry(&entry.file_name().to_string_lossy())
+    });
+    for entry in entries {
         let entry = match entry {
             Ok(entry) => entry,
             Err(error) => {
@@ -479,12 +512,13 @@ fn add_project_meta_dir_to_zip(
             .map_err(|error| format!("路径剥离失败: {error}"))?;
         let relative_slash = relative.to_string_lossy().replace('\\', "/");
         let top_level = relative_slash.split('/').next().unwrap_or("");
-        let is_index_entry = top_level.eq_ignore_ascii_case("lancedb");        /*
+        let is_index_entry = top_level.eq_ignore_ascii_case("lancedb");
+        /*
          * 三分类，取代原来的二分（index / 其余都是 analysis）：
          *   · lancedb 目录下        → 索引，只受 include_indexes 控制
          *   · 项目自身文件 + covers/ → 只要项目被备份就带上，与勾选哪些 section 无关
          *                             （见 PROJECT_OWNED_FILES 的说明）
-         *   · 其余                   → 分析/推演工作数据，受 include_analysis 控制
+         *   · 其余                   → AI 工作数据，受 include_analysis 控制
          */
         let project_owned = is_project_owned_entry(&relative_slash);
         if !project_owned
@@ -665,7 +699,7 @@ fn extract_dir_from_zip(
     for name in names {
         let relative = &name[zip_prefix.len()..];
         let relative = relative.trim_start_matches('/');
-        if relative.is_empty() {
+        if relative.is_empty() || is_retired_project_entry(relative) {
             continue;
         }
 
@@ -1038,7 +1072,7 @@ fn write_backup_zip<F: Fn(&BackupProgressPayload)>(
                  * 只记一条警告，**不能**中断整份备份。
                  *
                  * 原实现这里是 `fs::read(...)?`，与同函数里 add_dir_to_zip 的
-                 * "记警告继续" 策略相反：一个不可读的 soul.md 会让整次导出失败，
+                 * "记警告继续" 策略相反：一个不可读的 schema.md 会让整次导出失败，
                  * 用户拿不到任何备份 —— 而其余几十个项目本来都能备份。
                  * 备份工具的取向应当是"尽量多救回来 + 明确告知缺了什么"。
                  */
@@ -1098,22 +1132,6 @@ fn write_backup_zip<F: Fn(&BackupProgressPayload)>(
                         "复制项目 {} 的 .novel 目录失败: {}",
                         project.name, e
                     ));
-                }
-            }
-        }
-
-        if include_analysis {
-            let analysis_path = project_path.join("book-analysis");
-            if analysis_path.exists() && analysis_path.is_dir() {
-                let zip_sub_prefix = format!("{}/book-analysis", zip_prefix);
-                if let Err(e) = add_dir_to_zip(
-                    &mut zip,
-                    &analysis_path,
-                    &zip_sub_prefix,
-                    &mut file_count,
-                    &mut warnings,
-                ) {
-                    warnings.push(format!("复制项目 {} 的拆书数据失败: {}", project.name, e));
                 }
             }
         }
@@ -1759,7 +1777,7 @@ mod tests {
         assert!(names
             .iter()
             .any(|name| name == "projects/p1/raw/sources/source.txt"));
-        assert!(names.iter().any(|name| name == "projects/p1/soul.md"));
+        assert!(!names.iter().any(|name| name == "projects/p1/soul.md"));
         assert!(names
             .iter()
             .any(|name| name == "projects/p1/.qmai/lancedb/index.bin"));
@@ -1848,7 +1866,12 @@ mod tests {
     fn export_v2_removes_credentials_and_unselected_ui_preferences() {
         let tmp = unique_test_dir("credentials");
         let project = tmp.join("project");
-        std::fs::create_dir_all(project.join(".qmai")).unwrap();
+        std::fs::create_dir_all(project.join(".qmai/simulations")).unwrap();
+        std::fs::create_dir_all(project.join("book-analysis")).unwrap();
+        std::fs::write(project.join(".qmai/simulations/result.json"), "{}").unwrap();
+        std::fs::write(project.join(".qmai/character-aura.json"), "{}").unwrap();
+        std::fs::write(project.join("book-analysis/library.json"), "{}").unwrap();
+        std::fs::write(project.join(".qmai/chat.json"), "{}").unwrap();
         std::fs::write(
             project.join(".qmai/rerank-config.json"),
             r#"{"apiKey":"rerank-secret","model":"rerank-model"}"#,
@@ -1894,6 +1917,13 @@ mod tests {
         .unwrap();
         assert_eq!(rerank["model"], "rerank-model");
         assert!(rerank.get("apiKey").is_none());
+
+        let archive = zip::ZipArchive::new(std::fs::File::open(&zip_path).unwrap()).unwrap();
+        let names: Vec<_> = archive.file_names().collect();
+        assert!(names.contains(&"projects/p1/.qmai/chat.json"));
+        assert!(!names.iter().any(|name| name.contains("/simulations/")));
+        assert!(!names.iter().any(|name| name.ends_with("/character-aura.json")));
+        assert!(!names.iter().any(|name| name.contains("/book-analysis/")));
 
         let manifest: BackupManifest =
             serde_json::from_str(&read_zip_entry(&zip_path, "manifest.json")).unwrap();
@@ -2179,7 +2209,7 @@ mod tests {
         );
     }
 
-    /// D6：项目的配置、身份与手工记录属于项目自身，**不**该被"拆书分析"这个勾选决定去留。
+    /// 项目的配置、身份与手工记录始终随项目备份。
     ///
     /// 只勾「正文」时下面这些必须在，而 lancedb（索引）与 chat.json（AI 工作数据）必须不在
     /// —— 后者被顺带带出就违背了用户在对话框里做的选择。
@@ -2267,11 +2297,9 @@ mod tests {
     const EXPECTED_OWNED_FILES: &[&str] = &[
         // 项目身份 UUID：丢了它，恢复后所有按项目 id 索引的设置会失联
         "project.json",
-        // 用户手工建立的写作风格 / 灵魂风格预设
+        // 用户手工建立的写作风格预设
         "writing-style.json",
-        "project-soul-styles.json",
         // 用户逐条点出来的判断
-        "bindable-characters-ignore.json",
         "foreshadowing-keep.json",
         "dedup-not-duplicates.json",
         // 项目级功能配置
@@ -2289,7 +2317,7 @@ mod tests {
         for name in EXPECTED_OWNED_FILES {
             assert!(
                 PROJECT_OWNED_FILES.contains(name),
-                "{name} 必须列入 PROJECT_OWNED_FILES，否则不勾「拆书分析」时它会丢失"
+                "{name} 必须列入 PROJECT_OWNED_FILES，否则不勾「AI 工作数据」时它会丢失"
             );
             assert!(
                 is_project_owned_entry(name),
@@ -2502,12 +2530,12 @@ mod tests {
         let project = tmp.join("project");
         std::fs::create_dir_all(project.join("QM")).unwrap();
         std::fs::write(project.join("QM/chapter.md"), "正文").unwrap();
-        // 让 soul.md 变成"存在但打不开"
-        std::fs::write(project.join("soul.md"), "灵魂").unwrap();
+        // 让 schema.md 变成"存在但打不开"
+        std::fs::write(project.join("schema.md"), "项目结构").unwrap();
         let exclusive = std::fs::OpenOptions::new()
             .read(true)
             .share_mode(0)
-            .open(project.join("soul.md"))
+            .open(project.join("schema.md"))
             .unwrap();
 
         let app_state = tmp.join("app-state.json");
@@ -2535,7 +2563,7 @@ mod tests {
         drop(exclusive);
 
         assert!(
-            result.warnings.iter().any(|w| w.contains("soul.md")),
+            result.warnings.iter().any(|w| w.contains("schema.md")),
             "必须明确告知哪个文件被跳过：{:?}",
             result.warnings
         );

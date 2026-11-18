@@ -21,7 +21,7 @@ const modelIo = vi.hoisted(() => ({
   saveConfigs: vi.fn(async () => undefined),
 }))
 vi.mock("@/lib/connection-tests", () => ({ testLlmConnection: modelIo.connection, testLlmFunction: modelIo.functionTest }))
-const persistence = vi.hoisted(() => ({ saveLlm: vi.fn(async () => undefined), saveSoul: vi.fn(async (_path: string, store: unknown) => store) }))
+const persistence = vi.hoisted(() => ({ saveLlm: vi.fn(async () => undefined) }))
 vi.mock("@/lib/ui-test", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/ui-test")>(),
   get IS_UI_TEST_BUILD() { return ui.enabled },
@@ -33,18 +33,6 @@ vi.mock("@/lib/project-store", async (importOriginal) => ({
   saveLlmConfig: persistence.saveLlm,
   saveProviderConfigs: modelIo.saveConfigs,
   saveActivePresetId: vi.fn(async () => undefined),
-}))
-vi.mock("@/lib/novel/project-soul-style-store", async (importOriginal) => ({
-  ...await importOriginal<typeof import("@/lib/novel/project-soul-style-store")>(),
-  loadProjectSoulStyleStore: vi.fn(async () => ({
-    version: 1,
-    enabledStyleId: "style-a",
-    styles: [
-      { id: "style-a", name: "现有风格甲", content: "既有长规则。".repeat(1000), enabled: true, createdAt: 1, updatedAt: 1 },
-      { id: "style-b", name: "现有风格乙", content: "另一套已有规则。", enabled: false, createdAt: 2, updatedAt: 2 },
-    ],
-  })),
-  saveProjectSoulStyleStore: persistence.saveSoul,
 }))
 vi.mock("@/components/layout/panel-header-with-help", () => ({ PanelHeaderWithHelp: ({ title }: { title: string }) => <span>{title}</span> }))
 
@@ -86,9 +74,6 @@ beforeEach(async () => {
     activePresetId: null,
     activeSettingsCategory: null,
     activeModelSettingsTab: null,
-    selectedSoulTab: "project",
-    selectedSoulId: "project-soul",
-    selectedSoulSection: "builtIn",
   })
   container = document.createElement("div")
   container.className = "ui-test-root"
@@ -370,12 +355,10 @@ describe("工具页样式规格及作用域", () => {
     expect(source).toContain('uitest/ui-test-tools.css')
   })
 
-  it("设置正文 930px、1.25rem（原20px）顶部衬线标题、灵魂风格和编辑器单列", () => {
+  it("设置正文 930px、1.25rem（原20px）顶部衬线标题", () => {
     expect(hasDeclaration('.ui-test-root [data-ui="settings-section"]', "max-width", "930px")).toBe(true)
     expect(hasDeclaration('.ui-test-root .ui-test-page-title', "font-size", "1.25rem")).toBe(true)
     expect(hasDeclaration('.ui-test-root .ui-test-page-title', "font-family", "var(--serif)")).toBe(true)
-    expect(hasDeclaration('.ui-test-root [data-ui="soul-project-editor"] > div > .grid', "grid-template-columns", "minmax(0, 1fr)")).toBe(true)
-    expect(hasDeclaration('.ui-test-root [data-ui="soul-role-content"] main > div', "flex-direction", "column")).toBe(true)
   })
 
   it("测试版胶囊不受正式版直角风格的 important 层叠影响", () => {
@@ -387,24 +370,6 @@ describe("工具页样式规格及作用域", () => {
       rule.walkDecls("border-radius", (declaration) => { if (declaration.important && declaration.value !== "0") protectedTabs = true })
     })
     expect(protectedTabs).toBe(true)
-  })
-
-  it("正在编辑但未启用的风格仍有独立选中边界", () => {
-    let selectedBorder = false
-    cssRoot().walkRules((rule) => {
-      if (!rule.selector.includes('button[class*="border-primary/70"]')) return
-      rule.walkDecls("border-color", (declaration) => { if (declaration.value === "var(--ui-accent)") selectedBorder = true })
-    })
-    expect(selectedBorder).toBe(true)
-  })
-
-  it("自定义灵魂分组内的空输入框与容器有可见底色区分", () => {
-    let contrastingField = false
-    cssRoot().walkRules((rule) => {
-      if (!rule.selector.includes('[data-ui="soul-role-content"] .rounded-md')) return
-      rule.walkDecls("background-color", (declaration) => { if (declaration.value === "var(--ui-paper)") contrastingField = true })
-    })
-    expect(contrastingField).toBe(true)
   })
 
   it.each([

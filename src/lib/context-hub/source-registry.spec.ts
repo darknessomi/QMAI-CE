@@ -43,7 +43,7 @@ function createHarness(initialFiles: FileNode[]) {
 }
 
 describe("ContextSourceRegistry", () => {
-  it("scans direct .qmai files and nested simulation files", async () => {
+  it("scans direct .qmai files and skips the retired simulation directory", async () => {
     const calls: Array<[string, unknown]> = []
     const writingStyle = file("E:/Novel/.qmai/writing-style.json", 1)
     const simulation = file("E:/Novel/.qmai/simulations/latest.json", 1)
@@ -58,9 +58,9 @@ describe("ContextSourceRegistry", () => {
       }),
     })
 
-    expect(result).toEqual([writingStyle, simulation])
+    expect(result).toEqual([writingStyle])
     expect(calls).toContainEqual(["E:/Novel/.qmai", { includeHidden: true, maxDepth: 1 }])
-    expect(calls).toContainEqual(["E:/Novel/.qmai/simulations", { includeHidden: true, maxDepth: 30 }])
+    expect(calls.some(([path]) => path === "E:/Novel/.qmai/simulations")).toBe(false)
     expect(calls).toContainEqual(["E:/Novel/retrieval", { maxDepth: 30 }])
   })
 

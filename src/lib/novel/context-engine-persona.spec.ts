@@ -11,27 +11,16 @@ describe("写作上下文注入人物 Skill", () => {
     expect(contextEngine).toContain('import { buildPersonaSkillContext } from "./persona-skill-context"')
   })
 
-  it("character-aura 仍然只能动态 import（bundle 边界不变）", () => {
-    expect(contextEngine).not.toContain('from "./character-aura"')
-    expect(contextEngine).toContain('await import("./character-aura")')
-  })
-
-  it("两个匹配共用同一段 matchingText", () => {
+  it("使用任务关联的章纲和人物状态匹配人物 Skill", () => {
     expect(contextEngine).toContain("const personaMatchingText = joinNonEmpty([")
-    expect(contextEngine).toContain("matchingText: personaMatchingText")
     expect(contextEngine).toContain("buildPersonaSkillContext(context.projectPath, personaMatchingText)")
   })
 
-  it("走独立的 personaSkills 字段，绝不并进 characterAuras", () => {
-    // characterAuras 有一条硬不变量：有 portablePersonalities 时必须完整进入提示词，
-    // 否则 contextPackToPrompt 直接抛错停止生成。人物 Skill 文本很长，
-    // 并进去会把它挤出预算、触发一个跟人格规则无关的误导性报错。
+  it("用 personaSkills 字段承载匹配结果", () => {
     expect(contextEngine).toContain("personaSkills?: string")
     expect(contextEngine).toContain("personaSkills: 10.5,")
     expect(contextEngine).toContain('fieldKey: "personaSkills"')
     expect(contextEngine).toContain("...(personaSkillContext ? { personaSkills: personaSkillContext } : {}),")
-    // 原样保留：characterAuras 仍然只装角色灵魂
-    expect(contextEngine).toContain("characterAuras: soulContext.text,")
   })
 
   it("注入失败不能弄挂写作", () => {

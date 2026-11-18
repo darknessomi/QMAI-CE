@@ -28,7 +28,6 @@ vi.mock("@/lib/plugins/declarative/api", () => ({
       "inspiration-browser": { actions: [], packs: [] },
       "editor-context-menu": { actions: [], packs: [] },
       "outline-toolbar": { actions: [], packs: [] },
-      "analysis-toolbar": { actions: [], packs: [] },
     },
     loading: false,
     degraded: false,

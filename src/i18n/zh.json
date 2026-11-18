@@ -101,8 +101,6 @@
     "skillLibrary": "技能库",
     "writingSkillLibrary": "写作 Skill",
     "reviewCenter": "审查中心",
-    "dismantling": "拆文库",
-    "dismantlingLibrary": "拆文库",
     "plotFrameworkLibrary": "剧情框架库",
     "settings": "设置",
     "switchProject": "切换小说",
@@ -949,7 +947,7 @@
       },
       "dataManagement": {
         "title": "数据管理",
-        "description": "备份和恢复你的所有数据，包括模型配置、AI对话、小说内容、大纲、记忆库、拆书结果等。",
+        "description": "备份和恢复你的所有数据，包括模型配置、AI对话、小说内容、大纲、记忆库等。",
         "exportTitle": "导出备份",
         "exportDescription": "将选中的内容打包为 ZIP 文件，可选择全局配置、项目和数据类别。",
         "exportButton": "导出备份",
@@ -1106,7 +1104,6 @@
       "skillLibrary": "技能库",
       "writingSkillLibrary": "写作 Skill",
       "reviewCenter": "审查中心",
-      "dismantling": "拆文库",
       "plugins": "插件",
       "settings": "模型与写作设置",
       "switchProject": "切换小说"
@@ -1182,7 +1179,7 @@
       "taskModelsTitle": "分环节指定模型（写小说）",
       "taskModelsHint": "写小说时，审稿、摘要、提取信息、去 AI 味这几个环节可以各用一个模型。默认它们都跟随上面的「默认模型」，你不用管（默认模型也没设时，才用聊天框底部选中的模型兜底）。只有某个环节想固定用别的模型时，才取消它的「跟随默认模型」并在右侧选一个。",
       "defaultLlmModel": "默认模型（通用）",
-      "defaultLlmModelHint": "写正文以外的功能都用它：审稿、摘要、提取，以及拆书、剧情推演、角色灵魂、AI 改写/润色、重复条目检测、资料自动导入等。建议在这里指定一个模型。留空（勾选「跟随聊天模型」）时，才用聊天框底部选中的模型兜底。",
+      "defaultLlmModelHint": "写正文以外的功能都用它：审稿、摘要、提取，以及 AI 改写/润色、重复条目检测、资料自动导入等。建议在这里指定一个模型。留空（勾选「跟随聊天模型」）时，才用聊天框底部选中的模型兜底。",
       "defaultLlmModelScopeNote": "写小说的审稿、摘要、提取、去 AI 味默认都用这个模型；需要时可在下方「分环节指定模型」里单独指定。",
       "writingModel": "写作模型",
       "writingModelHint": "写小说时用于生成、续写和改写正文，直接使用聊天框底部选中的模型。",
@@ -1225,20 +1222,6 @@
     },
     "personaSkill": {
       "learningFailed": "{{message}}。模型的原始返回已记入 .qmai/chapter-ingest.log，重新提取一次即可重试；技能库不会再静默留空。"
-    },
-    "soul": {
-      "projectSoul": "项目灵魂",
-      "characterSoul": "角色灵魂",
-      "projectSoulDesc": "定义本项目的核心气质、创作边界、叙事原则和长期写作总则",
-      "projectSoulPlaceholder": "在此编写项目级写作总则...\n\n例如：\n- 核心气质：克制、冷静、现实压力强\n- 叙事原则：每个场景必须推动目标或制造代价\n- 语言边界：避免华丽堆砌，少用感叹和空泛比喻\n- 节奏控制：每 500 字至少出现一个新信息点",
-      "saveProjectSoul": "保存项目灵魂",
-      "saveProjectSoulSuccess": "项目灵魂已保存",
-      "saveProjectSoulFailed": "项目灵魂保存失败，请检查项目文件权限后重试",
-      "projectSoulItem": "项目灵魂文档",
-      "builtInSoul": "内置灵魂",
-      "customSoul": "自定义灵魂",
-      "newCustomSoul": "+ 新建灵魂",
-      "noCustomSoul": "暂无自定义灵魂"
     },
     "app": {
       "title": "青幕AI写作 CE",
@@ -1501,10 +1484,7 @@
       "recentChapterContents": "## 最近章节正文片段",
       "previousChapterEnding": "## 上一章结尾",
       "characterStates": "## 当前人物状态",
-      "characterAuras": "## 角色灵魂",
       "personaSkills": "## 人物 Skill",
-      "soulDoc": "## 项目灵魂",
-      "storyFrameworkBinding": "## 故事框架绑定",
       "cognitionStates": "## 角色认知状态",
       "foreshadowingStates": "## 当前伏笔状态",
       "timeline": "## 时间线",

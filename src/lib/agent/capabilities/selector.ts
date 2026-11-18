@@ -33,13 +33,11 @@ const STRICT_WRITING_TOOLS = new Set([
   "apply_skill",
 ])
 const STRICT_EXTRA_TOOLS = new Set([
-  "read_deduction",
   "read_chat_history",
   "read_outline_history",
   "list_chapters",
   "list_outlines",
   "list_memories",
-  "list_deductions",
 ])
 
 /**

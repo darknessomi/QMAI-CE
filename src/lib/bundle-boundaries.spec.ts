@@ -21,20 +21,7 @@ describe("frontend bundle boundaries", () => {
     expect(viteConfig).not.toContain('return "cytoscape-vendor"')
   })
 
-  it("keeps character-aura matching out of the initial context graph", () => {
-    const characterAura = read("./novel/character-aura.ts")
-    const contextEngine = read("./novel/context-engine.ts")
-    const reviewAdapter = read("./novel/review-adapter.ts")
-
-    expect(characterAura).toContain('from "opencc-js/t2cn"')
-    expect(characterAura).not.toContain('from "opencc-js"')
-    expect(contextEngine).not.toContain('from "./character-aura"')
-    expect(contextEngine).toContain('await import("./character-aura")')
-    expect(reviewAdapter).not.toContain('from "./character-aura"')
-    expect(reviewAdapter).toContain('await import("./character-aura")')
-  })
-
-  it("loads optional search, skill, soul, and book-analysis views on demand", () => {
+  it("loads optional search and skill views on demand", () => {
     const contentArea = read("../components/layout/content-area.tsx")
     const sidebarPanel = read("../components/layout/sidebar-panel.tsx")
 

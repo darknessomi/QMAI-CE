@@ -19,14 +19,12 @@ const READ_TOOLS = new Set([
   "read_chapter",
   "read_outline",
   "read_memory",
-  "read_deduction",
   "read_chat_history",
   "read_outline_history",
   "search_chapters",
   "list_chapters",
   "list_outlines",
   "list_memories",
-  "list_deductions",
   "web_search",
   "read_web_page",
 ])
@@ -73,8 +71,6 @@ export function getToolCallDescription(name: string, params: Record<string, unkn
     }
     case "read_memory":
       return `读取记忆「${params.name}」`
-    case "read_deduction":
-      return `读取推演结果「${params.name}」`
     case "read_chat_history": {
       const target = params.conversationId || params.conversationTitle
       return `读取会话历史「${target}」`
@@ -101,8 +97,6 @@ export function getToolCallDescription(name: string, params: Record<string, unkn
       return "列出所有大纲"
     case "list_memories":
       return "列出所有记忆"
-    case "list_deductions":
-      return "列出所有推演结果"
     case "write_chapter":
       return `写入章节《${params.name}》${formatWordCount(params.content)}`
     case "write_outline_node":

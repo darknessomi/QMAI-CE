@@ -18,18 +18,12 @@ interface SelectableProject extends WikiProject {
 const SOURCE_LABELS: Record<ExportSource, string> = {
   chapters: "章节",
   outlines: "大纲",
-  "book-analysis": "拆书库",
-  "story-simulation": "剧情推演室",
-  "soul-works": "灵魂作品",
 }
 
 function emptySources(): Record<ExportSource, ExportDocument[]> {
   return {
     chapters: [],
     outlines: [],
-    "book-analysis": [],
-    "story-simulation": [],
-    "soul-works": [],
   }
 }
 

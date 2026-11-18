@@ -1,9 +1,6 @@
 export type ExportSource =
   | "chapters"
   | "outlines"
-  | "book-analysis"
-  | "story-simulation"
-  | "soul-works"
 
 export type ExportFormat = "txt" | "docx"
 

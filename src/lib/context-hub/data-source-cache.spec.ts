@@ -24,8 +24,6 @@ function prefixToKinds(prefix: string): ContextSourceKind[] {
   if (prefix.startsWith("wiki/memory/") || prefix === ".novel/timeline.json") return ["memory"]
   if (prefix.startsWith(".novel/snapshots/") || prefix.startsWith(".novel/community-summaries/") || prefix === ".novel/revision-feedback.json") return ["snapshot"]
   if (prefix.startsWith("retrieval/")) return ["retrieval"]
-  if (prefix === "soul.md" || prefix === "wiki/soul.md") return ["soul"]
-  if (prefix.startsWith(".qmai/simulations/")) return ["deduction"]
   return ["other"]
 }
 
@@ -269,17 +267,17 @@ describe("DataSourceCacheAdapter", () => {
     }
   })
 
-  it("excludes all five task sources from both counters on a repeated twelve-source request", async () => {
+  it("excludes task-scoped sources from reusable cache counters", async () => {
     const harness = createHarness()
     const sources = [
-      "canonRules", "writingStyle", "soulDoc", "storyFrameworkBinding",
+      "canonRules", "writingStyle",
       "relatedSettings", "fallbackRecentSummaries", "cognitionText", "retrieval",
-      "searchResults", "graphSearchResults", "bookAnalysisReferences", "sectionBriefing",
+      "searchResults", "graphSearchResults", "sectionBriefing",
     ].map((name): DataSource<string> => ({ name, priority: 1, load: vi.fn(async () => name) }))
     const coldRegistry = new DataSourceRegistry({ loadAdapter: harness.adapter })
     coldRegistry.registerAll(sources)
     const cold = await coldRegistry.loadAll(context)
-    expect(harness.adapter.getStats()).toMatchObject({ cacheableLoaded: 7, cacheableHits: 0 })
+    expect(harness.adapter.getStats()).toMatchObject({ cacheableLoaded: 5, cacheableHits: 0 })
 
     const warmAdapter = new DataSourceCacheAdapter({ registry: harness.registry, storage: harness.cacheStorage })
     const warmRegistry = new DataSourceRegistry({ loadAdapter: warmAdapter })
@@ -288,10 +286,10 @@ describe("DataSourceCacheAdapter", () => {
 
     expect(warm).toEqual(cold)
     expect(warmAdapter.getStats()).toMatchObject({
-      cacheHits: 12,
-      taskScopedLoaded: 5,
-      cacheableLoaded: 7,
-      cacheableHits: 7,
+      cacheHits: 9,
+      taskScopedLoaded: 4,
+      cacheableLoaded: 5,
+      cacheableHits: 5,
     })
     for (const source of sources) expect(source.load).toHaveBeenCalledOnce()
   })

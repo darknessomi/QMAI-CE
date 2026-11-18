@@ -65,7 +65,7 @@ const PluginCenterView = lazy(async () => {
  * 它是**项目级**的维护动作（重复资料合并、伏笔清理都作用于当前打开的书），
  * 而设置里其余分类是应用级配置 —— 之前它放在设置左侧，用户在写作时
  * 要为了清理一本书的数据离开写作现场去"设置"，语义上也别扭。
- * 现在它和记忆中心、拆书库一样是一个正常视图，从顶栏「创作工具」进入。
+ * 现在它和记忆中心一样是一个正常视图，从顶栏「创作工具」进入。
  */
 const MaintenanceView = lazy(async () => {
   const mod = await import("@/components/settings/sections/maintenance-section");
@@ -123,7 +123,6 @@ export function ContentArea() {
       // 合并说明：两侧各自追加了技能库的内部视图，取并集 —— 都渲染同一个
       // UnifiedSkillLibraryView，由组件内部按 activeView 决定显示哪个 tab。
       case "writingStyleLibrary":
-      case "characterSoulLibrary":
       case "skillFavorites":
         content = (
           <Suspense fallback={<LoadingView />}>

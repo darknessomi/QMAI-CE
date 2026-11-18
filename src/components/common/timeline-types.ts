@@ -9,8 +9,8 @@ const WRITE_TOOLS = new Set([
   "write_chapter_outline",
 ])
 const READ_TOOLS = new Set([
-  "list_chapters", "list_outlines", "list_memories", "list_deductions",
-  "read_chapter", "read_outline", "read_memory", "read_deduction",
+  "list_chapters", "list_outlines", "list_memories",
+  "read_chapter", "read_outline", "read_memory",
   "read_chat_history", "read_outline_history", "search_chapters",
   "chapter_context", "chapter_previous_analysis", "load_context", "trim_context",
   "web_search", "read_web_page",

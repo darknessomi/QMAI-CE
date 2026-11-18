@@ -3,13 +3,13 @@
  *
  * 版式取自方案 G1：
  *   - 顶部一条紧凑栏：头像 + 名字 + 徽章 + 定位/出场 + 保存（一行放完，不占高度）
- *   - 下面一排页签：档案 / 性格与灵魂 / 语言与行为 / 关系与状态 / 研究文件
+ *   - 下面一排页签：档案 / 性格 / 语言与行为 / 关系与状态 / 研究文件
  *   - 每页内部用 5 列密排短字段：姓名/性别/年龄/定位/状态挤在同一行
  *
  * 两条硬约束（用户提的）：
  *   ① **短字段不许各占一行**。原来「姓名」独占一行，一屏只能看四五条，
  *      用户根本不愿意往下翻。现在一行排 5 个，档案页首屏能看到十几条。
- *   ② **必须拆子页面**。性格、灵魂、语言、关系、研究各自独立，
+ *   ② **必须拆子页面**。性格、语言、关系、研究各自独立，
  *      每页都短，不再是一整条长滚动。
  *
  * 编辑方式：**零点击**——格子平时显示为文字，hover 浮出边框，点上去就能改，
@@ -49,7 +49,7 @@ const ROLE_OPTIONS = [...PERSONA_MAJOR_ROLE_TYPES, ...PERSONA_MINOR_ROLE_TYPES]
 /** 子页面。顺序即页签顺序，也决定用户默认落在哪一页。 */
 const PAGES = [
   { key: "profile", label: "档案" },
-  { key: "persona", label: "性格与灵魂" },
+  { key: "persona", label: "性格" },
   { key: "act", label: "语言与行为" },
   { key: "relation", label: "关系与状态" },
   { key: "research", label: "研究文件" },
@@ -402,29 +402,28 @@ export function PersonaSkillProfilePanel(props: PersonaSkillProfilePanelProps) {
             </>
           ) : null}
 
-          {/* ===== 性格与灵魂 ===== */}
+          {/* ===== 性格 ===== */}
           {page === "persona" ? (
             <>
               <section className="ui-test-fsec">
                 <h5>性格 · 会进入写作注入</h5>
                 <PersonaPersonalityTab
                   tags={personality.tags}
-                  boundSoul={personality.boundSoul}
                   raw={personality.raw}
                   onChange={(next) => {
-                    setField("性格", renderPersonalitySection({ tags: next.tags, boundSoul: next.boundSoul }))
+                    setField("性格", renderPersonalitySection({ tags: next.tags }))
                   }}
                 />
               </section>
 
               {/* 注入预览不再是独立卡片：改成贴在性格区底部的虚线细条。
-                  它和「性格 / 灵魂」是同一件事的上下游，独立成卡片只会和上面那块
+                  它和「性格」是同一件事的上下游，独立成卡片只会和上面那块
                   形成两个并列的浅色方框（用户描述为「双蓝」）。 */}
               <div className="ui-test-injline" data-testid="persona-inject-preview">
                 <span className="k">注入预览</span>
                 <span className="v">
                   {personality.tags.length > 0
-                    ? `人物性格：${personality.tags.join("、")}（性格优先于灵魂基线）`
+                    ? `人物性格：${personality.tags.join("、")}`
                     : "还没有选性格，这一项不会进入注入。"}
                 </span>
                 <span className="n">
@@ -642,7 +641,7 @@ export function PersonaSkillProfilePanel(props: PersonaSkillProfilePanelProps) {
                     research={props.research}
                     injectPreview={
                       personality.tags.length > 0
-                        ? `人物性格：${personality.tags.join("、")}（性格优先于灵魂基线）`
+                        ? `人物性格：${personality.tags.join("、")}`
                         : "还没有选性格，这一项不会进入注入。"
                     }
                     onCommitField={(name, value) => setField(name, value)}

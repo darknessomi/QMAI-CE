@@ -1,13 +1,5 @@
 import { describe, expect, it } from "vitest"
-import {
-  INTEGRATED_DNA_CHAR_LIMIT,
-  WRITING_DNA_LAYERS,
-  emptyWritingDnaLayers,
-  isWritingDnaProfile,
-  migrateStyleProfile,
-  needsReextraction,
-} from "./style-profile-schema"
-import { computeStyleMetrics } from "./style-metrics"
+import { migrateStyleProfile } from "./style-profile-schema"
 import type { BookStyleProfile } from "./types"
 
 function v1Profile(overrides: Partial<BookStyleProfile> = {}): BookStyleProfile {
@@ -34,20 +26,6 @@ function v1Profile(overrides: Partial<BookStyleProfile> = {}): BookStyleProfile 
     ...overrides,
   }
 }
-
-describe("WRITING_DNA_LAYERS", () => {
-  it("四层齐全且文件名唯一", () => {
-    expect(WRITING_DNA_LAYERS).toHaveLength(4)
-    const keys = WRITING_DNA_LAYERS.map((item) => item.key)
-    expect(new Set(keys).size).toBe(4)
-    expect(new Set(WRITING_DNA_LAYERS.map((item) => item.fileName)).size).toBe(4)
-    expect(keys).toEqual(Object.keys(emptyWritingDnaLayers()))
-  })
-
-  it("整合文档上限沿用 writing-dna-skill 的 4000 字标准", () => {
-    expect(INTEGRATED_DNA_CHAR_LIMIT).toBe(4000)
-  })
-})
 
 describe("migrateStyleProfile", () => {
   it("把 v1 的 9 个维度按层归类，不丢内容", () => {
@@ -122,54 +100,5 @@ describe("migrateStyleProfile", () => {
     expect(migrated.samples).toEqual([])
     expect(migrated.sampledChapterIds).toEqual([])
     expect(migrated.constitution).toBe("")
-  })
-})
-
-describe("isWritingDnaProfile", () => {
-  it("有整合文档即视为 v2", () => {
-    expect(isWritingDnaProfile(v1Profile({ integratedDna: "整合" }))).toBe(true)
-  })
-
-  it("任一层非空即视为 v2", () => {
-    expect(isWritingDnaProfile(v1Profile({
-      layers: { ...emptyWritingDnaLayers(), rhythmGuide: "一句一段" },
-    }))).toBe(true)
-  })
-
-  it("纯 v1 数据返回 false", () => {
-    expect(isWritingDnaProfile(v1Profile())).toBe(false)
-  })
-
-  it("layers 全空返回 false", () => {
-    expect(isWritingDnaProfile(v1Profile({ layers: emptyWritingDnaLayers() }))).toBe(false)
-  })
-
-  it("空值安全", () => {
-    expect(isWritingDnaProfile(null)).toBe(false)
-    expect(isWritingDnaProfile(undefined)).toBe(false)
-  })
-})
-
-describe("needsReextraction", () => {
-  it("v1 迁移产物需要重新提取", () => {
-    expect(needsReextraction(migrateStyleProfile(v1Profile()))).toBe(true)
-  })
-
-  it("有分层但统计为空仍需重新提取", () => {
-    expect(needsReextraction(v1Profile({
-      integratedDna: "整合",
-      metrics: computeStyleMetrics([]),
-    }))).toBe(true)
-  })
-
-  it("分层与统计齐全时不需要重新提取", () => {
-    expect(needsReextraction(v1Profile({
-      integratedDna: "整合",
-      metrics: computeStyleMetrics(["他走了。"]),
-    }))).toBe(false)
-  })
-
-  it("没有画像时返回 false（而不是催用户重提取一个不存在的东西）", () => {
-    expect(needsReextraction(null)).toBe(false)
   })
 })

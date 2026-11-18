@@ -70,7 +70,6 @@ export async function scanProjectContextFiles(
     safeList(`${projectPath}/wiki`, { maxDepth: 30 }, io),
     safeList(`${projectPath}/.novel`, { includeHidden: true, maxDepth: 30 }, io),
     safeList(`${projectPath}/.qmai`, { includeHidden: true, maxDepth: 1 }, io),
-    safeList(`${projectPath}/.qmai/simulations`, { includeHidden: true, maxDepth: 30 }, io),
     safeList(`${projectPath}/retrieval`, { maxDepth: 30 }, io),
   ])
   return flattenFiles(roots.flat())

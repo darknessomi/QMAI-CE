@@ -36,7 +36,7 @@ const ALL_SECTIONS: ProjectBackupSection[] = [
 const SECTION_LABELS: Record<ProjectBackupSection, string> = {
   content: "项目正文与资料",
   memory: "结构化记忆与章节快照",
-  analysis: "拆书、推演与 AI 工作数据",
+  analysis: "AI 工作数据",
   indexes: "向量与检索索引",
   trash: "回收站",
 }
@@ -276,8 +276,8 @@ export function BackupExportDialog({
             <legend className="text-sm font-medium">项目数据类别</legend>
             {/*
               这句说明是必要的：项目的身份、配置与手工记录（.qmai 下的 project.json、
-              写作/灵魂风格预设、忽略与保留清单）不受下面的勾选影响，始终随项目备份。
-              不写出来，用户会以为取消勾选「拆书、推演与 AI 工作数据」会连带丢掉这些，
+              写作文风预设、忽略与保留清单）不受下面的勾选影响，始终随项目备份。
+              不写出来，用户会以为取消勾选「AI 工作数据」会连带丢掉这些，
               于是被迫把体积大得多的分析数据也一起备份。
             */}
             <p className="text-xs text-muted-foreground">

@@ -138,7 +138,6 @@ export function buildReviewPrompt(
   planBlueprint?: string,
   maxContextSize?: number,
   cachePrefix?: string,
-  extraContext?: string,
 ): string {
   const baseDimensions = characterOnly ? CHARACTER_REVIEW_DIMENSIONS : REVIEW_DIMENSIONS
   // 当传入用户确认的计划时，追加计划偏离维度（characterOnly 模式下不追加，保持轻量）
@@ -166,10 +165,7 @@ export function buildReviewPrompt(
   const contextSection = cachePrefix && cachePrefix.trim()
     ? cachePrefix.trim()
     : contextPackToPrompt(pack, undefined, { maxContextSize })
-  const extraSection = extraContext && extraContext.trim()
-    ? `\n\n${extraContext.trim()}`
-    : ""
-  return `${contextSection}${extraSection}
+  return `${contextSection}
 
 ${modeTitle}：
 ${modeStages.map((stage) => `- ${stage}：必须使用高级 thinking，先分析证据，再给结论。`).join("\n")}
@@ -178,8 +174,8 @@ ${characterOnly ? "角色一致性专项审查要求：" : "阶段要求："}
 ${characterOnly
   ? [
       "1. 角色提取：从本章正文中提取所有出现的角色名（含别名、昵称），列出角色清单。",
-      "2. 记忆库对照：逐个角色对照上下文中的角色光环/灵魂、人物状态、角色认知状态字段，标注命中状态。",
-      "3. 脱离判定：角色行为若违背光环设定、人物状态、认知状态、大纲人物小传，视为脱离记忆库，按严重程度标为 error 或 warning。",
+      "2. 记忆库对照：逐个角色对照上下文中的人物状态、角色认知状态字段，标注命中状态。",
+      "3. 脱离判定：角色行为若违背人物状态、认知状态、大纲人物小传，视为脱离记忆库，按严重程度标为 error 或 warning。",
       "4. 二次复核：删除没有正文证据或没有记忆/大纲依据的主观评价，补上遗漏的阻断问题。",
     ].join("\n")
   : [
@@ -206,12 +202,11 @@ ${characterOnly ? "" : `${i18n.t("novel.reviewPrompt.specialChecksTitle")}
 ${blueprintSection}
 
 1. 角色提取：先从本章正文中提取所有出现的角色名（含别名、昵称），列出角色清单。
-2. 记忆库对照：逐个角色对照上下文中的"角色光环/灵魂"、"人物状态"、"角色认知状态"字段：
-   - 标注该角色是否命中记忆库（已注入光环 / 仅有状态 / 完全缺失）。
-   - 若角色已命中记忆库，检查正文行为是否符合光环设定（说话方式、心智模型、决策启发式、价值观反模式、诚实边界）。
+2. 记忆库对照：逐个角色对照上下文中的"人物状态"、"角色认知状态"字段：
+   - 标注该角色是否命中记忆库（有角色状态或认知记录 / 完全缺失）。
    - 若角色未命中记忆库但在大纲/人物小传中存在，标注"未命中但应命中"。
-3. 脱离判定：角色行为若违背光环设定、人物状态、认知状态（知道/不知道什么）、大纲人物小传，视为"脱离记忆库"，按严重程度标为 error 或 warning。
-4. 输出要求：在审查 JSON 中，角色相关问题 type 使用 "character_consistency"，relatedMemory 必须引用对应的光环/状态/认知/大纲原文。
+3. 脱离判定：角色行为若违背人物状态、认知状态（知道/不知道什么）、大纲人物小传，视为"脱离记忆库"，按严重程度标为 error 或 warning。
+4. 输出要求：在审查 JSON 中，角色相关问题 type 使用 "character_consistency"，relatedMemory 必须引用对应的状态/认知/大纲原文。
 
 ${i18n.t("novel.reviewPrompt.chapterContent")}
 ${chapterContent.slice(0, CHAPTER_BODY_EXCERPT_MAX_CHARS)}
@@ -257,42 +252,13 @@ export async function reviewChapter(
   }
 
   // 复用调用方已构建的 contextPack；没有才自行构建。
-  const baseContextPack = options.contextPack ?? await buildContextPack(
+  const contextPack = options.contextPack ?? await buildContextPack(
     projectPath,
     `审稿第${chapterNumber || "?"}章`,
     chapterNumber,
   )
 
-  // 审查前用初稿正文重新匹配角色光环，补齐初稿中新出现的角色。
-  // 阶段1构建 contextPack 时 matchingText 不含初稿正文，配角/新角色登场时光环不会被注入，
-  // 这里把 chapterContent 加入 matchingText 重新匹配，确保审查阶段能看到初稿新角色的完整光环。
-  let contextPack = baseContextPack
-  try {
-    const { buildCharacterAuraContext } = await import("./character-aura")
-    const draftCharacterAuras = await buildCharacterAuraContext(projectPath, baseContextPack.task, {
-      matchingText: [
-        baseContextPack.chapterGoal,
-        baseContextPack.outline,
-        baseContextPack.characterStates,
-        baseContextPack.cognitionStates,
-        chapterContent,
-      ].filter(Boolean).join("\n\n"),
-    })
-    if (draftCharacterAuras && draftCharacterAuras !== baseContextPack.characterAuras) {
-      contextPack = { ...baseContextPack, characterAuras: draftCharacterAuras }
-    }
-  } catch (err) {
-    console.error("[Novel Review] 重新匹配角色光环失败，沿用阶段1的光环:", err)
-  }
-
   if (signal?.aborted) throw new Error("已停止生成")
-  // 复用写作前缀时，审稿自建的 contextPackToPrompt 会被前缀取代，
-  // 重匹配得到的角色光环必须单独补在**前缀之后**，否则这部分信息会丢。
-  const auraDelta = options.cachePrefix
-    && contextPack.characterAuras
-    && contextPack.characterAuras !== baseContextPack.characterAuras
-    ? `## 初稿新增角色光环（写作阶段之后重新匹配）\n${contextPack.characterAuras}`
-    : undefined
 
   const outputLang = getOutputLanguage()
   const langReminder = buildLanguageReminder(outputLang)
@@ -326,7 +292,6 @@ ${langReminder}`
         options.planBlueprint,
         llmConfig.maxContextSize,
         options.cachePrefix,
-        auraDelta,
       )
       const stageTitle = chunks.length > 1
         ? (options.characterOnly ? `角色一致性审查（第${i + 1}/${chunks.length}段）` : `深度审查（第${i + 1}/${chunks.length}段）`)

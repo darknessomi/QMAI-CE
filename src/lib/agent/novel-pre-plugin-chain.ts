@@ -12,7 +12,6 @@ import { createResolveChapterPlugin } from "./plugins/resolve-chapter-plugin"
 import { createBuildContextPackPlugin } from "./plugins/build-context-pack-plugin"
 import { createSelectSkillsPlugin } from "./plugins/select-skills-plugin"
 import { createSelectCapabilitiesPlugin } from "./plugins/select-capabilities-plugin"
-import { createSoulDialogPlugin } from "./plugins/soul-dialog-plugin"
 import { createTrimContextPlugin } from "./plugins/trim-context-plugin"
 import { createBuildSystemPromptPlugin } from "./plugins/build-system-prompt-plugin"
 import type { BuildContextPackPluginDeps } from "./plugins/build-context-pack-plugin"
@@ -20,7 +19,6 @@ import type { BuildContextPackPluginDeps } from "./plugins/build-context-pack-pl
 interface NovelPrePluginDeps {
   selectedFile?: string | null
   lastGeneratedChapterNumber?: number
-  requestSoulDialog?: (summary: string) => Promise<boolean>
   onError?: (pluginName: string, error: Error) => void
   buildContextPack?: BuildContextPackPluginDeps["buildContextPack"]
   loadClassificationConfig?: BuildContextPackPluginDeps["loadClassificationConfig"]
@@ -33,7 +31,6 @@ export function createNovelPrePluginChain(deps: NovelPrePluginDeps = {}): PrePlu
   const {
     selectedFile,
     lastGeneratedChapterNumber,
-    requestSoulDialog,
     onError,
     buildContextPack,
     loadClassificationConfig,
@@ -62,13 +59,6 @@ export function createNovelPrePluginChain(deps: NovelPrePluginDeps = {}): PrePlu
     }),
     createSelectSkillsPlugin(),
     createSelectCapabilitiesPlugin(),
-    createSoulDialogPlugin({
-      shouldRequestSoulDialog: (pack) => {
-        if (!requestSoulDialog) return false
-        return Boolean(pack?.characterAuras?.trim())
-      },
-      onError: (e) => onError?.("soul_dialog", e),
-    }),
     createTrimContextPlugin({
       onError: (e) => onError?.("trim_context", e),
     }),

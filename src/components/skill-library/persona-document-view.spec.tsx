@@ -41,7 +41,7 @@ async function render(props: Partial<Parameters<typeof PersonaDocumentView>[0]> 
 describe("PersonaDocumentView（N1 整页文档 + R2 折叠研究文件）", () => {
   it("四章齐全，字段与正文都在同一份文档里", async () => {
     await render()
-    for (const title of ["基本信息", "性格与灵魂", "语言与行为", "关系与状态", "研究文件"]) {
+    for (const title of ["基本信息", "性格", "语言与行为", "关系与状态", "研究文件"]) {
       expect(host.textContent, title).toContain(title)
     }
     expect(host.textContent).toContain("怎么说话")

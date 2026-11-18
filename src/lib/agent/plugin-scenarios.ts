@@ -5,12 +5,10 @@ export type ScenarioType = "chat" | "outline_gen" | "chapter_gen" | "review" | "
 export const DEFAULT_SCENARIO_CONFIGS: Record<ScenarioType, PluginConfig> = {
   general: {},
   chat: {},
-  outline_gen: {
-    disabledPlugins: ["soul_dialog"],
-  },
+  outline_gen: {},
   chapter_gen: {},
   review: {
-    disabledPlugins: ["soul_dialog", "confidence_gate"],
+    disabledPlugins: ["confidence_gate"],
   },
 }
 

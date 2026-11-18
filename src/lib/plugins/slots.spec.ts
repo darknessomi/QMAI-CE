@@ -159,8 +159,9 @@ describe("buildSlotIndex", () => {
 })
 
 describe("isSlotId / slotBucket", () => {
-  it("只认 6 个已知插槽", () => {
+  it("只认可用的五个插槽", () => {
     expect(isSlotId("chapter-toolbar")).toBe(true)
+    expect(isSlotId("analysis-toolbar")).toBe(false)
     expect(isSlotId("plugin-center")).toBe(true)
     expect(isSlotId("chapter-toolbar ")).toBe(false)
     expect(isSlotId(undefined)).toBe(false)
@@ -168,7 +169,7 @@ describe("isSlotId / slotBucket", () => {
   })
 
   it("取不存在的桶时退回空桶而不是 undefined", () => {
-    const empty = { actions: [], packs: [] } as unknown as ReturnType<typeof emptySlotIndex>
-    expect(slotBucket(empty, "analysis-toolbar")).toEqual({ actions: [], packs: [] })
+    const empty = {} as ReturnType<typeof emptySlotIndex>
+    expect(slotBucket(empty, "outline-toolbar")).toEqual({ actions: [], packs: [] })
   })
 })

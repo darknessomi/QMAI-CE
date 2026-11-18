@@ -50,7 +50,6 @@ function makeData(overrides: Partial<MemoryCenterData> = {}): MemoryCenterData {
     snapshots: [],
     allChapterNumbers: [],
     files: [],
-    dismantlingProjects: [],
     ...overrides,
   }
 }
