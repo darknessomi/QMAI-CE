@@ -1,6 +1,6 @@
 import { useEffect, useId, useState } from "react"
 import { Check } from "lucide-react"
-import { UI_TEST_SKINS, readUiTestSkin, writeUiTestSkin, type UiTestSkin } from "@/lib/ui-test"
+import { UI_TEST_SKINS, isUiTestSkin, readUiTestSkin, writeUiTestSkin, type UiTestSkin } from "@/lib/ui-test"
 import type { SettingsDraft, DraftSetter } from "../settings-types"
 import {
   UI_FONT_SIZE_MAX,
@@ -24,7 +24,7 @@ export function InterfaceSection({ draft, setDraft }: Props) {
     const root = document.documentElement
     const observer = new MutationObserver(() => {
       const current = root.dataset.uiTestSkin
-      if (current === "jing" || current === "zhi" || current === "xing") setSkin(current)
+      if (isUiTestSkin(current)) setSkin(current)
     })
     observer.observe(root, { attributes: true, attributeFilter: ["data-ui-test-skin"] })
     return () => observer.disconnect()
@@ -37,7 +37,7 @@ export function InterfaceSection({ draft, setDraft }: Props) {
       setSkinError("")
       window.dispatchEvent(new CustomEvent("qmai-ui-test-skin-change", { detail: next }))
     } catch {
-      setSkinError("无法保存测试版外观，请重试。当前皮肤保持不变。")
+      setSkinError("无法保存外观设置，请重试。")
     }
   }
 
@@ -46,7 +46,7 @@ export function InterfaceSection({ draft, setDraft }: Props) {
       <h1 className="ui-test-page-title">外观与界面</h1>
       <section aria-label="推荐外观">
         <p className="ui-test-interface-label">推荐外观</p>
-        <div data-ui="interface-skins" role="group" aria-label="测试版皮肤">
+        <div data-ui="interface-skins" role="group" aria-label="界面皮肤">
           {UI_TEST_SKINS.map((option) => (
             <button key={option.id} type="button" data-ui-skin-choice={option.id} aria-label={`${option.name}皮肤`} aria-pressed={skin === option.id} onClick={() => chooseSkin(option.id)}>
               <span aria-hidden="true" className={`ui-test-interface-swatch ui-test-skin-dot-${option.id}`} />
@@ -54,7 +54,7 @@ export function InterfaceSection({ draft, setDraft }: Props) {
             </button>
           ))}
         </div>
-        <p className="ui-test-interface-description">三款皮肤立即应用，仅保存到独立测试版外观偏好，不改变书稿或模型配置。</p>
+        <p className="ui-test-interface-description">选择后立即生效。</p>
         {skinError && <p role="alert" className="text-sm text-destructive">{skinError}</p>}
       </section>
       <div data-ui="interface-fields">

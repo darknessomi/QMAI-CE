@@ -59,7 +59,7 @@ describe("独立窗口 URL 约定", () => {
 
   it("外观快照也能随查询串往返（浏览器里验收布局走的就是这条路径）", () => {
     const appearance = {
-      skin: "xing" as const,
+      skin: "dark" as const,
       uiFontSizeScale: 1.25,
       bodyFontPx: 21,
       bodyLineHeight: 2.05,

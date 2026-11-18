@@ -1,6 +1,6 @@
 import { getStore } from "@/lib/web-store"
 import { loadModelConfigsEncrypted, saveModelConfigsEncrypted } from "@/lib/local-secret"
-import { IS_UI_TEST_BUILD } from "@/lib/ui-test"
+import { normalizeUiTestSkin, readUiTestSkin, writeUiTestSkin, type UiTestSkin } from "@/lib/ui-test"
 import type { WikiProject } from "@/types/wiki"
 import type { LlmConfig, SearchApiConfig, EmbeddingConfig, MultimodalConfig, OutputLanguage, ProviderConfigs, ProxyConfig, SourceWatchConfig, NovelConfig, RerankConfig } from "@/stores/wiki-store"
 import { DEFAULT_NOVEL_CONFIG, DEFAULT_RERANK_CONFIG } from "@/stores/wiki-store"
@@ -900,19 +900,24 @@ export async function loadRerankConfig(projectId?: string, projectPath?: string)
   return config
 }
 
-const THEME_KEY = IS_UI_TEST_BUILD ? "theme__uiTest" : "theme"
+export const THEME_KEY = "theme__uiTest"
 const VISUAL_STYLE_KEY = "visualStyle"
 const VISUAL_STYLE_VERSION_KEY = "visualStyleVersion"
 
-export async function saveTheme(theme: "light" | "dark" | "system"): Promise<void> {
+export async function saveTheme(theme: UiTestSkin): Promise<void> {
   const store = await getStore()
   await store.set(THEME_KEY, theme)
 }
 
-export async function loadTheme(): Promise<"light" | "dark" | "system" | null> {
+export async function loadTheme(): Promise<UiTestSkin> {
   const store = await getStore()
-  const savedTheme = await store.get<"light" | "dark" | "system">(THEME_KEY)
-  return savedTheme ?? null
+  const saved = await store.get(THEME_KEY)
+  const legacy = await store.get("uiTestSkin")
+  const theme = normalizeUiTestSkin(legacy) ?? normalizeUiTestSkin(saved) ?? readUiTestSkin()
+  if (saved !== theme) await store.set(THEME_KEY, theme)
+  if (legacy !== undefined && legacy !== null) await store.delete("uiTestSkin")
+  writeUiTestSkin(theme)
+  return theme
 }
 
 export async function saveVisualStyle(style: VisualStyle): Promise<void> {

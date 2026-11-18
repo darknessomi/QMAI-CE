@@ -15,38 +15,12 @@ import {
 import { readDocumentAppearance } from "@/lib/html-document-appearance"
 import { isTauri } from "@/lib/platform"
 import { applyTheme } from "@/lib/theme-utils"
-import { readUiTestSkin } from "@/lib/ui-test"
+import { normalizeUiTestSkin, readUiTestSkin, type UiTestSkin } from "@/lib/ui-test"
 import { useWikiStore } from "@/stores/wiki-store"
 
-/**
- * 独立窗口的「外观 + 正文排版」快照。
- *
- * ── 为什么必须由主窗口带过去，不能让独立窗口自己读 ──
- * 独立窗口跑在另一个 webview 里，而且用的是**自己的 WebView2 profile**
- * （`reader_window.rs` 的 `data_directory`，每进程一个 `reader-webview-<pid>`）。
- * 这带来两个直接后果：
- *   1. localStorage 不共享 —— 皮肤存在 `qm-uitest-skin` 里，那边永远读到空值、
- *      回退成默认皮肤。用户看到的就是「我设的是静水，独立窗口却不是静水」。
- *   2. 两个窗口各有一份 store —— 正文字体 / 字号 / 行距 / 字距 / 边距 /
- *      安全距离也读不到，全部退回出厂默认。用户看到的就是
- *      「独立窗口没跟随格式设置」。
- * 所以建窗时把这些值塞进 payload（`ReaderWindowPayload.appearance`），
- * 打开之后主窗口再改动时用 Tauri 事件广播一次（`publishReaderWindowAppearance`）。
- *
- * ── 为什么不各自读 app-state.json ──
- * app-state 确实跨窗口共享，但皮肤根本不在里面（只在 localStorage），
- * 且它是异步的 store 读取，页面首帧会先按默认皮肤画一遍再跳变。
- * 快照走 payload 是同步的，首帧就是对的。
- */
-
-/** 皮肤 → 深浅主题。与 `ui-test-shell.tsx` 里「skin 驱动 theme」的规则必须一致。 */
-export function readerWindowThemeForSkin(skin: ReaderWindowAppearance["skin"]): "light" | "dark" {
-  return skin === "xing" ? "dark" : "light"
-}
-
+/** 主窗口随建窗参数和外观变更事件发送快照，供独立 WebView 使用。 */
 export interface ReaderWindowAppearance {
-  /** 外观皮肤：静水 / 纸间 / 星夜。 */
-  skin: "jing" | "zhi" | "xing"
+  skin: UiTestSkin
   /** 界面字号倍率（写成 `documentElement.style.fontSize` 的百分比）。 */
   uiFontSizeScale: number
   /** 正文字号 px。 */
@@ -59,10 +33,6 @@ export interface ReaderWindowAppearance {
   bodyMarginX: number | null
   /** 正文底部安全距离 px。 */
   bodySafeBottom: number
-}
-
-export function isReaderWindowSkin(value: unknown): value is ReaderWindowAppearance["skin"] {
-  return value === "jing" || value === "zhi" || value === "xing"
 }
 
 /**
@@ -79,7 +49,7 @@ export function normalizeReaderWindowAppearance(value: unknown): ReaderWindowApp
   if (!value || typeof value !== "object") return null
   const raw = value as Record<string, unknown>
   return {
-    skin: isReaderWindowSkin(raw.skin) ? raw.skin : readUiTestSkin(),
+    skin: normalizeUiTestSkin(raw.skin) ?? readUiTestSkin(),
     uiFontSizeScale: clampUiFontSizeScale(raw.uiFontSizeScale),
     bodyFontPx: clampBodyFontPx(raw.bodyFontPx),
     bodyLineHeight: clampBodyLineHeight(raw.bodyLineHeight),
@@ -125,7 +95,7 @@ export function defaultReaderWindowAppearance(): ReaderWindowAppearance {
 /**
  * payload → 实际要应用的那份外观。
  *
- * 没有快照时按主题兜底：`dark` 一律落到星夜（深色皮肤的语义就是"夜间"），
+ * 没有快照时按主题兜底：`dark` 一律落到石墨（深色皮肤的语义就是"夜间"），
  * 其余落到默认浅色皮肤。这样"没有快照"也不会出现「深色窗口配浅色皮肤」的错配。
  */
 export function resolveReaderWindowAppearance(
@@ -135,16 +105,16 @@ export function resolveReaderWindowAppearance(
   const normalized = normalizeReaderWindowAppearance(appearance)
   if (normalized) return normalized
   const fallback = defaultReaderWindowAppearance()
-  return theme === "dark" ? { ...fallback, skin: "xing" } : fallback
+  return { ...fallback, skin: normalizeUiTestSkin(theme) ?? fallback.skin }
 }
 
 /**
  * 落到这个 webview 上。
  *
  * 四件事缺一不可，对应四种不同的失效：
- *   1. `data-ui-test-skin` —— ui-test.css 的**皮肤变体**（纸间 / 星夜）挂在这个属性上，
+ *   1. `data-ui-test-skin` —— ui-test.css 的**皮肤变体**（青瓷 / 石墨）挂在这个属性上，
  *      同时它也是 `html` 侧的整套令牌来源（弹窗、toast 这些挂在 body 上的节点靠它）。
- *   2. `.dark`（经 applyTheme）—— 星夜是深色的，缺了它原生控件
+ *   2. `.dark`（经 applyTheme）—— 石墨是深色的，缺了它原生控件
  *      （滚动条、输入框、下拉）仍是浅色。
  *   3. 字体与排版变量 —— 正文的字体 / 字号 / 行距 / 字距 / 边距 / 安全距离
  *      全靠 `--qmai-body-*` 这一组变量；不写它们就一律走 CSS 兜底默认值。
@@ -152,7 +122,7 @@ export function resolveReaderWindowAppearance(
  *      ⚠ 这一条最容易漏：ui-test.css 把**基础令牌**声明在 `.ui-test-root` 上，
  *      而声明在元素自身的值**优先级高于继承**，所以 html 上那份变体令牌
  *      盖不住 `.ui-test-root` 自己的浅色基础值 —— 结果就是"属性设对了，
- *      但背景还是浅色"（实测：星夜窗口白底黑字）。
+ *      但背景还是浅色"（实测：石墨窗口白底黑字）。
  */
 export function applyReaderWindowAppearance(value: unknown): ReaderWindowAppearance {
   const appearance = normalizeReaderWindowAppearance(value) ?? defaultReaderWindowAppearance()
@@ -160,7 +130,7 @@ export function applyReaderWindowAppearance(value: unknown): ReaderWindowAppeara
 
   const html = document.documentElement
   html.dataset.uiTestSkin = appearance.skin
-  applyTheme(readerWindowThemeForSkin(appearance.skin))
+  applyTheme(appearance.skin)
   // 与 App.tsx 完全同一条写法：根字号百分比，界面里的 rem 尺寸随之缩放。
   html.style.fontSize = `${Math.round(clampUiFontSizeScale(appearance.uiFontSizeScale) * 100)}%`
   applyBodyTypography({

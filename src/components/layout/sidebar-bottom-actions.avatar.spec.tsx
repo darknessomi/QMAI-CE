@@ -36,7 +36,7 @@ vi.mock("react-i18next", () => ({
 }))
 
 vi.mock("@/components/layout/appearance-context", () => ({
-  useAppearanceSkin: () => ({ skin: "jing", selectSkin: mocks.selectSkin }),
+  useAppearanceSkin: () => ({ skin: "light", selectSkin: mocks.selectSkin }),
 }))
 
 import { SidebarBottomActions } from "./sidebar-bottom-actions"
@@ -111,7 +111,7 @@ describe("设置菜单", () => {
     expect(menu()).toBeNull()
   })
 
-  it("外观默认折叠，点开后列出三个主题并可切换", () => {
+  it("外观默认折叠，点开后列出青瓷和石墨并可切换", () => {
     render()
     act(() => trigger().click())
     const panel = menu()!
@@ -124,9 +124,9 @@ describe("设置菜单", () => {
     expect(sub().getAttribute("data-open")).toBe("true")
 
     const skins = panel.querySelectorAll('[role="menuitemradio"]')
-    expect(skins.length).toBeGreaterThanOrEqual(3)
-    act(() => (skins[0] as HTMLButtonElement).click())
-    expect(mocks.selectSkin).toHaveBeenCalled()
+    expect(Array.from(skins, (item) => item.textContent)).toEqual(["青瓷", "石墨"])
+    act(() => (skins[1] as HTMLButtonElement).click())
+    expect(mocks.selectSkin).toHaveBeenCalledWith("dark")
   })
 
   it("鼠标移到「外观」上就展开，移开就收起", () => {

@@ -1,5 +1,4 @@
-/* 已确认的三套皮肤；保留 jing/zhi/xing 偏好键与原有布局、字体通路。 */
-html[data-ui-test-skin="jing"], .ui-test-root[data-skin="jing"] {
+html[data-ui-test-skin="light"], .ui-test-root[data-skin="light"] {
  --ui-canvas:#e8efec;--ui-paper:#fcfdfc;--ui-panel:#edf2ef;--ui-ai:#f3f6f4;--ui-soft:#e1ece6;
  --ui-ink:#263b33;--ui-muted:#5b6e64;--ui-accent:#246653;--ui-on-accent:#fff;--ui-line:#d3dfd7;
  --ui-card:#f5f8f5;--ui-hover:#e4eee8;--ui-active:#246653;--ui-active-ink:#fff;--ui-selected:#dcebe3;
@@ -7,15 +6,7 @@ html[data-ui-test-skin="jing"], .ui-test-root[data-skin="jing"] {
  --ui-gold:#835c27;--ui-gold-line:#cfb377;--ui-gold-bg:#f7f0df;--ui-gold-bright:#c6a260;
  --ui-shadow:0 14px 38px #213c3224;--ui-subtle-shadow:0 1px 3px #1c493610;--ui-radius:8px;--ui-card-radius:10px;--ui-panel-radius:12px;
 }
-html[data-ui-test-skin="zhi"], .ui-test-root[data-skin="zhi"] {
- --ui-canvas:#ebe6db;--ui-paper:#fffdf7;--ui-panel:#f0eade;--ui-ai:#f7f2e8;--ui-soft:#ece1cf;
- --ui-ink:#39362f;--ui-muted:#756858;--ui-accent:#79543c;--ui-on-accent:#fffdf7;--ui-line:#dfd3c0;
- --ui-card:#faf6ec;--ui-hover:#eee4d4;--ui-active:#79543c;--ui-active-ink:#fffdf7;--ui-selected:#e9ddca;
- --ui-success:#44654a;--ui-danger:#9a4038;--ui-focus:#79543c;--ui-divider:#dfd3c0;
- --ui-gold:#815b22;--ui-gold-line:#c2a268;--ui-gold-bg:#f3e8cd;--ui-gold-bright:#bd9751;
- --ui-shadow:0 12px 30px #4b39251e;--ui-subtle-shadow:none;--ui-radius:5px;--ui-card-radius:6px;--ui-panel-radius:8px;
-}
-html[data-ui-test-skin="xing"], .ui-test-root[data-skin="xing"] {
+html[data-ui-test-skin="dark"], .ui-test-root[data-skin="dark"] {
  color-scheme:dark;--ui-canvas:#14191d;--ui-paper:#20262b;--ui-panel:#191f24;--ui-ai:#1b2228;--ui-soft:#2d3e40;
  --ui-ink:#e2e9e6;--ui-muted:#a4b4b2;--ui-accent:#8bcdbd;--ui-on-accent:#122820;--ui-line:#37444b;
  --ui-card:#252e35;--ui-hover:#2b383e;--ui-active:#8bcdbd;--ui-active-ink:#122820;--ui-selected:#2a4140;

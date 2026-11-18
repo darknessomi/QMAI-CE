@@ -1996,7 +1996,7 @@
   font: 0.8125rem/1.8 var(--ui);
 }
 
-/* 外观页：三皮肤始终置顶；旧布局选项只在显式展开的兼容区展示。 */
+/* 外观页：皮肤选项置顶。 */
 .ui-test-root [data-ui="interface-settings"] > section {
   margin-top: 26px;
 }
@@ -2016,7 +2016,7 @@
 
 .ui-test-root [data-ui="interface-skins"] {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
 }
 

@@ -15,7 +15,7 @@ export function SidebarBottomActions() {
   const setActiveView = useWikiStore((s) => s.setActiveView)
   const setSearchPanelOpen = useWikiStore((s) => s.setSearchPanelOpen)
   const appearance = useAppearanceSkin()
-  const currentSkin = appearance?.skin ?? "jing"
+  const currentSkin = appearance?.skin ?? "light"
   const [menuOpen, setMenuOpen] = useState(false)
   /** 鼠标是否停在外观子菜单区域上（悬停展开/收起）。 */
   const [appearanceHovered, setAppearanceHovered] = useState(false)
@@ -149,7 +149,7 @@ export function SidebarBottomActions() {
             data-tauri-drag-region="false"
           >
             {/*
-             * 外观：**鼠标移上去就在它右侧弹出**三个皮肤主题，点击也仍然可以展开/收起。
+             * 外观：**鼠标移上去就在它右侧弹出**皮肤主题，点击也仍然可以展开/收起。
              *
              * 为什么不做成「下方折叠列表」：菜单是 290px 的窄弹层，皮肤放在下面会把
              * 设置 / 维护工具顶到菜单外面（用户 2026-10-28 报「应该在右侧，不是下方」）。

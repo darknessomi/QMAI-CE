@@ -22,6 +22,8 @@ vi.mock("@/lib/web-store", () => ({
 }))
 
 import {
+  loadTheme,
+  saveTheme,
   loadAiOutlineModel,
   loadAiWorkflowMode,
   loadLastReadChapter,
@@ -250,4 +252,19 @@ describe("正文排版参数持久化", () => {
     storeMocks.values.set("uiBodyFontPx", 24)
     await expect(loadUiBodyFontPx(1.5)).resolves.toBe(24)
   })
+})
+
+describe("外观持久化", () => {
+  it.each([["zhi", "light"], ["jing", "light"], ["xing", "dark"]])(
+    "将旧选择 %s 迁移到 %s，并在下次启动读取最新选择",
+    async (legacy, expected) => {
+      storeMocks.values.clear()
+      storeMocks.values.set("uiTestSkin", legacy)
+      expect(await loadTheme()).toBe(expected)
+      expect(storeMocks.values.has("uiTestSkin")).toBe(false)
+      expect(storeMocks.values.get("theme__uiTest")).toBe(expected)
+      await saveTheme("dark")
+      expect(await loadTheme()).toBe("dark")
+    },
+  )
 })

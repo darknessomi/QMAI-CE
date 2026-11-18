@@ -241,7 +241,7 @@ describe("设定分项分区契约", () => {
   it("皮肤注入 CSS 不得包含 .chip 规则（否则历史 HTML 文档的头图芯片会白底白字）", () => {
     const injected = applyDocumentAppearance(
       "<!DOCTYPE html><html><head><title>x</title></head><body></body></html>",
-      "jing",
+      "light",
     )
     expect(injected).not.toContain(".chip,")
     expect(injected).not.toMatch(/\.chip\{/)

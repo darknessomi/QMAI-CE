@@ -132,9 +132,9 @@ export function ReaderWindow({ payload: providedPayload }: ReaderWindowProps) {
    *
    * 为什么必须是 state 而不只是往 documentElement 上写属性：ui-test.css 把
    * 基础令牌声明在 `.ui-test-root` 上（纸底、墨色…），而元素自身的声明优先于
-   * 继承，所以 `html[data-ui-test-skin="xing"]` 那份变体令牌**盖不住**根节点
+   * 继承，所以 `html[data-ui-test-skin="dark"]` 那份变体令牌**盖不住**根节点
    * 自己的浅色基础值 —— 必须给根节点挂上 `data-skin`，走
-   * `.ui-test-root[data-skin="xing"]` 那条更高优先级的规则。
+   * `.ui-test-root[data-skin="dark"]` 那条更高优先级的规则。
    * 实测症状：属性都设对了，窗口仍是白底黑字。
    */
   const [appearance, setAppearance] = useState(() =>

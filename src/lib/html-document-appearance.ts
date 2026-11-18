@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
-import { readUiTestSkin, type UiTestSkin } from "@/lib/ui-test"
+import { isUiTestSkin, readUiTestSkin, type UiTestSkin } from "@/lib/ui-test"
 
 /** 预览注入样式的唯一标记。重复套用时替换这一段，不叠样式。 */
 export const DOCUMENT_APPEARANCE_STYLE_ID = "qmai-document-appearance"
@@ -96,9 +96,9 @@ interface DocumentPalette {
   shadow2: string
 }
 
-/** 与外观皮肤的纸底、墨色、强调色对齐。节拍色单独给星夜压暗，避免奶油色块贴在夜色页面上。 */
+/** 与外观皮肤的纸底、墨色、强调色对齐。节拍色单独给石墨压暗，避免奶油色块贴在夜色页面上。 */
 const PALETTES: Record<UiTestSkin, DocumentPalette> = {
-  jing: {
+  light: {
     scheme: "light",
     bg: "#fcfdfb",
     surface: "#f2f5ef",
@@ -157,66 +157,7 @@ const PALETTES: Record<UiTestSkin, DocumentPalette> = {
     shadow1: "0 1px 2px rgba(39,60,53,.06),0 1px 3px rgba(39,60,53,.05)",
     shadow2: "0 8px 24px rgba(39,60,53,.10)",
   },
-  zhi: {
-    scheme: "light",
-    bg: "#fffcf7",
-    surface: "#f5f0e5",
-    surface2: "#ece4d3",
-    ink: "#423d31",
-    ink2: "#5a5346",
-    muted: "#716b5b",
-    border: "#e7decb",
-    brand: "#655a42",
-    brandSoft: "#f5f0e6",
-    brandSoft2: "#ece2cf",
-    brandText: "#54452f",
-    onBrand: "#ffffff",
-    qi: "#8e6e63",
-    cheng: "#c4846a",
-    zhuan: "#655a42",
-    he: "#c49a3c",
-    ok: "#3c7a3c",
-    okSoft: "#eef7ee",
-    okBorder: "#b7dfb7",
-    warn: "#96601a",
-    warnSoft: "#fff7e6",
-    danger: "#a8071a",
-    dangerSoft: "#fff1f0",
-    dangerBorder: "#ffccc7",
-    day: "#7a8f6a",
-    kQiBg: "#f1ede9",
-    kQiInk: "#5f4a3e",
-    kChengBg: "#fbede6",
-    kChengInk: "#a8451c",
-    kHeBg: "#fef3e2",
-    kHeInk: "#96601a",
-    beatFlatBg: "#f4eee8",
-    beatFlatBorder: "#e2d8cf",
-    beatFlatInk: "#5f4a3e",
-    beatRiseBg: "#fbede6",
-    beatRiseBorder: "#f0cdb8",
-    beatRiseInk: "#a8451c",
-    beatTightBg: "#f6e0d2",
-    beatTightBorder: "#e0a87e",
-    beatTightInk: "#8a3f13",
-    beatFallBg: "#efeae6",
-    beatFallBorder: "#d8ccc2",
-    beatFallInk: "#6b5548",
-    beatHangBg: "#fff7e6",
-    beatHangInk: "#96601a",
-    card: "#fffdf8",
-    cardHead: "#faf5ea",
-    zebra: "#fbf7ee",
-    railBg: "#f9f4e9",
-    lineStrong: "#d8cdb4",
-    tintGold: "#faf3e4",
-    tintJade: "#eff3e8",
-    tintRose: "#f8ede7",
-    tintSand: "#f5f1e2",
-    shadow1: "0 1px 2px rgba(66,61,49,.06),0 1px 3px rgba(66,61,49,.05)",
-    shadow2: "0 8px 24px rgba(66,61,49,.10)",
-  },
-  xing: {
+  dark: {
     scheme: "dark",
     bg: "#222f2a",
     surface: "#1d2724",
@@ -277,15 +218,11 @@ const PALETTES: Record<UiTestSkin, DocumentPalette> = {
   },
 }
 
-function isSkin(value: unknown): value is UiTestSkin {
-  return value === "jing" || value === "zhi" || value === "xing"
-}
-
 /**
  * 整份皮肤令牌写成**一个** `:root` 规则。
  * ⚠️ 不要用 `join(";")` 把多个 `:root{…}` 拼起来：那会得到 `};:root{`，
  * 浏览器认为 `;:root` 是非法选择器而把整条规则丢掉，令牌静默失效
- * （星夜皮肤会因此退回模板的浅色纸底，变成白底浅字）。
+ * （石墨皮肤会因此退回模板的浅色纸底，变成白底浅字）。
  */
 function paletteBlock(palette: DocumentPalette): string {
   const tokens = [
@@ -388,9 +325,9 @@ function appearanceCss(skin: UiTestSkin): string {
 }
 
 export function readDocumentAppearance(): UiTestSkin {
-  if (typeof document === "undefined") return "jing"
+  if (typeof document === "undefined") return "light"
   const value = document.documentElement.dataset.uiTestSkin
-  if (isSkin(value)) return value
+  if (isUiTestSkin(value)) return value
   return readUiTestSkin()
 }
 
@@ -399,7 +336,7 @@ export function subscribeDocumentAppearance(onChange: (skin: UiTestSkin) => void
 
   const onSkinChange = (event: Event) => {
     const detail = event instanceof CustomEvent ? event.detail : undefined
-    onChange(isSkin(detail) ? detail : readDocumentAppearance())
+    onChange(isUiTestSkin(detail) ? detail : readDocumentAppearance())
   }
   window.addEventListener("qmai-ui-test-skin-change", onSkinChange)
 

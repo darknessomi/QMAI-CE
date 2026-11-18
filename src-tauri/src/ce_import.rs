@@ -61,6 +61,144 @@ fn write_new(path: &Path, bytes: &[u8]) -> io::Result<()> {
     }
 }
 
+// 早期 CE 对全新安装和导入都写了同一个标记。升级时只修复有共同来源的配置。
+fn same_profile(original: &Value, ce: &Value) -> bool {
+    [
+        "analytics_device_uuid",
+        "lastProject",
+        "llmConfig",
+        "providerConfigs",
+    ]
+    .iter()
+    .any(|key| {
+        original
+            .get(key)
+            .is_some_and(|v| !v.is_null() && Some(v) == ce.get(key))
+    }) || original["projectRegistry"]
+        .as_object()
+        .is_some_and(|books| {
+            books
+                .keys()
+                .any(|id| ce["projectRegistry"].get(id).is_some())
+        })
+}
+
+fn ui_record(state: Option<&Value>, _original: &Path) -> Value {
+    let Some(state) = state else {
+        return serde_json::json!({ "imported": false });
+    };
+    #[cfg(target_os = "macos")]
+    let web = mac_web_preferences(_original);
+    #[cfg(not(target_os = "macos"))]
+    let web = Value::Null;
+    let theme = state["theme__uiTest"].as_str().or(state["theme"].as_str());
+    let skin = [state["uiTestSkin"].as_str(), web["skin"].as_str(), theme]
+        .into_iter()
+        .flatten()
+        .find_map(|value| match value {
+            "xing" | "dark" => Some("dark"),
+            "jing" | "zhi" | "light" => Some("light"),
+            _ => None,
+        });
+    serde_json::json!({ "imported": true, "skin": skin, "guide": web["guide"] })
+}
+
+#[cfg(target_os = "macos")]
+fn mac_web_preferences(original: &Path) -> Value {
+    // 仅访问原版应用的顶层本地来源，跳过其他来源、iframe 和 CE 自身的数据库。
+    let Some(library) = original.parent().and_then(Path::parent) else {
+        return Value::Null;
+    };
+    let webkit = library.join("WebKit");
+    let mut profiles = vec![(
+        "com.qingmuai.writer",
+        b"\x05\0\0\0\x01tauri\x09\0\0\0\x01localhost\0".as_slice(),
+    )];
+    if cfg!(debug_assertions) {
+        profiles.insert(
+            0,
+            (
+                "qmai",
+                b"\x04\0\0\0\x01http\x09\0\0\0\x01localhost\x01\x8c\x05",
+            ),
+        );
+    }
+    for (profile, origin) in profiles {
+        let Ok(dirs) = fs::read_dir(webkit.join(profile).join("WebsiteData/Default")) else {
+            continue;
+        };
+        for entry in dirs.flatten() {
+            let root = entry.path().join(entry.file_name());
+            if fs::read(root.join("origin")).ok().as_deref()
+                != Some([origin, origin].concat().as_slice())
+            {
+                continue;
+            }
+            let db = root.join("LocalStorage/localstorage.sqlite3");
+            if !db.is_file() {
+                continue;
+            }
+            let sql = "SELECT key,hex(value) FROM ItemTable WHERE key IN ('qm-uitest-skin','qmai-guide-v1')";
+            let Ok(output) = std::process::Command::new("/usr/bin/sqlite3")
+                .args([
+                    "-batch",
+                    "-init",
+                    "/dev/null",
+                    "-readonly",
+                    "-noheader",
+                    "-separator",
+                    "|",
+                ])
+                .arg(db)
+                .arg(sql)
+                .output()
+            else {
+                continue;
+            };
+            if !output.status.success() {
+                continue;
+            }
+            let mut prefs = serde_json::json!({});
+            for row in String::from_utf8_lossy(&output.stdout).lines() {
+                let Some((key, hex)) = row.split_once('|') else {
+                    continue;
+                };
+                let bytes: Option<Vec<_>> = hex
+                    .as_bytes()
+                    .chunks_exact(2)
+                    .map(|p| u8::from_str_radix(std::str::from_utf8(p).ok()?, 16).ok())
+                    .collect();
+                let Some(bytes) = bytes else {
+                    continue;
+                };
+                let value = if bytes.contains(&0) {
+                    String::from_utf16_lossy(
+                        &bytes
+                            .chunks_exact(2)
+                            .map(|p| u16::from_le_bytes([p[0], p[1]]))
+                            .collect::<Vec<_>>(),
+                    )
+                } else {
+                    String::from_utf8_lossy(&bytes).into_owned()
+                };
+                match key {
+                    "qm-uitest-skin" => prefs["skin"] = Value::String(value),
+                    "qmai-guide-v1" => {
+                        if let Ok(g) = serde_json::from_str::<Value>(&value) {
+                            prefs["guide"] = serde_json::json!({"status":g["status"],"stepIndex":g["stepIndex"],"finishedAt":g["finishedAt"]});
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            if prefs["skin"].is_string() || prefs["guide"].is_object() {
+                return prefs;
+            }
+        }
+    }
+    Value::Null
+}
+
 pub fn import_once(
     original: &Path,
     original_local: &Path,
@@ -74,9 +212,30 @@ pub fn import_once(
         ));
     }
     let marker = ce.join(IMPORTED);
-    if marker.try_exists()? {
+    if let Some(mark) = read_optional(&marker)? {
+        if mark == b"1" {
+            // 用户已在使用 CE；只补界面偏好，不重写两份全局配置。
+            let upgrade = || -> io::Result<()> {
+                let old =
+                    read_original_state(original)?.and_then(|b| serde_json::from_slice(&b).ok());
+                let current =
+                    read_original_state(ce)?.and_then(|b| serde_json::from_slice(&b).ok());
+                let source = old
+                    .as_ref()
+                    .filter(|s| current.as_ref().is_some_and(|c| same_profile(s, c)));
+                crate::atomic_file::write_bytes_atomically(
+                    &marker,
+                    ui_record(source, original).to_string().as_bytes(),
+                )
+                .map_err(io::Error::other)
+            };
+            if let Err(e) = upgrade() {
+                log::warn!("补充旧版 CE 界面偏好失败：{e}");
+            }
+        }
         return Ok(());
     }
+    let mut imported = None;
     let state = ce.join(PRIMARY_FILE_NAME);
     if !state.try_exists()? && !ce.join(BAK_FILE_NAME).try_exists()? {
         let settings = read_original_state(original)?;
@@ -85,13 +244,20 @@ pub fn import_once(
         if !models.try_exists()? {
             if let Some(bytes) = read_optional(&original_local.join(MODEL_CONFIGS_FILE))? {
                 write_new(&models, &bytes)?;
+                imported = Some(serde_json::json!({}));
             }
         }
         if let Some(bytes) = settings {
             write_new(&state, &bytes)?;
+            imported = serde_json::from_slice(&bytes).ok();
         }
     }
-    write_new(&marker, b"1")
+    write_new(
+        &marker,
+        ui_record(imported.as_ref(), original)
+            .to_string()
+            .as_bytes(),
+    )
 }
 
 #[cfg(test)]
@@ -171,6 +337,34 @@ mod tests {
         write_new(&existing.join(PRIMARY_FILE_NAME), b"{}").unwrap();
         import_once(&src, &src, &existing, &existing).unwrap();
         assert_eq!(fs::read(existing.join(PRIMARY_FILE_NAME)).unwrap(), b"{}");
+    }
+
+    #[test]
+    fn upgrades_old_marker_without_touching_ce_settings() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src = tmp.path().join("src");
+        let ce = tmp.path().join("ce");
+        let old = json!({"theme__uiTest":"dark","projectRegistry":{"shared-book":{}}});
+        let current = json!({"theme__uiTest":"light","projectRegistry":{"shared-book":{}}});
+        write_new(&src.join(PRIMARY_FILE_NAME), old.to_string().as_bytes()).unwrap();
+        write_new(&ce.join(PRIMARY_FILE_NAME), current.to_string().as_bytes()).unwrap();
+        write_new(&ce.join(IMPORTED), b"1").unwrap();
+        import_once(&src, &src, &ce, &ce).unwrap();
+        let record: Value = serde_json::from_slice(&fs::read(ce.join(IMPORTED)).unwrap()).unwrap();
+        assert_eq!(record["imported"], true);
+        assert_eq!(record["skin"], "dark");
+        assert_eq!(
+            fs::read_to_string(ce.join(PRIMARY_FILE_NAME)).unwrap(),
+            current.to_string()
+        );
+
+        let separate = tmp.path().join("separate");
+        write_new(&separate.join(PRIMARY_FILE_NAME), br#"{"theme":"light"}"#).unwrap();
+        write_new(&separate.join(IMPORTED), b"1").unwrap();
+        import_once(&src, &src, &separate, &separate).unwrap();
+        let unrelated: Value =
+            serde_json::from_slice(&fs::read(separate.join(IMPORTED)).unwrap()).unwrap();
+        assert_eq!(unrelated["imported"], false);
     }
 
     #[test]

@@ -33,7 +33,7 @@ let root: Root
 async function mount(mode: "chapter" | "outline") {
   await act(async () => {
     root.render(
-      <div className="ui-test-root" data-skin="jing">
+      <div className="ui-test-root" data-skin="light">
         <UiTestWorkspace mode={mode} requestedWidth={420} viewportWidth={1440} onWidthChange={() => {}} />
       </div>,
     )

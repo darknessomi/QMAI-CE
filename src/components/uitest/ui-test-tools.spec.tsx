@@ -209,12 +209,12 @@ describe("真实外观页的测试皮肤", () => {
     return onChange
   }
 
-  it("只显示三款测试皮肤，不保留旧版界面切换和旧版风格", async () => {
-    writeUiTestSkin("zhi")
+  it("只显示青瓷和石墨，不保留旧版界面切换和旧版风格", async () => {
+    writeUiTestSkin("light")
     await renderInterface()
     const choices = container.querySelectorAll('[data-ui="interface-skins"] button')
-    expect(choices).toHaveLength(3)
-    expect(container.querySelector('[data-ui-skin-choice="zhi"]')?.getAttribute("aria-pressed")).toBe("true")
+    expect(Array.from(choices, (button) => button.getAttribute("aria-label"))).toEqual(["青瓷皮肤", "石墨皮肤"])
+    expect(container.querySelector('[data-ui-skin-choice="light"]')?.getAttribute("aria-pressed")).toBe("true")
     expect(container.querySelectorAll('[data-ui="interface-skins"] [aria-pressed="true"]')).toHaveLength(1)
     expect(container.querySelector('h1')?.textContent).toBe("外观与界面")
     expect(container.textContent).not.toContain("切换到旧版界面")
@@ -223,33 +223,33 @@ describe("真实外观页的测试皮肤", () => {
   })
 
   it("点击每个皮肤立即持久化并发送约定事件，不写入正式视觉风格草稿", async () => {
-    writeUiTestSkin("jing")
+    writeUiTestSkin("light")
     const setDraft = await renderInterface()
     const received: unknown[] = []
     const listener = (event: Event) => received.push((event as CustomEvent).detail)
     window.addEventListener("qmai-ui-test-skin-change", listener)
     try {
-      for (const skin of ["zhi", "xing", "jing"] as const) {
+      for (const skin of ["dark", "light"] as const) {
         await click(`[data-ui-skin-choice="${skin}"]`)
         expect(readUiTestSkin()).toBe(skin)
         expect(container.querySelector(`[data-ui-skin-choice="${skin}"]`)?.getAttribute("aria-pressed")).toBe("true")
         expect(container.querySelectorAll('[data-ui="interface-skins"] [aria-pressed="true"]')).toHaveLength(1)
       }
-      expect(received).toEqual(["zhi", "xing", "jing"])
+      expect(received).toEqual(["dark", "light"])
       expect(setDraft).not.toHaveBeenCalled()
     } finally { window.removeEventListener("qmai-ui-test-skin-change", listener) }
   })
 
   it("从顶栏切换皮肤后页面当前选择同步，不误显示上一种外观", async () => {
-    writeUiTestSkin("jing")
+    writeUiTestSkin("light")
     await renderInterface()
     const previous = document.documentElement.dataset.uiTestSkin
     try {
       await act(async () => {
-        document.documentElement.dataset.uiTestSkin = "xing"
+        document.documentElement.dataset.uiTestSkin = "dark"
         await Promise.resolve()
       })
-      expect(container.querySelector('[data-ui-skin-choice="xing"]')?.getAttribute("aria-pressed")).toBe("true")
+      expect(container.querySelector('[data-ui-skin-choice="dark"]')?.getAttribute("aria-pressed")).toBe("true")
     } finally {
       if (previous) document.documentElement.dataset.uiTestSkin = previous
       else delete document.documentElement.dataset.uiTestSkin
@@ -273,14 +273,14 @@ describe("真实外观页的测试皮肤", () => {
   })
 
   it("皮肤保存失败时保留原选择并提示中文错误，不发送虚假应用事件", async () => {
-    writeUiTestSkin("jing")
+    writeUiTestSkin("light")
     await renderInterface()
     const listener = vi.fn()
     window.addEventListener("qmai-ui-test-skin-change", listener)
     const storage = vi.spyOn(Storage.prototype, "setItem").mockImplementationOnce(() => { throw new Error("存储不可用") })
     try {
-      await click('[data-ui-skin-choice="xing"]')
-      expect(container.querySelector('[data-ui-skin-choice="jing"]')?.getAttribute("aria-pressed")).toBe("true")
+      await click('[data-ui-skin-choice="dark"]')
+      expect(container.querySelector('[data-ui-skin-choice="light"]')?.getAttribute("aria-pressed")).toBe("true")
       expect(container.querySelector('[role="alert"]')?.textContent).toContain("无法保存")
       expect(listener).not.toHaveBeenCalled()
     } finally { storage.mockRestore(); window.removeEventListener("qmai-ui-test-skin-change", listener) }

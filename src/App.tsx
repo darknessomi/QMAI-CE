@@ -19,13 +19,15 @@ import { restoreUiTestWorkspace, readUiTestWorkspacePreference } from "@/lib/ui-
 import { UiTestShell } from "@/components/uitest/ui-test-shell"
 import { PersonaSkillCompletionDialog } from "@/components/skill-library/persona-skill-completion-dialog"
 import { StyleEvolutionNoticeDialog } from "@/components/skill-library/style-evolution-notice-dialog"
+import { restoreImportedUiPreferences } from "@/lib/imported-ui-preferences"
 import { formatAppTitle } from "@/lib/app-title"
 import { resetProjectState } from "@/lib/reset-project-state"
 import { findLlmPresetById } from "@/components/settings/llm-presets"
 import { resolveConfig } from "@/components/settings/preset-resolver"
 import { toast } from "@/lib/toast"
 import type { WikiProject } from "@/types/wiki"
-import { applyTheme, watchSystemTheme } from "@/lib/theme-utils"
+import { readUiTestSkin } from "@/lib/ui-test"
+import { applyTheme } from "@/lib/theme-utils"
 import { applyBodyTypography } from "@/lib/font-settings"
 import { publishReaderWindowAppearance } from "@/lib/reader-window-appearance"
 import { useDocumentAppearance } from "@/lib/html-document-appearance"
@@ -401,9 +403,9 @@ function App() {
   useEffect(() => {
     async function init() {
       try {
+        await restoreImportedUiPreferences().catch((error) => console.warn("恢复导入的界面偏好失败", error))
         // 先加载和应用主题
-        const savedTheme = await loadTheme()
-        const themeToUse = savedTheme ?? "system"
+        const themeToUse = isTauri() ? await loadTheme() : readUiTestSkin()
         useWikiStore.getState().setTheme(themeToUse)
         applyTheme(themeToUse)
         const savedVisualStyle = await loadVisualStyle()
@@ -603,19 +605,8 @@ function App() {
     }
   }, [])
 
-  // 监听系统主题变化，当设置为跟随系统时自动切换
   const theme = useWikiStore((s) => s.theme)
-  useEffect(() => {
-    if (theme === "system") {
-      applyTheme("system")
-      const unwatch = watchSystemTheme(() => {
-        applyTheme("system")
-      })
-      return unwatch
-    } else {
-      applyTheme(theme)
-    }
-  }, [theme])
+  useEffect(() => applyTheme(theme), [theme])
 
   useEffect(() => {
     if (!project?.path) {

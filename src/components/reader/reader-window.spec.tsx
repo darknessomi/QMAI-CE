@@ -65,7 +65,7 @@ vi.mock("@/components/editor/outline-dual-preview", () => ({
 }))
 
 const APPEARANCE: ReaderWindowAppearance = {
-  skin: "zhi",
+  skin: "light",
   uiFontSizeScale: 1.25,
   bodyFontPx: 21,
   bodyLineHeight: 2.05,
@@ -94,7 +94,7 @@ describe("独立窗口跟随外观与格式设置", () => {
       true
     docState.status = "ready"
     docState.html = null
-    // 皮肤默认值来自 localStorage，清干净才能断言"兜底是静水"
+    // 皮肤默认值来自 localStorage，清干净才能断言"兜底是青瓷"
     localStorage.clear()
     host = document.createElement("div")
     document.body.appendChild(host)
@@ -116,12 +116,12 @@ describe("独立窗口跟随外观与格式设置", () => {
 
   it("皮肤落到 data-ui-test-skin（ui-test.css 整套令牌都挂在这个属性上）", () => {
     render(payloadOf())
-    expect(document.documentElement.dataset.uiTestSkin).toBe("zhi")
+    expect(document.documentElement.dataset.uiTestSkin).toBe("light")
   })
 
-  it("星夜皮肤同时把窗口切成深色", () => {
-    render(payloadOf({ appearance: { ...APPEARANCE, skin: "xing" } }))
-    expect(document.documentElement.dataset.uiTestSkin).toBe("xing")
+  it("石墨皮肤同时把窗口切成深色", () => {
+    render(payloadOf({ appearance: { ...APPEARANCE, skin: "dark" } }))
+    expect(document.documentElement.dataset.uiTestSkin).toBe("dark")
     expect(document.documentElement.classList.contains("dark")).toBe(true)
   })
 
@@ -142,22 +142,22 @@ describe("独立窗口跟随外观与格式设置", () => {
   it("根节点必须带 data-skin —— 基础令牌声明在 .ui-test-root 上，只给 html 挂属性会被它盖掉", () => {
     render(payloadOf())
     const root = host.querySelector(".ui-test-root")
-    expect(root?.getAttribute("data-skin")).toBe("zhi")
+    expect(root?.getAttribute("data-skin")).toBe("light")
     // html 侧那份同样要有：弹窗、toast 挂在 body 上，靠 html[data-ui-test-skin] 取令牌
-    expect(document.documentElement.dataset.uiTestSkin).toBe("zhi")
+    expect(document.documentElement.dataset.uiTestSkin).toBe("light")
   })
 
-  it("没带外观快照时按主题兜底：深色落到星夜", () => {
+  it("没带外观快照时按主题兜底：深色落到石墨", () => {
     render(payloadOf({ appearance: undefined, theme: "dark" }))
-    expect(host.querySelector(".ui-test-root")?.getAttribute("data-skin")).toBe("xing")
-    expect(document.documentElement.dataset.uiTestSkin).toBe("xing")
+    expect(host.querySelector(".ui-test-root")?.getAttribute("data-skin")).toBe("dark")
+    expect(document.documentElement.dataset.uiTestSkin).toBe("dark")
     expect(document.documentElement.classList.contains("dark")).toBe(true)
   })
 
-  it("没带外观快照 + 浅色主题：落到默认皮肤（静水）", () => {
+  it("没带外观快照 + 浅色主题：落到默认皮肤（青瓷）", () => {
     render(payloadOf({ appearance: undefined, theme: "light" }))
-    expect(host.querySelector(".ui-test-root")?.getAttribute("data-skin")).toBe("jing")
-    expect(document.documentElement.dataset.uiTestSkin).toBe("jing")
+    expect(host.querySelector(".ui-test-root")?.getAttribute("data-skin")).toBe("light")
+    expect(document.documentElement.dataset.uiTestSkin).toBe("light")
     expect(document.documentElement.classList.contains("dark")).toBe(false)
   })
 

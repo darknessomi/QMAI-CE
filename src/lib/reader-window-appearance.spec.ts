@@ -11,14 +11,12 @@ import {
 import {
   applyReaderWindowAppearance,
   defaultReaderWindowAppearance,
-  isReaderWindowSkin,
   normalizeReaderWindowAppearance,
   publishReaderWindowAppearance,
-  readerWindowThemeForSkin,
 } from "@/lib/reader-window-appearance"
 
 const APPEARANCE = {
-  skin: "zhi" as const,
+  skin: "light" as const,
   uiFontSizeScale: 1.25,
   bodyFontPx: 21,
   bodyLineHeight: 2.05,
@@ -38,30 +36,11 @@ afterEach(() => {
   resetRoot()
 })
 
-describe("readerWindowThemeForSkin", () => {
-  it("星夜是深色皮肤，另外两个是浅色", () => {
-    expect(readerWindowThemeForSkin("xing")).toBe("dark")
-    expect(readerWindowThemeForSkin("jing")).toBe("light")
-    expect(readerWindowThemeForSkin("zhi")).toBe("light")
-  })
-})
-
-describe("isReaderWindowSkin", () => {
-  it("只认三个皮肤 id", () => {
-    expect(isReaderWindowSkin("jing")).toBe(true)
-    expect(isReaderWindowSkin("zhi")).toBe(true)
-    expect(isReaderWindowSkin("xing")).toBe(true)
-    expect(isReaderWindowSkin("dark")).toBe(false)
-    expect(isReaderWindowSkin(undefined)).toBe(false)
-    expect(isReaderWindowSkin(null)).toBe(false)
-  })
-})
-
 describe("normalizeReaderWindowAppearance", () => {
   it("不是对象一律 null（宁可走兜底快照，也不要半份参数）", () => {
     expect(normalizeReaderWindowAppearance(undefined)).toBeNull()
     expect(normalizeReaderWindowAppearance(null)).toBeNull()
-    expect(normalizeReaderWindowAppearance("zhi")).toBeNull()
+    expect(normalizeReaderWindowAppearance("light")).toBeNull()
     expect(normalizeReaderWindowAppearance(42)).toBeNull()
   })
 
@@ -101,21 +80,21 @@ describe("normalizeReaderWindowAppearance", () => {
     expect(normalized?.bodySafeBottom).toBe(BODY_SAFE_BOTTOM_MAX)
     expect(normalized?.bodyMarginX).toBe(0)
     // 字体名被清理后一定落到合法 id，而不是原样拼进 CSS
-    expect(normalized?.skin).toBe("jing")
+    expect(normalized?.skin).toBe("light")
   })
 })
 
 describe("applyReaderWindowAppearance", () => {
   it("皮肤写进 data-ui-test-skin（ui-test.css 的整套令牌都挂在这个属性上）", () => {
     applyReaderWindowAppearance(APPEARANCE)
-    expect(document.documentElement.dataset.uiTestSkin).toBe("zhi")
-    // 纸间是浅色
+    expect(document.documentElement.dataset.uiTestSkin).toBe("light")
+    // 青瓷是浅色
     expect(document.documentElement.classList.contains("dark")).toBe(false)
   })
 
-  it("星夜同时切到深色（原生控件才不会残留浅色）", () => {
-    applyReaderWindowAppearance({ ...APPEARANCE, skin: "xing" })
-    expect(document.documentElement.dataset.uiTestSkin).toBe("xing")
+  it("石墨同时切到深色（原生控件才不会残留浅色）", () => {
+    applyReaderWindowAppearance({ ...APPEARANCE, skin: "dark" })
+    expect(document.documentElement.dataset.uiTestSkin).toBe("dark")
     expect(document.documentElement.classList.contains("dark")).toBe(true)
   })
 

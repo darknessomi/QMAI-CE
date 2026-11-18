@@ -1,3 +1,4 @@
+import type { UiTestSkin } from "@/lib/ui-test"
 import { create } from "zustand"
 import type { WikiProject, FileNode } from "@/types/wiki"
 import {
@@ -797,7 +798,7 @@ interface WikiState {
   finalChapterSave: FinalChapterSaveState | null
   lintRun: LintRunState | null
   reviewRun: ReviewRunState | null
-  theme: "light" | "dark" | "system"
+  theme: UiTestSkin
   uiFontSizeScale: number
   /** 正文字号（px 绝对值）。替代原 uiBodyFontSizeScale（倍数）。 */
   uiBodyFontPx: number
@@ -889,7 +890,7 @@ interface WikiState {
   setReviewRun: (reviewRun: ReviewRunState | null) => void
   finishReviewRun: (runId: string, reviewRun: ReviewRunFinishState) => void
   clearTransientTaskState: () => void
-  setTheme: (theme: "light" | "dark" | "system") => void
+  setTheme: (theme: UiTestSkin) => void
   setUiFontSizeScale: (scale: number) => void
   setUiBodyFontPx: (value: number) => void
   setUiBodyLineHeight: (value: number) => void
@@ -1145,7 +1146,7 @@ export const useWikiStore = create<WikiState>((set) => ({
   finalChapterSave: null,
   lintRun: null,
   reviewRun: null,
-  theme: "system",
+  theme: "light",
   uiFontSizeScale: readStoredUiFontSizeScale(),
   uiBodyFontPx: readStoredBodyFontPx(),
   uiBodyLineHeight: readStoredBodyLineHeight(),

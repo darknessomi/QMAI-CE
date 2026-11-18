@@ -50,13 +50,7 @@
   --brand-50: #edf3ec; --brand-100: #dce9da; --brand-200: #bed5ba; --brand-300: #96ba91; --brand-400: #6f9b6a;
   --brand-500: #517d4e; --brand-600: #45624f; --brand-700: #384f3e; --brand-800: #2c3e33;
 }
-.ui-test-root[data-skin="zhi"], html[data-ui-test-skin="zhi"] {
-  --ui-canvas: #eeeade; --ui-paper: #fffcf7; --ui-panel: #f5f0e5; --ui-soft: #ece4d3;
-  --ui-ink: #423d31; --ui-muted: #716b5b; --ui-accent: #655a42; --ui-line: #e7decb;
-  --brand-50: #f5f0e6; --brand-100: #ece2cf; --brand-200: #ddcdae; --brand-300: #c6ae80; --brand-400: #aa8c5b;
-  --brand-500: #8d7046; --brand-600: #655a42; --brand-700: #54452f; --brand-800: #403627;
-}
-.ui-test-root[data-skin="xing"], html[data-ui-test-skin="xing"] {
+.ui-test-root[data-skin="dark"], html[data-ui-test-skin="dark"] {
   --ui-canvas: #17201c; --ui-paper: #222f2a; --ui-panel: #1d2724; --ui-soft: #34483b;
   --ui-ink: #e6eee7; --ui-muted: #adbcb2; --ui-accent: #b0c9ae; --ui-on-accent: #17281d;
   --ui-warm: #3b362c; --ui-danger: #efb3a7; --ui-line: #334540;
@@ -238,7 +232,7 @@ html[data-ui-test-skin], html[data-ui-test-skin] body, html[data-ui-test-skin] #
 .ui-test-menu-item:hover, .ui-test-menu-item:focus-visible { background: var(--ui-soft); }
 .ui-test-skin-menu { width: 290px; }
 .ui-test-skin-dot { width: 25px; height: 25px; border-radius: 50%; flex-shrink: 0; }
-.ui-test-skin-dot-jing { background: #d8e3d5; } .ui-test-skin-dot-zhi { background: #e6d9bd; } .ui-test-skin-dot-xing { background: #34483b; }
+.ui-test-skin-dot-light { background: #d8e3d5; } .ui-test-skin-dot-dark { background: #34483b; }
 .ui-test-skin-copy { flex: 1; display: flex; flex-direction: column; gap: 3px; }
 .ui-test-skin-copy small { color: var(--ui-muted); font-size: 0.75rem; }
 .ui-test-workspace { min-height: 0; flex: 1; display: flex; overflow: hidden; position: relative; }
@@ -529,7 +523,7 @@ html[data-ui-test-skin] .ui-test-wizard-chips button[aria-pressed="true"] { back
 }
 
 /*
- * 账号菜单里的「外观」：三个皮肤主题**弹在「外观」右侧**，不再列在它下面。
+ * 账号菜单里的「外观」：皮肤主题**弹在「外观」右侧**，不再列在它下面。
  *
  * 为什么改到右侧：菜单只有 290px 宽，主题放在下方会把「设置 / 维护工具」顶出菜单，
  * 用户要的是「鼠标移上去就在右边出现」。

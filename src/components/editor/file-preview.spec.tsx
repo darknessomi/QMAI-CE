@@ -18,7 +18,7 @@ describe("HtmlFilePreview 外观", () => {
     host = document.createElement("div")
     document.body.appendChild(host)
     root = createRoot(host)
-    document.documentElement.dataset.uiTestSkin = "xing"
+    document.documentElement.dataset.uiTestSkin = "dark"
   })
 
   afterEach(() => {

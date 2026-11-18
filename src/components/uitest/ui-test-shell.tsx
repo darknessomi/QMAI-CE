@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react"
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react"
 import { Brain, Grid2X2, GitBranch, History, Minus, PanelLeft, Puzzle, Search, Settings, ShieldCheck, Sparkles, Square, Trash2, Wrench, X } from "lucide-react"
 import logoImg from "@/assets/QM-LOGO.png"
 // 侧栏（人物小传区段等）也用工具样式：必须在主 chunk 引入，
@@ -16,9 +16,8 @@ import { refreshProjectFileTree } from "@/lib/project-file-tree-refresh"
 import { isMacOS, isTauri } from "@/lib/platform"
 import { CreateProjectDialog } from "@/components/project/create-project-dialog"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { applyTheme } from "@/lib/theme-utils"
 import { saveTheme } from "@/lib/project-store"
-import { readUiTestAiHintDismissed, readUiTestDirectoryHintDismissed, readUiTestSkin, writeUiTestAiHintDismissed, writeUiTestDirectoryHintDismissed, writeUiTestSkin, type UiTestSkin } from "@/lib/ui-test"
+import { readUiTestAiHintDismissed, readUiTestDirectoryHintDismissed, isUiTestSkin, writeUiTestAiHintDismissed, writeUiTestDirectoryHintDismissed, writeUiTestSkin, type UiTestSkin } from "@/lib/ui-test"
 import { AppearanceSkinProvider } from "@/components/layout/appearance-context"
 import { readUiTestWorkspacePreference as readPreference, uiTestWorkspaceKey as preferenceKey } from "@/lib/ui-test-workspace-preferences"
 import { availablePrimaryNav, movePrimaryNav, normalizePrimaryNav, PRIMARY_NAV_LONG_PRESS_MS, readPrimaryNav, writePrimaryNav, type PrimaryNavItem, type PrimaryNavView } from "@/lib/ui-test-primary-nav"
@@ -100,7 +99,7 @@ function menuKeyboard(event: KeyboardEvent<HTMLDivElement>) {
 
 /**
  * 顶栏「AI 对话」专用图标：圆角对话气泡内嵌 AI 字样。
- * 全部笔画使用 currentColor，跟随按钮文字色，因此会自动适配青瓷/宣纸/石墨三种皮肤。
+ * 全部笔画使用 currentColor，跟随按钮文字色，因此会自动适配青瓷和石墨。
  */
 function AiChatIcon() {
   return (
@@ -123,7 +122,7 @@ export function UiTestShell({ project, onOpenProject, onSelectProject, onSwitchP
   const setChatExpanded = useWikiStore((s) => s.setChatExpanded)
   const outlineExpanded = useOutlineGenerationStore((s) => s.panelOpen)
   const setOutlineExpanded = useOutlineGenerationStore((s) => s.setPanelOpen)
-  const [skin, setSkin] = useState<UiTestSkin>(() => readUiTestSkin())
+  const skin = useWikiStore((s) => s.theme)
   const [directoryHintDismissed, setDirectoryHintDismissed] = useState(() => readUiTestDirectoryHintDismissed())
   const [aiHintDismissed, setAiHintDismissed] = useState(() => readUiTestAiHintDismissed())
   const [showCreateDialog, setShowCreateDialog] = useState(false)
@@ -239,20 +238,22 @@ export function UiTestShell({ project, onOpenProject, onSelectProject, onSwitchP
     return () => window.removeEventListener(GUIDE_RESTART_EVENT, onRestart)
   }, [onSwitchProject])
   useEffect(() => {
-    const nextTheme = skin === "xing" ? "dark" : "light"
     document.documentElement.dataset.uiTestSkin = skin
-    applyTheme(nextTheme); setTheme(nextTheme); writeUiTestSkin(skin)
-    void saveTheme(nextTheme).catch(() => undefined)
     return () => { delete document.documentElement.dataset.uiTestSkin }
-  }, [skin, setTheme])
+  }, [skin])
+  const selectSkin = useCallback((next: UiTestSkin) => {
+    writeUiTestSkin(next)
+    setTheme(next)
+    void saveTheme(next).catch((error) => console.warn("保存外观设置失败", error))
+  }, [setTheme])
   useEffect(() => {
     const onSkinChange = (event: Event) => {
       const next = (event as CustomEvent).detail
-      if (next === "jing" || next === "zhi" || next === "xing") setSkin(next)
+      if (isUiTestSkin(next)) selectSkin(next)
     }
     window.addEventListener("qmai-ui-test-skin-change", onSkinChange)
     return () => window.removeEventListener("qmai-ui-test-skin-change", onSkinChange)
-  }, [])
+  }, [selectSkin])
   useEffect(() => {
     const onResize = () => setViewportWidth(window.innerWidth)
     window.addEventListener("resize", onResize)
@@ -505,7 +506,7 @@ export function UiTestShell({ project, onOpenProject, onSelectProject, onSwitchP
    * 皮肤切换器已从顶栏移到侧栏底部（SidebarBottomActions 的「外观」）。
    * 这里把皮肤状态通过 context 传下去，避免穿过层层侧栏面板做 prop drilling。
    */
-  const appearanceValue = useMemo(() => ({ skin, selectSkin: setSkin }), [skin])
+  const appearanceValue = useMemo(() => ({ skin, selectSkin }), [skin, selectSkin])
 
   return (
     <AppearanceSkinProvider value={appearanceValue}>

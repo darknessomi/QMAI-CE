@@ -249,7 +249,7 @@ describe("OutlineDualPreview", () => {
   })
 
   it("预览跟随当前外观，切换皮肤后换成对应配色", async () => {
-    document.documentElement.dataset.uiTestSkin = "xing"
+    document.documentElement.dataset.uiTestSkin = "dark"
     const html = "<!DOCTYPE html><html><head></head><body><h1>折叠树</h1></body></html>"
     await render(html, <div data-testid="md-editor">MD 编辑器</div>)
 
@@ -261,13 +261,13 @@ describe("OutlineDualPreview", () => {
     expect(iframe().className).toContain("bg-transparent")
 
     await act(async () => {
-      window.dispatchEvent(new CustomEvent("qmai-ui-test-skin-change", { detail: "zhi" }))
+      window.dispatchEvent(new CustomEvent("qmai-ui-test-skin-change", { detail: "light" }))
     })
 
     expect(iframe().srcdoc).toContain("折叠树")
-    expect(iframe().srcdoc).toContain("#fffcf7")
-    expect(iframe().srcdoc).toContain("#423d31")
-    expect(iframe().srcdoc).toContain("#655a42")
+    expect(iframe().srcdoc).toContain("#fcfdfb")
+    expect(iframe().srcdoc).toContain("#273c35")
+    expect(iframe().srcdoc).toContain("#45624f")
     expect(iframe().srcdoc).not.toContain("#222f2a")
     expect((iframe().srcdoc.match(/id="qmai-document-appearance"/g) ?? []).length).toBe(1)
   })

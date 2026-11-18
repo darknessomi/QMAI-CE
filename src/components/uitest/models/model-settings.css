@@ -73,7 +73,7 @@
 :is(.ui-test-root,html[data-ui-test-skin]) .model-provider-status { flex-shrink: 0; font-size: 0.75rem; font-weight: 400; color: var(--ui-muted); }
 :is(.ui-test-root,html[data-ui-test-skin]) .model-provider-hint { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.75rem; font-weight: 400; color: var(--ui-muted); }
 :is(.ui-test-root,html[data-ui-test-skin]) .model-brand-icon { width: 16px; height: 16px; flex-shrink: 0; object-fit: contain; }
-:is(.ui-test-root[data-skin="xing"],html[data-ui-test-skin="xing"]) .model-brand-icon.is-mono { filter: invert(1); }
+:is(.ui-test-root[data-skin="dark"],html[data-ui-test-skin="dark"]) .model-brand-icon.is-mono { filter: invert(1); }
 :is(.ui-test-root,html[data-ui-test-skin]) .model-provider-title svg { width: 16px; height: 16px; flex-shrink: 0; }
 :is(.ui-test-root,html[data-ui-test-skin]) .model-provider-title .is-collapsed { transform: rotate(-90deg); }
 :is(.ui-test-root,html[data-ui-test-skin]) .model-switch { border: 0; border-radius: 999px; background: var(--ui-soft); width: 36px; height: 21px; padding: 3px; display: flex; align-items: center; flex-shrink: 0; }

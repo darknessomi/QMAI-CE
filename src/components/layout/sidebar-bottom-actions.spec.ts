@@ -10,7 +10,7 @@ const source = readFileSync(
 describe("sidebar-bottom-actions", () => {
 
 
-  it("外观默认折叠，点击或悬停都能展开三个主题且不带副标题", () => {
+  it("外观默认折叠，点击或悬停都能展开主题且不带副标题", () => {
     expect(source).toContain('data-ui="sidebar-appearance-entry"')
     expect(source).toContain("ui-avatar-appearance-group")
     expect(source).toContain("ui-avatar-appearance-sub")

@@ -194,7 +194,7 @@ describe("第二版批准方案：运行时渲染而不是硬编码样稿", () =
     expect(html).not.toContain("分区导航")
   })
   it("浅深皮肤注入仍保留图形、单栏版面与语义对比色", () => {
-    const html = applyDocumentAppearance(renderProfileDocumentHtml(normalized(),template(),"地理"),"xing")
+    const html = applyDocumentAppearance(renderProfileDocumentHtml(normalized(),template(),"地理"),"dark")
     expect(html).toContain('data-profile-diagram="map"')
     expect(html).toContain("var(--brand-text)")
     expect(html).toContain("var(--surface)")

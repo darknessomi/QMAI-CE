@@ -8,6 +8,7 @@ import { createRoot, type Root } from "react-dom/client"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { useWikiStore } from "@/stores/wiki-store"
 import { PRIMARY_NAV_LONG_PRESS_MS } from "@/lib/ui-test-primary-nav"
+import { saveTheme } from "@/lib/project-store"
 import { UiTestShell } from "./ui-test-shell"
 import { useModelDraftGuard } from "./models/model-draft-guard"
 import { answerModelDraft, deferred } from "./models/model-test-utils"
@@ -323,11 +324,13 @@ describe("独立UI测试版外壳", () => {
     await render(false)
     expect(host.querySelector(".ui-test-statusbar")).toBeNull()
   })
-  it("设置页的三皮肤选择同步外壳与Portal作用域", async () => {
+  it("设置页的皮肤选择同步外壳与Portal作用域", async () => {
     await render()
-    await act(async () => window.dispatchEvent(new CustomEvent("qmai-ui-test-skin-change", { detail: "xing" })))
-    expect(host.querySelector(".ui-test-root")?.getAttribute("data-skin")).toBe("xing")
-    expect(document.documentElement.dataset.uiTestSkin).toBe("xing")
+    expect(saveTheme).not.toHaveBeenCalled()
+    await act(async () => window.dispatchEvent(new CustomEvent("qmai-ui-test-skin-change", { detail: "dark" })))
+    expect(host.querySelector(".ui-test-root")?.getAttribute("data-skin")).toBe("dark")
+    expect(document.documentElement.dataset.uiTestSkin).toBe("dark")
+    expect(saveTheme).toHaveBeenCalledWith("dark")
   })
   it("右键或长按可调整主导航，并在重新打开后保留", async () => {
     vi.useFakeTimers()

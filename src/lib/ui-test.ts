@@ -4,7 +4,7 @@ export const IS_UI_TEST_BUILD = true
 /** UI 测试版用于本机偏好存储的键前缀（仅在测试版内使用，不写入正式配置）。 */
 export const UI_TEST_STORAGE_PREFIX = "qm-uitest-"
 
-export type UiTestSkin = "jing" | "zhi" | "xing"
+export type UiTestSkin = "light" | "dark"
 
 export const UI_TEST_SKIN_KEY = `${UI_TEST_STORAGE_PREFIX}skin`
 
@@ -13,16 +13,25 @@ export const UI_TEST_SKINS: Array<{
   name: string
   hint: string
 }> = [
-  { id: "jing", name: "青瓷", hint: "青绿主色 · 清晰沉静" },
-  { id: "zhi", name: "宣纸", hint: "暖纸底色 · 温润专注" },
-  { id: "xing", name: "石墨", hint: "深灰底色 · 柔和夜读" },
+  { id: "light", name: "青瓷", hint: "青绿主色 · 清晰沉静" },
+  { id: "dark", name: "石墨", hint: "深灰底色 · 柔和夜读" },
 ]
 
+export function isUiTestSkin(value: unknown): value is UiTestSkin {
+  return value === "light" || value === "dark"
+}
+
+/** 旧配置和备份使用独立的皮肤编号。 */
+export function normalizeUiTestSkin(value: unknown): UiTestSkin | undefined {
+  if (isUiTestSkin(value)) return value
+  if (value === "jing" || value === "zhi") return "light"
+  if (value === "xing") return "dark"
+}
+
 export function readUiTestSkin(): UiTestSkin {
-  if (typeof localStorage === "undefined") return "jing"
+  if (typeof localStorage === "undefined") return "light"
   const value = localStorage.getItem(UI_TEST_SKIN_KEY)
-  if (value === "zhi" || value === "xing" || value === "jing") return value
-  return "jing"
+  return normalizeUiTestSkin(value) ?? "light"
 }
 
 export function writeUiTestSkin(skin: UiTestSkin): void {
