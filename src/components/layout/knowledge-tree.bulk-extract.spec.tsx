@@ -79,17 +79,39 @@ describe("章节右键批量提取范围", () => {
     useImportProgressStore.setState({ tasks: [] })
   })
 
-  it.each([
-    ["全部提取", "all"],
-    ["仅提取未提取章节", "pending"],
-  ])("选择 %s 后才开始对应范围的提取", async (label, mode) => {
+  it("默认聚焦仅提取未提取章节，点击后直接补提取", async () => {
     await openExtractionDialog()
-    clickButton(label)
+    expect(document.activeElement?.textContent).toBe("仅提取未提取章节")
+    clickButton("仅提取未提取章节")
     await flush()
     expect(runBulkChapterIngest).toHaveBeenCalledExactlyOnceWith(projectPath, {
-      mode,
+      mode: "pending",
       chapters: [expect.objectContaining({ path: chapterPath, chapterNumber: 1 })],
     })
+  })
+
+  it("全部提取须二次确认，确认后只启动一次", async () => {
+    await openExtractionDialog()
+    clickButton("全部提取")
+    await flush()
+    expect(runBulkChapterIngest).not.toHaveBeenCalled()
+    expect(document.activeElement?.textContent).toBe("取消")
+    clickButton("确认全部提取")
+    await flush()
+    expect(runBulkChapterIngest).toHaveBeenCalledExactlyOnceWith(projectPath, {
+      mode: "all",
+      chapters: [expect.objectContaining({ path: chapterPath, chapterNumber: 1 })],
+    })
+  })
+
+  it("取消全部提取后，再次打开仍默认补提取", async () => {
+    await openExtractionDialog()
+    clickButton("全部提取")
+    clickButton("取消")
+    await flush()
+    expect(document.querySelector('[role="dialog"]')).toBeNull()
+    await openExtractionDialog()
+    expect(document.activeElement?.textContent).toBe("仅提取未提取章节")
   })
 
   it("取消后不启动提取", async () => {

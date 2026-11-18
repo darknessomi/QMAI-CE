@@ -375,7 +375,8 @@ export function KnowledgeTree({
   const [deletingPath, setDeletingPath] = useState<string | null>(null)
   const [createMenu, setCreateMenu] = useState<CreateMenuState | null>(null)
   const [findOpen, setFindOpen] = useState(false)
-  const [chapterExtractDialogOpen, setChapterExtractDialogOpen] = useState(false)
+  const [chapterExtractStep, setChapterExtractStep] = useState<"scope" | "confirmAll" | null>(null)
+  const pendingExtractButton = useRef<HTMLButtonElement>(null)
   const [findDraft, setFindDraft] = useState("")
   const [pageMenu, setPageMenu] = useState<{ path: string; x: number; y: number } | null>(null)
   /** 历史版本弹窗的目标页；null 表示弹窗关闭。 */
@@ -851,7 +852,7 @@ export function KnowledgeTree({
 
   const handleExtractAllChapterMemories = useCallback(async (mode: BulkChapterIngestMode) => {
     if (!project || filterType !== "chapter") return
-    setChapterExtractDialogOpen(false)
+    setChapterExtractStep(null)
     const chapterPaths = sortedChapterPages.map((page) => page.path)
     if (chapterPaths.length === 0) {
       window.alert("当前没有可提取的章节。")
@@ -2343,7 +2344,7 @@ export function KnowledgeTree({
                 className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-accent"
                 onClick={() => {
                   setPageMenu(null)
-                  setChapterExtractDialogOpen(true)
+                  setChapterExtractStep("scope")
                 }}
               >
                 <BookOpen className="h-3.5 w-3.5" />
@@ -2436,24 +2437,34 @@ export function KnowledgeTree({
           </div>
         )}
 
-        <Dialog open={chapterExtractDialogOpen} onOpenChange={setChapterExtractDialogOpen}>
-          <DialogContent className="sm:max-w-md">
+        <Dialog open={chapterExtractStep !== null} onOpenChange={(open) => { if (!open) setChapterExtractStep(null) }}>
+          <DialogContent className="sm:max-w-md" initialFocus={pendingExtractButton}>
             <DialogHeader>
-              <DialogTitle>选择章节提取范围</DialogTitle>
+              <DialogTitle>{chapterExtractStep === "confirmAll" ? "确认提取全部章节？" : "选择章节提取范围"}</DialogTitle>
               <DialogDescription>
-                “全部提取”会重新提取所有章节，更新已有章节记忆；“仅提取未提取章节”会跳过已有记忆快照的章节。
+                {chapterExtractStep === "confirmAll"
+                  ? "将重新提取本书所有章节，并更新已有章节记忆。"
+                  : "默认仅提取尚无记忆快照的章节。如需重新提取所有章节，请选择“全部提取”。"}
               </DialogDescription>
             </DialogHeader>
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setChapterExtractDialogOpen(false)}>
+              <Button key={chapterExtractStep} type="button" variant="outline" autoFocus={chapterExtractStep === "confirmAll"} onClick={() => setChapterExtractStep(null)}>
                 取消
               </Button>
-              <Button type="button" variant="secondary" onClick={() => void handleExtractAllChapterMemories("pending")}>
-                仅提取未提取章节
-              </Button>
-              <Button type="button" onClick={() => void handleExtractAllChapterMemories("all")}>
-                全部提取
-              </Button>
+              {chapterExtractStep === "confirmAll" ? (
+                <Button type="button" onClick={() => void handleExtractAllChapterMemories("all")}>
+                  确认全部提取
+                </Button>
+              ) : (
+                <>
+                  <Button type="button" variant="secondary" onClick={() => setChapterExtractStep("confirmAll")}>
+                    全部提取
+                  </Button>
+                  <Button ref={pendingExtractButton} type="button" onClick={() => void handleExtractAllChapterMemories("pending")}>
+                    仅提取未提取章节
+                  </Button>
+                </>
+              )}
             </DialogFooter>
           </DialogContent>
         </Dialog>
