@@ -1,9 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from "react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
-import remarkMath from "remark-math"
-import rehypeKatex from "rehype-katex"
-import "katex/dist/katex.min.css"
 import {
   FileText,
   Image as ImageIcon,
@@ -24,7 +21,6 @@ import { getHtmlLang, getTextDirection } from "@/lib/language-metadata"
 import { parseFrontmatter } from "@/lib/frontmatter"
 import { FrontmatterPanel } from "@/components/editor/frontmatter-panel"
 import { useWikiStore } from "@/stores/wiki-store"
-import { MermaidDiagram, unwrapMermaidPre } from "@/components/mermaid-diagram"
 import { isTauri } from "@/lib/platform"
 import { useDocumentAppearance, useDocumentAppearanceHtml } from "@/lib/html-document-appearance"
 
@@ -222,8 +218,7 @@ function TextPreview({ filePath, content, label }: { filePath: string; content: 
         style={{ textAlign: "start", overflowWrap: "anywhere", wordBreak: "break-word" }}
       >
         <ReactMarkdown
-          remarkPlugins={[remarkGfm, remarkMath]}
-          rehypePlugins={[rehypeKatex]}
+          remarkPlugins={[remarkGfm]}
           components={{
             img: ({ src, alt, ...props }) => (
               <img
@@ -250,14 +245,9 @@ function TextPreview({ filePath, content, label }: { filePath: string; content: 
               <td className="border border-border/60 px-3 py-1.5" {...props}>{children}</td>
             ),
             pre: ({ children, ...props }) => {
-              const mermaid = unwrapMermaidPre(children)
-              if (mermaid) return <>{mermaid}</>
               return <pre dir="ltr" style={{ textAlign: "left" }} {...props}>{children}</pre>
             },
             code: ({ className, children, ...props }) => {
-              const lang = className?.replace("language-", "")
-              const codeText = String(children).replace(/\n$/, "")
-              if (lang === "mermaid") return <MermaidDiagram code={codeText} />
               return <code dir="ltr" className={className} {...props}>{children}</code>
             },
           }}

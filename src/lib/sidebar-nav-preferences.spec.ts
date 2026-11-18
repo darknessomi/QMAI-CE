@@ -20,7 +20,6 @@ describe("sidebar nav preferences", () => {
     expect(DEFAULT_SIDEBAR_NAV_ORDER).toEqual([
       "wiki",
       "sources",
-      "graph",
       "lint",
       "skillLibrary",
       "plugins",
@@ -32,7 +31,7 @@ describe("sidebar nav preferences", () => {
 
   it("normalizes persisted order by removing unknown ids, deduping, and appending missing ids", () => {
     const config = normalizeSidebarNavConfig({
-      order: ["search", "wiki", "unknown", "search", "trash"],
+      order: ["search", "wiki", "graph", "unknown", "search", "trash"],
       hidden: [],
     } as unknown as SidebarNavConfig)
 
@@ -41,7 +40,6 @@ describe("sidebar nav preferences", () => {
       "search",
       "trash",
       "sources",
-      "graph",
       "lint",
       "skillLibrary",
       // 追加项按 DEFAULT_SIDEBAR_NAV_ORDER 的顺序补齐（"plugins" 同理）
@@ -56,7 +54,7 @@ describe("sidebar nav preferences", () => {
       hidden: ["graph", "settings", "trash", "theme"],
     } as unknown as SidebarNavConfig)
 
-    expect(config.hidden).toEqual(["graph", "trash"])
+    expect(config.hidden).toEqual(["trash"])
   })
 
   it("moves a feature id relative to another feature id while keeping wiki first", () => {
@@ -65,7 +63,7 @@ describe("sidebar nav preferences", () => {
   })
 
   it("always keeps wiki in first position after normalization", () => {
-    const config = normalizeSidebarNavConfig({ order: ["trash", "sources", "wiki", "graph"] })
+    const config = normalizeSidebarNavConfig({ order: ["trash", "sources", "wiki", "lint"] })
     expect(config.order[0]).toBe("wiki")
   })
 

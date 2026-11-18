@@ -7,7 +7,6 @@ const read = (relativePath: string) =>
 describe("user-facing hardcoded chinese strings", () => {
   it("moves selected visible UI copy into i18n", () => {
     const reviewView = read("../components/review/review-view.tsx")
-    const graphView = read("../components/graph/graph-view.tsx")
     const lint = read("../lib/lint.ts")
     const lintLib = read("../components/lint/lint-view.tsx")
     const sourcesView = read("../components/sources/sources-view.tsx")
@@ -26,20 +25,6 @@ describe("user-facing hardcoded chinese strings", () => {
     expect(reviewView).not.toContain("章审稿")
     expect(reviewView).not.toContain("个严重问题")
     expect(reviewView).not.toContain("个警告")
-
-    expect(graphView).not.toContain("编辑真实节点档案页")
-    expect(graphView).not.toContain("编辑：")
-    expect(graphView).not.toContain("构建图谱失败")
-    expect(graphView).not.toContain("图谱视图")
-    expect(graphView).not.toContain("文档视图")
-    expect(graphView).not.toContain("脑图视图")
-    expect(graphView).not.toContain("重置图谱过滤")
-    expect(graphView).not.toContain("编辑节点档案：")
-    expect(graphView).not.toContain("保存后会写入真实 wiki 档案页，并刷新图谱、脑图与可用检索内容。")
-    expect(graphView).not.toContain("取消")
-    expect(graphView).not.toContain("保存中...")
-    expect(graphView).not.toContain("保存档案页")
-    expect(graphView).not.toContain("关系强度")
 
     expect(lint).not.toContain("No other pages link to this page.")
     expect(lint).not.toContain("This page has no [[wikilink]] references to other pages.")

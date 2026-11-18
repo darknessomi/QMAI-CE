@@ -1,6 +1,6 @@
 import { useMemo } from "react"
 import {
-  FileText, FolderOpen, Search, Network, Brain, ArrowLeftRight, Trash2, LayoutDashboard, WandSparkles, Puzzle,
+  FileText, FolderOpen, Search, Brain, ArrowLeftRight, Trash2, LayoutDashboard, WandSparkles, Puzzle,
 } from "lucide-react"
 import {
   DndContext,
@@ -42,7 +42,6 @@ interface ConfigurableNavItem {
 const CONFIGURABLE_NAV_ITEMS: ConfigurableNavItem[] = [
   { id: "wiki", view: "wiki", icon: FileText, labelKey: "novel.nav.wiki" },
   { id: "sources", view: "sources", icon: FolderOpen, labelKey: "novel.nav.sources" },
-  { id: "graph", view: "graph", icon: Network, labelKey: "novel.nav.graph" },
   { id: "lint", view: "lint", icon: Brain, labelKey: "novel.nav.lint" },
   { id: "skillLibrary", view: "skillLibrary", icon: WandSparkles, labelKey: "novel.nav.skillLibrary" },
   /*

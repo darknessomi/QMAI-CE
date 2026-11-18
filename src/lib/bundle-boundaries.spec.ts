@@ -14,14 +14,11 @@ describe("frontend bundle boundaries", () => {
     expect(viteConfig).not.toContain('return "book-analysis-vendor"')
   })
 
-  it("matches sigma packages before the broad React vendor rule", () => {
+  it("keeps the graphology chunk for writing memory without visual graph vendors", () => {
     const viteConfig = read("../../vite.config.ts")
-    const sigmaRule = viteConfig.indexOf('id.includes("@react-sigma")')
-    const reactRule = viteConfig.indexOf('id.includes("react") || id.includes("scheduler")')
-
-    expect(sigmaRule).toBeGreaterThan(-1)
-    expect(reactRule).toBeGreaterThan(-1)
-    expect(sigmaRule).toBeLessThan(reactRule)
+    expect(viteConfig).toContain('return "graphology-vendor"')
+    expect(viteConfig).not.toContain('return "sigma-vendor"')
+    expect(viteConfig).not.toContain('return "cytoscape-vendor"')
   })
 
   it("keeps character-aura matching out of the initial context graph", () => {

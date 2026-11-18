@@ -20,7 +20,6 @@ import type { WikiState } from "@/stores/wiki-store"
 export type BuiltinPluginId =
   | "web-search"
   | "memory-center"
-  | "novel-graph"
   | "skill-library"
   | "review-center"
   | "plot-search"
@@ -74,28 +73,6 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
     view: "lint",
     offEffect: "关闭后「记忆中心」入口从创作工具中消失，已记录的记忆条目不会被删除。",
     defaultEnabled: true,
-  },
-  {
-    id: "novel-graph",
-    name: "小说图谱",
-    description: "把人物、地点、事件之间的关系画成图，便于检查设定一致性。",
-    kind: "view",
-    view: "graph",
-    offEffect: "已关闭：创作工具里不显示「小说图谱」入口。图谱数据仍保留在项目里，重新开启即可查看。",
-    /*
-     * **默认关闭**（用户决定）。
-     *
-     * 图谱是一个「插件类型」的功能：保留代码与数据，但不在创作工具里默认出现。
-     * 想要的人到「插件」页把它打开即可。
-     *
-     * 为什么不是删掉：已有用户的项目里可能存了图谱数据，删功能会让那些数据变成
-     * 打不开的孤儿；留一个默认关闭的开关，既能满足"不要它出现在界面上"，
-     * 又不破坏老数据。
-     *
-     * 对老用户的影响：他们本地没存过这个键，所以读到的也是这里的默认值 false ——
-     * 也就是说升级后图谱会从创作工具里消失一次。这是本次决定的预期效果。
-     */
-    defaultEnabled: false,
   },
   {
     id: "skill-library",

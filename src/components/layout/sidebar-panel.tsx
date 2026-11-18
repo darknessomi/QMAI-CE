@@ -5,7 +5,6 @@ import { UiTestOutlineTools } from "@/components/uitest/ui-test-outline-tools"
 import { KnowledgeTree, type KnowledgeCreateRequest } from "./knowledge-tree"
 import { PersonaTreeSection } from "./persona-tree-section"
 import { TrashPanel } from "./trash-panel"
-import { GraphSidebarPanel } from "./graph-sidebar-panel"
 import { ReviewCenterSidebarPanel } from "./review-center-sidebar-panel"
 import { useListFileDrop } from "@/components/novel/use-list-file-drop"
 import { SidebarBottomActions } from "@/components/layout/sidebar-bottom-actions"
@@ -746,10 +745,6 @@ export function SidebarPanel({ onUiTestCloseDirectory, onUiTestRegisterCancel }:
     onUiTestRegisterCancel(handleCancelImportMemoryExtraction)
     return () => onUiTestRegisterCancel(null)
   }, [onUiTestRegisterCancel])
-
-  if (activeView === "graph") {
-    return <GraphSidebarPanel />
-  }
 
   if (activeView === "reviewCenter") {
     return <ReviewCenterSidebarPanel />

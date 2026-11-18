@@ -72,12 +72,8 @@ import {
 import { hasUsableLlm } from "@/lib/has-usable-llm";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import remarkMath from "remark-math";
-import rehypeKatex from "rehype-katex";
-import "katex/dist/katex.min.css";
 import { FileEditPreview } from "@/components/chat/file-edit-preview";
 import { resolveMarkdownImageSrc } from "@/lib/markdown-image-resolver";
-import { MermaidDiagram, unwrapMermaidPre } from "@/components/mermaid-diagram";
 import {
   AgentToolCallMessage,
   type ToolCallRecord,
@@ -1590,8 +1586,7 @@ function OutlineMarkdownContent({
       style={{ overflowWrap: "anywhere", wordBreak: "break-word" }}
     >
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkMath]}
-        rehypePlugins={[rehypeKatex]}
+        remarkPlugins={[remarkGfm]}
         components={{
           img: ({ src, alt, ...props }) => (
             <img
@@ -1632,8 +1627,6 @@ function OutlineMarkdownContent({
             </td>
           ),
           pre: ({ children, ...props }) => {
-            const mermaid = unwrapMermaidPre(children);
-            if (mermaid) return <>{mermaid}</>;
             const htmlFence = unwrapHtmlFence(children);
             if (htmlFence) return <HtmlFenceBlock codeText={htmlFence.codeText} />;
             return (
@@ -1650,9 +1643,6 @@ function OutlineMarkdownContent({
           code: ({ className, children, ...props }) => {
             const lang = className?.replace("language-", "");
             const codeText = String(children).replace(/\n$/, "");
-            if (lang === "mermaid") {
-              return <MermaidDiagram code={codeText} />;
-            }
             if (lang && lang !== "text" && lang !== "plain") {
               const highlighted = highlightCode(codeText, lang);
               return (

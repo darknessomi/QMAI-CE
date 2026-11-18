@@ -4,13 +4,14 @@ import { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { FilePreview } from "./file-preview"
+import { WikiReader } from "./wiki-reader"
 
 ;(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT =
   true
 
 const SOURCE = "<!DOCTYPE html><html><head></head><body>原文</body></html>"
 
-describe("HtmlFilePreview 外观", () => {
+describe("文件预览", () => {
   let host: HTMLDivElement
   let root: Root
 
@@ -49,5 +50,22 @@ describe("HtmlFilePreview 外观", () => {
     const textarea = host.querySelector("textarea") as HTMLTextAreaElement
     expect(textarea.value).toBe(SOURCE)
     expect(textarea.value).not.toContain("qmai-document-appearance")
+  })
+
+  it("文本预览和阅读页将旧 Mermaid 内容显示为代码块", async () => {
+    const markdown = ["```mermaid", "flowchart LR", "A --> B", "```", "", "```text", "普通代码", "```"].join("\n")
+    await act(async () => {
+      root.render(
+        <>
+          <FilePreview filePath="outline.txt" textContent={markdown} />
+          <WikiReader body={markdown} />
+        </>,
+      )
+    })
+
+    const codeBlocks = [...host.querySelectorAll("pre > code")]
+    expect(codeBlocks.map((block) => block.textContent?.trim())).toEqual([
+      "flowchart LR\nA --> B", "普通代码", "flowchart LR\nA --> B", "普通代码",
+    ])
   })
 })

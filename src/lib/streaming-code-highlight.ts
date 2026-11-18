@@ -237,7 +237,7 @@ function escapeHtml(text: string): string {
 }
 
 export function highlightCode(code: string, lang: string): string {
-  if (!lang || lang === "mermaid" || lang === "text" || lang === "plain") {
+  if (!lang || lang === "text" || lang === "plain") {
     return escapeHtml(code)
   }
 

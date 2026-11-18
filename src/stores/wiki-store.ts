@@ -59,11 +59,6 @@ import type { CodexSpeedMode } from "@/lib/codex-cli-speed"
 // 这里只做类型引用；`import type` 编译期擦除，不会把 llm-providers 拉进 store 的运行时依赖。
 import type { LlmProviderId } from "@/lib/llm-providers"
 
-const GRAPH_LABEL_MODE_KEY = "lk-graph-label-display-mode"
-const GRAPH_EDGE_COLOR_KEY = "lk-graph-edge-color"
-const GRAPH_EDGE_STRENGTH_KEY = "lk-graph-edge-strength"
-const GRAPH_EDGE_STYLE_KEY = "lk-graph-edge-style"
-const GRAPH_EDGE_LABELS_ALWAYS_KEY = "lk-graph-edge-labels-always"
 const UI_FONT_SIZE_SCALE_KEY = "qmai-ui-font-size-scale"
 /** 正文字号独立键：与界面字号分开存。 */
 const BODY_FONT_SIZE_SCALE_KEY = "qmai-ui-body-font-scale"
@@ -169,35 +164,6 @@ const readStoredSidebarNavConfig = (): SidebarNavConfig => {
   } catch {
     return DEFAULT_SIDEBAR_NAV_CONFIG
   }
-}
-
-const readStoredGraphLabelDisplayMode = (): string => {
-  if (typeof localStorage === "undefined") return "all"
-  const saved = localStorage.getItem(GRAPH_LABEL_MODE_KEY)
-  return saved === "auto" || saved === "focused" || saved === "all" ? saved : "all"
-}
-
-const readStoredGraphEdgeColorHex = (): string => {
-  if (typeof localStorage === "undefined") return "#7f8ea3"
-  const saved = localStorage.getItem(GRAPH_EDGE_COLOR_KEY)
-  return saved && /^#[0-9a-fA-F]{6}$/.test(saved) ? saved : "#7f8ea3"
-}
-
-const readStoredGraphEdgeStrengthPercent = (): number => {
-  if (typeof localStorage === "undefined") return 180
-  const saved = Number(localStorage.getItem(GRAPH_EDGE_STRENGTH_KEY) ?? "180")
-  return Number.isFinite(saved) ? Math.max(100, Math.min(260, saved)) : 180
-}
-
-const readStoredGraphEdgeStyle = (): string => {
-  if (typeof localStorage === "undefined") return "curve"
-  const saved = localStorage.getItem(GRAPH_EDGE_STYLE_KEY)
-  return saved === "curve" || saved === "arrow" || saved === "line" ? saved : "curve"
-}
-
-const readStoredGraphEdgeLabelsAlways = (): boolean => {
-  if (typeof localStorage === "undefined") return false
-  return localStorage.getItem(GRAPH_EDGE_LABELS_ALWAYS_KEY) === "true"
 }
 
 /**
@@ -700,7 +666,7 @@ interface WikiState {
    *   main（人物 Skill）→ personaSkillLibrary
    *   scratch-20261010（文风 skill 化）→ writingStyleLibrary、characterSoulLibrary
    */
-  activeView: "wiki" | "sources" | "search" | "graph" | "lint" | "soul" | "skillLibrary" | "writingSkillLibrary" | "writingStyleLibrary" | "characterSoulLibrary" | "personaSkillLibrary" | "skillFavorites" | "bookAnalysis" | "settings" | "trash" | "reviewCenter" | "storySimulation" | "maintenance" | "plugins"
+  activeView: "wiki" | "sources" | "search" | "lint" | "soul" | "skillLibrary" | "writingSkillLibrary" | "writingStyleLibrary" | "characterSoulLibrary" | "personaSkillLibrary" | "skillFavorites" | "bookAnalysis" | "settings" | "trash" | "reviewCenter" | "storySimulation" | "maintenance" | "plugins"
   activeSettingsCategory: SettingsCategoryId | null
   activeModelSettingsTab: ModelSettingsTabId | null
   selectedSoulId: string | null
@@ -729,18 +695,6 @@ interface WikiState {
   personaDataVersion: number
   selectedReviewDimension: string | null
   selectedReviewFilePath: string
-  graphMode: string
-  graphDisplayMode: string
-  graphColorMode: string
-  graphLabelDisplayMode: string
-  graphShowFilters: boolean
-  graphShowEdgeControls: boolean
-  graphEdgeStyle: string
-  graphEdgeColorHex: string
-  graphEdgeStrengthPercent: number
-  graphEdgeLabelsAlwaysVisible: boolean
-  graphStats: { nodeCount: number; edgeCount: number; hiddenCount: number; filteredNodeCount: number; filteredEdgeCount: number }
-  refreshGraph: (() => void) | null
   llmConfig: LlmConfig
   aiChatModel: string
   /** Dedicated global AI outline model key; isolated from AI chat. */
@@ -844,18 +798,6 @@ interface WikiState {
   bumpPersonaDataVersion: () => void
   setSelectedReviewDimension: (dimension: string | null) => void
   setSelectedReviewFilePath: (path: string) => void
-  setGraphMode: (mode: string) => void
-  setGraphDisplayMode: (mode: string) => void
-  setGraphColorMode: (mode: string) => void
-  setGraphLabelDisplayMode: (mode: string) => void
-  setGraphShowFilters: (v: boolean) => void
-  setGraphShowEdgeControls: (v: boolean) => void
-  setGraphEdgeStyle: (style: string) => void
-  setGraphEdgeColorHex: (hex: string) => void
-  setGraphEdgeStrengthPercent: (pct: number) => void
-  setGraphEdgeLabelsAlwaysVisible: (v: boolean) => void
-  setGraphStats: (stats: WikiState["graphStats"]) => void
-  setRefreshGraph: (refreshGraph: (() => void) | null) => void
   setLlmConfig: (config: LlmConfig) => void
   setAiChatModel: (model: string) => void
   setAiOutlineModel: (model: string) => void
@@ -932,18 +874,6 @@ export const useWikiStore = create<WikiState>((set) => ({
   personaDataVersion: 0,
   selectedReviewDimension: null,
   selectedReviewFilePath: "",
-  graphMode: "overview",
-  graphDisplayMode: "graph",
-  graphColorMode: "type",
-  graphLabelDisplayMode: readStoredGraphLabelDisplayMode(),
-  graphShowFilters: false,
-  graphShowEdgeControls: false,
-  graphEdgeStyle: readStoredGraphEdgeStyle(),
-  graphEdgeColorHex: readStoredGraphEdgeColorHex(),
-  graphEdgeStrengthPercent: readStoredGraphEdgeStrengthPercent(),
-  graphEdgeLabelsAlwaysVisible: readStoredGraphEdgeLabelsAlways(),
-  graphStats: { nodeCount: 0, edgeCount: 0, hiddenCount: 0, filteredNodeCount: 0, filteredEdgeCount: 0 },
-  refreshGraph: null,
   llmConfig: {
     provider: "openai",
     apiKey: "",
@@ -1059,18 +989,6 @@ export const useWikiStore = create<WikiState>((set) => ({
 
   setSelectedReviewDimension: (selectedReviewDimension) => set({ selectedReviewDimension }),
   setSelectedReviewFilePath: (selectedReviewFilePath) => set({ selectedReviewFilePath }),
-  setGraphMode: (graphMode) => set({ graphMode }),
-  setGraphDisplayMode: (graphDisplayMode) => set({ graphDisplayMode }),
-  setGraphColorMode: (graphColorMode) => set({ graphColorMode }),
-  setGraphLabelDisplayMode: (graphLabelDisplayMode) => set({ graphLabelDisplayMode }),
-  setGraphShowFilters: (graphShowFilters) => set({ graphShowFilters }),
-  setGraphShowEdgeControls: (graphShowEdgeControls) => set({ graphShowEdgeControls }),
-  setGraphEdgeStyle: (graphEdgeStyle) => set({ graphEdgeStyle }),
-  setGraphEdgeColorHex: (graphEdgeColorHex) => set({ graphEdgeColorHex }),
-  setGraphEdgeStrengthPercent: (graphEdgeStrengthPercent) => set({ graphEdgeStrengthPercent }),
-  setGraphEdgeLabelsAlwaysVisible: (graphEdgeLabelsAlwaysVisible: boolean) => set({ graphEdgeLabelsAlwaysVisible }),
-  setGraphStats: (graphStats) => set({ graphStats }),
-  setRefreshGraph: (refreshGraph) => set({ refreshGraph }),
   searchApiConfig: {
     provider: "none",
     apiKey: "",

@@ -43,11 +43,6 @@ const MemoryCenterView = lazy(async () => {
   return { default: mod.MemoryCenterView };
 });
 
-const GraphView = lazy(async () => {
-  const mod = await import("@/components/graph/graph-view");
-  return { default: mod.GraphView };
-});
-
 const ReviewCenterView = lazy(async () => {
   const mod = await import("@/components/review/review-center-view");
   return { default: mod.ReviewCenterView };
@@ -149,13 +144,6 @@ export function ContentArea() {
         content = (
           <Suspense fallback={<LoadingView />}>
             {novelMode ? <MemoryCenterView /> : <LintView />}
-          </Suspense>
-        );
-        break;
-      case "graph":
-        content = (
-          <Suspense fallback={<LoadingView />}>
-            <GraphView />
           </Suspense>
         );
         break;

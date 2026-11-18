@@ -95,6 +95,19 @@ describe("chat message references", () => {
   })
 })
 
+it("将旧 Mermaid 消息显示为 Markdown 代码块", () => {
+  const message: DisplayMessage = {
+    id: "msg-mermaid-source",
+    role: "assistant",
+    content: ["```mermaid", "flowchart LR", "A --> B", "```"].join("\n"),
+    timestamp: 1,
+    conversationId: "conv-1",
+  }
+
+  const html = renderToStaticMarkup(<ChatMessage message={message} />)
+  expect(html).toMatch(/<pre[^>]*><code[^>]*language-mermaid[^>]*>flowchart LR\nA --&gt; B<\/code><\/pre>/)
+})
+
 describe("chapter co-creation rendering", () => {
   it("hides the chapter_discuss protocol block from the assistant bubble", () => {
     const message: DisplayMessage = {

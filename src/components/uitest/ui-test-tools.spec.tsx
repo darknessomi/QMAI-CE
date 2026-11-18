@@ -407,18 +407,9 @@ describe("工具页样式规格及作用域", () => {
     expect(contrastingField).toBe(true)
   })
 
-  it("图谱 Canvas 文字读取测试皮肤 token，保留正式版原值", () => {
-    const source = readFileSync(resolve(__dirname, "../graph/graph-view.tsx"), "utf8")
-    expect(source.includes('getPropertyValue("--ui-ink")')).toBe(true)
-    expect(source.includes('getPropertyValue("--ui-muted")')).toBe(true)
-    expect(source.includes('labelColor: { color: uiTestGraphColors?.ink ?? "#1e293b" }')).toBe(true)
-    expect(source.includes('edgeLabelColor: { color: uiTestGraphColors?.muted ?? "#334155" }')).toBe(true)
-  })
-
   it.each([
     ["memory", "novel/memory-center-view.tsx"],
     ["review", "review/review-center-view.tsx"],
-    ["graph", "graph/graph-view.tsx"],
     ["search", "search/search-view.tsx"],
     ["skills", "skill-library/unified-skill-library-view.tsx"],
   ])("%s 有明确页面和状态布局标识，不影响正式版分支", (page, path) => {

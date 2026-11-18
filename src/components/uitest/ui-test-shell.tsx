@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react"
-import { Brain, Grid2X2, GitBranch, History, Minus, PanelLeft, Puzzle, Search, Settings, ShieldCheck, Sparkles, Square, Trash2, Wrench, X } from "lucide-react"
+import { Brain, Grid2X2, History, Minus, PanelLeft, Puzzle, Search, Settings, ShieldCheck, Sparkles, Square, Trash2, Wrench, X } from "lucide-react"
 import logoImg from "@/assets/QM-LOGO.png"
 // 侧栏（人物小传区段等）也用工具样式：必须在主 chunk 引入，
 // 否则首屏会渲染出一块没有样式的裸列表（字号、图标全不对，用户实测）。
@@ -62,7 +62,7 @@ interface UiTestShellProps {
 const TOOL_GROUPS = [
   // 「插件」和「技能库」同组：都是「扩展能力」类工具。放第一组而不是
   // 「维护工具」那组，是因为它是一级功能，不该埋在维护类的角落里。
-  [ { view: "lint", label: "记忆中心", icon: Brain }, { view: "graph", label: "小说图谱", icon: GitBranch }, { view: "skillLibrary", label: "技能库", icon: Sparkles }, { view: "plugins", label: "插件", icon: Puzzle } ],
+  [ { view: "lint", label: "记忆中心", icon: Brain }, { view: "skillLibrary", label: "技能库", icon: Sparkles }, { view: "plugins", label: "插件", icon: Puzzle } ],
   [ { view: "reviewCenter", label: "审查中心", icon: ShieldCheck }, { view: "search", label: "剧情搜索", icon: Search } ],
   [ { view: "maintenance", label: "维护工具", icon: Wrench }, { view: "trash", label: "回收站", icon: Trash2 } ],
 ] as const
@@ -202,7 +202,7 @@ export function UiTestShell({ project, onOpenProject, onSelectProject, onSwitchP
    */
   const memoryCenterFullWindow = activeView === "lint" && novelMode
   const hasDirectory = Boolean(project && activeView !== "settings" && !fullWindowViews && !memoryCenterFullWindow)
-  const sidebarPreference = preference.directory?.[activeView] ?? activeView !== "graph"
+  const sidebarPreference = preference.directory?.[activeView] ?? true
   const sidebarVisible = hasDirectory && sidebarPreference
   const chapterListMaxWidth = Math.max(CHAPTER_LIST_MIN_WIDTH, Math.min(CHAPTER_LIST_MAX_WIDTH, Math.floor(viewportWidth / 2) - UI_TEST_PANEL_GAP))
   const clampChapterListWidth = (width: number) => Math.max(CHAPTER_LIST_MIN_WIDTH, Math.min(chapterListMaxWidth, Math.round(width)))

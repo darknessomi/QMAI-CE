@@ -137,10 +137,11 @@ describe("builtin-state：存储容错", () => {
   it("未知的插件 id 被忽略，不影响已知项", () => {
     localStorage.setItem(
       BUILTIN_PLUGINS_STORAGE_KEY,
-      JSON.stringify({ "no-such-plugin": false, "review-center": false }),
+      JSON.stringify({ "novel-graph": true, "review-center": false }),
     )
     __resetBuiltinPluginCacheForTests()
 
+    expect(builtinPluginsSnapshot()).not.toHaveProperty("novel-graph")
     expect(isBuiltinPluginEnabled("review-center")).toBe(false)
     expect(isBuiltinPluginEnabled("web-search")).toBe(true)
   })
@@ -172,18 +173,6 @@ describe("内置插件：覆盖范围", () => {
       setBuiltinPluginEnabled(id, true)
       expect(isBuiltinViewEnabled(view)).toBe(true)
     }
-  })
-
-  it("小说图谱默认关闭（创作工具里一开始不显示），但可以被打开", () => {
-    /*
-     * 用户决定：图谱作为「内置插件」保留，但**默认不在创作工具里出现**。
-     * 想要的人到插件页打开；数据不会因为默认关闭而被删。
-     */
-    expect(isBuiltinPluginEnabled("novel-graph")).toBe(false)
-    expect(isBuiltinViewEnabled("graph")).toBe(false)
-
-    setBuiltinPluginEnabled("novel-graph", true)
-    expect(isBuiltinViewEnabled("graph")).toBe(true)
   })
 
   it("关掉记忆中心不会牵连别的视图（各自独立）", () => {

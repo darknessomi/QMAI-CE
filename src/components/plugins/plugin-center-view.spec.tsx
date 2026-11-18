@@ -57,6 +57,7 @@ vi.mock("@/lib/toast", () => ({
 }))
 
 import { BUILTIN_PLUGINS } from "@/lib/plugins/builtin"
+import { BUILTIN_PLUGINS_STORAGE_KEY, __resetBuiltinPluginCacheForTests } from "@/lib/plugins/builtin-state"
 import { PluginCenterView } from "./plugin-center-view"
 
 function summary(overrides: Partial<PluginSummary> & { id: string }): PluginSummary {
@@ -111,6 +112,19 @@ function buttonByText(label: string): HTMLButtonElement | null {
     (buttons.find((b) => (b.textContent ?? "").trim() === label) as HTMLButtonElement) ?? null
   )
 }
+
+it("忽略旧版小说图谱开关且继续显示其他内置插件", async () => {
+  localStorage.setItem(BUILTIN_PLUGINS_STORAGE_KEY, JSON.stringify({ "novel-graph": true }))
+  __resetBuiltinPluginCacheForTests()
+  try {
+    await render()
+    expect(host.querySelector('[data-builtin-plugin-row="memory-center"]')).not.toBeNull()
+    expect(host.textContent).not.toContain("小说图谱")
+  } finally {
+    localStorage.removeItem(BUILTIN_PLUGINS_STORAGE_KEY)
+    __resetBuiltinPluginCacheForTests()
+  }
+})
 
 describe("PluginCenterView：已安装行", () => {
   it("开关反映启用状态，点击调 enable 并带上清单申请的权限", async () => {

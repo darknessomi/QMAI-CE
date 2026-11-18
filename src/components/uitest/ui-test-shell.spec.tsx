@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { readFileSync } from "node:fs"
-import { setBuiltinPluginEnabled } from "@/lib/plugins/builtin-state"
+import { BUILTIN_PLUGINS_STORAGE_KEY, __resetBuiltinPluginCacheForTests } from "@/lib/plugins/builtin-state"
 import { resolve } from "node:path"
 import postcss from "postcss"
 import { act } from "react"
@@ -367,12 +367,6 @@ describe("独立UI测试版外壳", () => {
   })
   it("右键或长按可调整主导航，并在重新打开后保留", async () => {
     vi.useFakeTimers()
-    /*
-     * 「小说图谱」是默认关闭的内置插件（用户决定）。本用例验的是"一级导航右键/替换"
-     * 交互，与图谱本身无关 —— 先打开它，菜单里才有这一项可选。必须在 render 之前设置，
-     * 否则菜单已按旧状态渲染好了。
-     */
-    setBuiltinPluginEnabled("novel-graph", true)
     await render()
     const soulSlot = [...host.querySelectorAll(".ui-test-nav-slot")].find((slot) => slot.textContent?.includes("记忆中心")) as HTMLElement
     await act(async () => {
@@ -401,14 +395,26 @@ describe("独立UI测试版外壳", () => {
     const skill = [...host.querySelectorAll(".ui-test-nav-slot")].find((slot) => slot.querySelector("button")?.textContent === "技能库") as HTMLElement
     await act(async () => { skill.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true })) })
     await hover("新增功能")
-    await click("小说图谱")
-    expect([...host.querySelectorAll(".ui-test-nav-item")].map((button) => button.textContent)).toEqual(["大纲", "技能库", "章节", "插件", "小说图谱"])
-    useWikiStore.setState({ activeView: "graph" })
-    const graph = [...host.querySelectorAll(".ui-test-nav-slot")].find((slot) => slot.querySelector("button")?.textContent === "小说图谱") as HTMLElement
-    await act(async () => { graph.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true })) })
+    await click("审查中心")
+    expect([...host.querySelectorAll(".ui-test-nav-item")].map((button) => button.textContent)).toEqual(["大纲", "技能库", "章节", "插件", "审查中心"])
+    useWikiStore.setState({ activeView: "reviewCenter" })
+    const review = [...host.querySelectorAll(".ui-test-nav-slot")].find((slot) => slot.querySelector("button")?.textContent === "审查中心") as HTMLElement
+    await act(async () => { review.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true })) })
     await click("删除")
     expect(useWikiStore.getState().activeView).toBe("sources")
     expect([...host.querySelectorAll(".ui-test-nav-item")].map((button) => button.textContent)).toEqual(["大纲", "技能库", "章节", "插件"])
+  })
+  it("忽略旧版已开启并固定在导航上的小说图谱", async () => {
+    localStorage.setItem(BUILTIN_PLUGINS_STORAGE_KEY, JSON.stringify({ "novel-graph": true }))
+    localStorage.setItem("qm-uitest-primary-nav-v1", JSON.stringify(["wiki", "graph", "sources", "lint", "plugins"]))
+    __resetBuiltinPluginCacheForTests()
+    await render()
+
+    expect([...host.querySelectorAll(".ui-test-nav-item")].map((button) => button.textContent)).toEqual(["章节", "大纲", "记忆中心", "插件"])
+    await click("创作工具")
+    const menu = host.querySelector('[role="menu"][aria-label="创作工具"]')
+    expect(menu?.textContent).toContain("记忆中心")
+    expect(menu?.textContent).not.toContain("小说图谱")
   })
   it("没有小说时仍可右键管理主导航", async () => {
     await render(false)
@@ -461,14 +467,9 @@ describe("独立UI测试版外壳", () => {
     const skill = [...host.querySelectorAll(".ui-test-nav-slot")].find((slot) => slot.querySelector("button")?.textContent === "技能库") as HTMLElement
     await act(async () => { skill.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 300, clientY: 20 })) })
     await hover("替换为")
-    /*
-     * 「小说图谱」现在是默认关闭的内置插件（用户决定：保留功能但不在创作工具里默认出现）。
-     * 本用例验的是"一级导航的右键/替换交互"，与图谱本身无关，所以先把它打开再继续。
-     */
-    setBuiltinPluginEnabled("novel-graph", true)
-    await click("小说图谱")
+    await click("审查中心")
     expect(useWikiStore.getState().activeView).toBe("sources")
-    expect([...host.querySelectorAll(".ui-test-nav-item")].map((button) => button.textContent)).toEqual(["大纲", "章节", "小说图谱", "插件"])
+    expect([...host.querySelectorAll(".ui-test-nav-item")].map((button) => button.textContent)).toEqual(["大纲", "章节", "审查中心", "插件"])
   })
   it("记忆中心被替换成技能库后，仍可从创作工具重新打开记忆中心", async () => {
     await render()
@@ -516,7 +517,7 @@ describe("独立UI测试版外壳", () => {
     expect([...host.querySelectorAll(".ui-test-nav-item")].map((button) => button.textContent)).toEqual(["大纲", "章节", "记忆中心", "插件"])
     const menu = host.querySelector('[aria-label="记忆中心功能菜单"]')!
     const submenu = menu.querySelector<HTMLElement>('[aria-label="记忆中心二级菜单"]')!
-    expect([...submenu.querySelectorAll(".ui-test-menu-item")].map((button) => button.textContent)).toEqual(["技能库", "小说图谱", "审查中心", "剧情搜索"])
+    expect([...submenu.querySelectorAll(".ui-test-menu-item")].map((button) => button.textContent)).toEqual(["技能库", "审查中心", "剧情搜索"])
   })
   it("窄窗口中的功能菜单保持在窗口内并可滚动", async () => {
     Object.defineProperty(window, "innerWidth", { value: 390, configurable: true })

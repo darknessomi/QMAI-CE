@@ -2,9 +2,6 @@ import { UserMessageMeta } from "./user-message-meta";
 import { useCallback, useEffect, useRef, useState, useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import remarkMath from "remark-math";
-import rehypeKatex from "rehype-katex";
-import "katex/dist/katex.min.css";
 import {
   Bot,
   User,
@@ -46,7 +43,6 @@ import { UiTestGenerationStats } from "@/components/common/context-hub-stats-sum
 import { getStreamingTailDisplay } from "@/components/common/streaming-display-text";
 import { parseContextHubSnapshotRef } from "@/lib/context-hub/types";
 
-import { convertLatexToUnicode } from "@/lib/latex-to-unicode";
 import { resolveMarkdownImageSrc } from "@/lib/markdown-image-resolver";
 import {
   findRawSourceForImage,
@@ -54,7 +50,6 @@ import {
 } from "@/lib/raw-source-resolver";
 import { detectLanguage } from "@/lib/detect-language";
 import { getHtmlLang, getTextDirection } from "@/lib/language-metadata";
-import { MermaidDiagram, unwrapMermaidPre } from "@/components/mermaid-diagram";
 import { highlightCode } from "@/lib/streaming-code-highlight";
 import { separateThinking } from "@/lib/separate-thinking";
 import { StreamingMarkdown } from "@/components/common/streaming-markdown";
@@ -1151,8 +1146,7 @@ function MarkdownContent({ content }: { content: string }) {
         style={{ textAlign: "start" }}
       >
         <ReactMarkdown
-          remarkPlugins={[remarkGfm, remarkMath]}
-          rehypePlugins={[rehypeKatex]}
+          remarkPlugins={[remarkGfm]}
           components={{
             a: ({ href, children }) => {
               if (href?.startsWith("wikilink:")) {
@@ -1207,8 +1201,6 @@ function MarkdownContent({ content }: { content: string }) {
               </td>
             ),
             pre: ({ children, ...props }) => {
-              const mermaid = unwrapMermaidPre(children);
-              if (mermaid) return <>{mermaid}</>;
               return (
                 <pre
                   dir="ltr"
@@ -1223,9 +1215,6 @@ function MarkdownContent({ content }: { content: string }) {
             code: ({ className, children, ...props }) => {
               const lang = className?.replace("language-", "");
               const codeText = String(children).replace(/\n$/, "");
-              if (lang === "mermaid") {
-                return <MermaidDiagram code={codeText} />;
-              }
               if (lang && lang !== "text" && lang !== "plain") {
                 const highlighted = highlightCode(codeText, lang);
                 return (
@@ -1390,37 +1379,17 @@ function WorkflowBlock({ content }: { content: string }) {
  * - [[wikilinks]] → markdown links with wikilink: protocol
  */
 function processContent(text: string): string {
-  let result = text;
-
-  // Wrap bare \begin{...}...\end{...} blocks with $$ for remark-math
-  result = result.replace(
-    /(?<!\$\$\s*)(\\begin\{[^}]+\}[\s\S]*?\\end\{[^}]+\})(?!\s*\$\$)/g,
-    (_match, block: string) => `$$\n${block}\n$$`,
-  );
-
-  // Only apply Unicode conversion to text outside of math delimiters
-  // Split on $$...$$ and $...$ blocks, only convert non-math parts
-  const parts = result.split(/(\$\$[\s\S]*?\$\$|\$[^$\n]+?\$)/g);
-  result = parts
-    .map((part) => {
-      if (part.startsWith("$")) return part; // preserve math
-      return convertLatexToUnicode(part);
-    })
-    .join("");
-
   // Fix malformed wikilinks like [[name] (missing closing bracket)
-  result = result.replace(/\[\[([^\]]+)\](?!\])/g, "[[$1]]");
+  const result = text.replace(/\[\[([^\]]+)\](?!\])/g, "[[$1]]");
 
   // Convert [[wikilinks]] to markdown links
-  result = result.replace(
+  return result.replace(
     /\[\[([^\]|]+?)(?:\|([^\]]+?))?\]\]/g,
     (_match, pageName: string, displayText?: string) => {
       const display = displayText?.trim() || pageName.trim();
       return `[${display}](wikilink:${pageName.trim()})`;
     },
   );
-
-  return result;
 }
 
 function WikiLink({

@@ -279,6 +279,19 @@ afterEach(async () => {
   vi.restoreAllMocks()
 })
 
+it("将旧 Mermaid 大纲消息和普通代码一起显示为代码块", async () => {
+  const content = [
+    "```mermaid", "flowchart LR", "A --> B", "```", "",
+    "```text", "普通代码", "```",
+  ].join("\n")
+  setOutlineConversations([conversation([{ id: "old-outline", role: "assistant", content }])], "outline-active")
+
+  const container = await renderOutlineChatPanel()
+
+  expect(container.querySelector("pre > code.language-mermaid")?.textContent?.trim()).toBe("flowchart LR\nA --> B")
+  expect(container.querySelector("pre > code.language-text")?.textContent?.trim()).toBe("普通代码")
+})
+
 describe("AI 大纲完整结果过滤", () => {
   it("把 Gemini 普通文本思考摘要识别为无正文", () => {
     expect(filterOutlineGeneratedContent(GEMINI_OUTLINE_THOUGHT_DUMP)).toEqual({

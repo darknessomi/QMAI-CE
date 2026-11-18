@@ -1,7 +1,5 @@
 overrides:
   dompurify: ^3.4.17
-  # 与 package.json 的 KaTeX 版本范围同步，保证公式渲染器与 CSS 匹配。
-  "rehype-katex>katex": ^0.19.1
   source-map-js: ^1.2.2
 
 allowBuilds:

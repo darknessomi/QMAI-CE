@@ -14,9 +14,8 @@ describe("outline source format", () => {
     expect(applyOutlineSourceFormat("甲乙", 0, 1, "subscript").text).toBe("<sub>甲</sub>乙")
   })
 
-  it("keeps math and mermaid as source instead of editor nodes", () => {
+  it("keeps math as source instead of an editor node", () => {
     expect(applyOutlineSourceFormat("甲", 0, 1, "math").text).toBe("$甲$")
-    expect(applyOutlineSourceFormat("甲", 1, 1, "mermaid").text).toContain("```mermaid")
   })
 
   it("renders only the allowlisted annotation markup", () => {

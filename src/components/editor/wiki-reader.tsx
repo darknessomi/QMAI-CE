@@ -1,9 +1,6 @@
 import { useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import remarkMath from "remark-math";
-import rehypeKatex from "rehype-katex";
-import "katex/dist/katex.min.css";
 import { transformWikilinks } from "@/lib/wikilink-transform";
 import { resolveRelatedSlug } from "@/lib/wiki-page-resolver";
 import { resolveMarkdownImageSrc } from "@/lib/markdown-image-resolver";
@@ -11,7 +8,6 @@ import { normalizePath } from "@/lib/path-utils";
 import { detectLanguage } from "@/lib/detect-language";
 import { getHtmlLang, getTextDirection } from "@/lib/language-metadata";
 import { useWikiStore } from "@/stores/wiki-store";
-import { MermaidDiagram, unwrapMermaidPre } from "@/components/mermaid-diagram";
 import { outlineExtensionHtml, renderOutlineExtensionText } from "@/lib/outline-source-format";
 import { transformHandcraftZonesForReader } from "@/lib/novel/handcraft-zone";
 
@@ -101,8 +97,7 @@ function handleAnchorClick(
       style={{ textAlign: "start", overflowWrap: "anywhere", wordBreak: "break-word" }}
     >
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkMath]}
-        rehypePlugins={[rehypeKatex]}
+        remarkPlugins={[remarkGfm]}
         components={{
           h1: ({ children, ...props }) => (
             <h1
@@ -219,8 +214,6 @@ function handleAnchorClick(
             </td>
           ),
           pre: ({ children, ...props }) => {
-            const mermaid = unwrapMermaidPre(children);
-            if (mermaid) return <>{mermaid}</>;
             return (
               <pre
                 className="my-4 overflow-x-auto rounded-lg border bg-muted p-4 text-sm"
@@ -233,9 +226,6 @@ function handleAnchorClick(
             );
           },
           code: ({ className, children, ...props }) => {
-            const lang = className?.replace("language-", "");
-            const codeText = String(children).replace(/\n$/, "");
-            if (lang === "mermaid") return <MermaidDiagram code={codeText} />;
             return (
               <code
                 dir="ltr"

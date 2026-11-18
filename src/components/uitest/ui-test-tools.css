@@ -1804,42 +1804,6 @@
   min-height: 240px;
 }
 
-/* 图谱：整块画布；筛选 / 洞察是画布内浮层，不再挤出固定第四列。 */
-.ui-test-root [data-ui-page="graph"] {
-  overflow: hidden;
-}
-
-.ui-test-root [data-ui="graph-workspace"] {
-  position: relative;
-  min-width: 0;
-  isolation: isolate;
-}
-
-.ui-test-root [data-ui="graph-canvas"] {
-  min-width: 0;
-  background: var(--ui-paper);
-}
-
-.ui-test-root [data-ui="graph-filters"],
-.ui-test-root [data-ui="graph-insights"] {
-  max-width: calc(100% - 24px);
-  max-height: calc(100% - 24px);
-  overflow: auto;
-  border: 1px solid var(--ui-soft);
-  border-radius: 10px;
-  background: var(--ui-panel);
-  box-shadow: none;
-  overscroll-behavior: contain;
-}
-
-.ui-test-root [data-ui="graph-insights"] {
-  position: absolute;
-  z-index: 2;
-  top: 12px;
-  right: 12px;
-  width: 320px;
-}
-
 /* 搜索：查询与筛选为一组；结果仍使用原有文本 / 图片各自的滚动容器。 */
 .ui-test-root [data-ui-page="search"] {
   padding-bottom: 20px;
@@ -1889,7 +1853,6 @@
   .ui-test-root [data-ui="soul-role-content"] main > div > .rounded-lg:has(> .mb-4 > h2) { padding: 0; }
   .ui-test-root [data-ui="memory-snapshot"] { padding: 16px; }
   .ui-test-root [data-ui="simulation-config"] section > .grid { grid-template-columns: minmax(0, 1fr); }
-  .ui-test-root [data-ui="graph-insights"] { width: min(320px, calc(100% - 24px)); }
 }
 
 /* 选中编辑与启用是两个不同状态；不覆盖 checkbox 对启用状态的表达。 */

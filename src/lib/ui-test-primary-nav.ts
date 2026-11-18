@@ -11,7 +11,6 @@ export const PRIMARY_NAV_OPTIONS: PrimaryNavItem[] = [
   // 「插件」跟在技能库之后：两者都是「扩展能力」类入口，顺序与顶栏「创作工具」
   // 下拉里的分组保持一致（见 ui-test-shell.tsx 的 TOOL_GROUPS）。
   { view: "plugins", label: "插件" },
-  { view: "graph", label: "小说图谱" },
   { view: "reviewCenter", label: "审查中心" },
   { view: "search", label: "剧情搜索" },
   { view: "lint", label: "记忆中心" },

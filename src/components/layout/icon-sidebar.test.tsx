@@ -99,7 +99,6 @@ describe("icon-sidebar", () => {
     // 各侧栏面板统一在底部渲染 SidebarBottomActions
     const panels = [
       "sidebar-panel.tsx",
-      "graph-sidebar-panel.tsx",
       "review-center-sidebar-panel.tsx",
       "trash-panel.tsx",
     ]

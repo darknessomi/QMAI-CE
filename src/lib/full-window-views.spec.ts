@@ -68,7 +68,7 @@ describe("fullWindowViews（整窗视图清单）", () => {
    * 它现在是整窗单栏落地页，不再是「左栏 + 内容区」的双栏视图。
    */
   it("双栏视图与设置页都不是整窗视图", () => {
-    for (const view of ["wiki", "sources", "graph", "search", "reviewCenter", "settings", "trash", "maintenance"]) {
+    for (const view of ["wiki", "sources", "search", "reviewCenter", "settings", "trash", "maintenance"]) {
       expect(isFullWindowView(view)).toBe(false)
     }
   })
@@ -83,7 +83,7 @@ describe("fullWindowViews（整窗视图清单）", () => {
     }
     const admitted = [
       "skillLibrary", "writingSkillLibrary", "writingStyleLibrary", "characterSoulLibrary", "personaSkillLibrary", "skillFavorites",
-      "soul", "bookAnalysis", "lint", "wiki", "sources", "graph", "search",
+      "soul", "bookAnalysis", "lint", "wiki", "sources", "search",
       /*
        * `plugins` 是新入清单的一项：它的用例在上面（「插件」页是整窗视图）。
        * 这份候选清单必须跟着加 —— 漏加的话，"没有漏项"那条就会因为

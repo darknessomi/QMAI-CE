@@ -7,7 +7,6 @@
 const guide = "https://github.com/darknessomi/QMAI-CE"
 export const HELP_LINKS = {
   settings: `${guide}#基本使用流程`,
-  graph: `${guide}#readme`,
   review: `${guide}#-审查系统`,
 } as const
 

@@ -2,6 +2,7 @@
 import { beforeEach, describe, expect, it } from "vitest"
 import {
   PRIMARY_NAV_OPTIONS,
+  availablePrimaryNav,
   normalizePrimaryNav,
   readPrimaryNav,
   type PrimaryNavItem,
@@ -50,11 +51,18 @@ describe("老数据向前补全「插件」", () => {
   })
 
   it("已经满 5 项时不补全：尊重用户用满的名额", () => {
-    const stashed = ["sources", "wiki", "reviewCenter", "graph", "search"]
+    const stashed = ["sources", "wiki", "reviewCenter", "lint", "search"]
     const result = normalizePrimaryNav(stashed)
     expect(views(result)).toEqual(stashed)
     expect(views(result)).toHaveLength(5)
     expect(views(result)).not.toContain("plugins")
+  })
+
+  it("移除旧版固定的小说图谱，并排除新增和替换候选中的入口", () => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(["wiki", "graph", "sources", "plugins"]))
+    const items = readPrimaryNav()
+    expect(views(items)).toEqual(["wiki", "sources", "plugins"])
+    expect(views(availablePrimaryNav(items))).not.toContain("graph")
   })
 
   it("补全是幂等的：连续 normalize 两次结果相同，不会重复追加", () => {

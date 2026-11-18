@@ -68,9 +68,6 @@ export default defineConfig({
             if (id.includes("js-yaml")) {
               return "yaml-vendor"
             }
-            if (id.includes("@react-sigma") || id.includes("sigma")) {
-              return "sigma-vendor"
-            }
             if (id.includes("graphology")) {
               return "graphology-vendor"
             }
@@ -79,12 +76,6 @@ export default defineConfig({
             }
             if (id.includes("@milkdown")) {
               return "milkdown-vendor"
-            }
-            if (id.includes("katex") || id.includes("remark-math") || id.includes("rehype-katex")) {
-              return "katex-vendor"
-            }
-            if (id.includes("cytoscape")) {
-              return "cytoscape-vendor"
             }
           }
           return undefined

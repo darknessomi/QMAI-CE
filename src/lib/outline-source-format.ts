@@ -7,14 +7,12 @@ export type OutlineSourceFormat =
   | "superscript"
   | "subscript"
   | "math"
-  | "mermaid"
 
 export interface OutlineSourcePayload {
   color?: string
   align?: "left" | "center" | "right"
   href?: string
   note?: string
-  code?: string
 }
 
 export function applyOutlineSourceFormat(
@@ -41,7 +39,6 @@ export function applyOutlineSourceFormat(
   } else if (action === "superscript") inserted = `<sup>${fallback}</sup>`
   else if (action === "subscript") inserted = `<sub>${fallback}</sub>`
   else if (action === "math") inserted = `$${fallback}$`
-  else inserted = `\n\`\`\`mermaid\n${payload.code?.trim() || "graph TD\n  A[开始] --> B[结束]"}\n\`\`\`\n`
   const next = text.slice(0, start) + inserted + text.slice(end)
   return { text: next, start, end: start + inserted.length }
 }

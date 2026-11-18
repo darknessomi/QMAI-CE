@@ -3,7 +3,6 @@ import type { WikiState } from "@/stores/wiki-store"
 export const DEFAULT_SIDEBAR_NAV_ORDER = [
   "wiki",
   "sources",
-  "graph",
   "lint",
   "skillLibrary",
   /*

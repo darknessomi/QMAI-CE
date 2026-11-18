@@ -56,7 +56,7 @@ describe("工作区顶部标题对齐", () => {
     expect(css("ui-test.css")).not.toContain("ui-test-brand-copy")
   })
   it("其他目录首行使用显式标记，不批量修改内容区", () => {
-    for (const file of ["../layout/sidebar-panel.tsx", "../layout/graph-sidebar-panel.tsx", "../layout/review-center-sidebar-panel.tsx"]) {
+    for (const file of ["../layout/sidebar-panel.tsx", "../layout/review-center-sidebar-panel.tsx"]) {
       expect(readFileSync(resolve(__dirname, file), "utf8")).toContain('data-ui-panel-heading')
     }
     expect(declaration("ui-test.css", ".ui-test-root [data-ui-panel-heading] button", "height")).toBe("var(--ui-heading-line)")
