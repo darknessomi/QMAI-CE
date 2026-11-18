@@ -29,9 +29,9 @@ describe("fullWindowViews（整窗视图清单）", () => {
     expect(isFullWindowView("personaSkillLibrary")).toBe(true)
   })
 
-  it("灵魂与拆书库也是整窗视图", () => {
-    expect(isFullWindowView("soul")).toBe(true)
-    expect(isFullWindowView("bookAnalysis")).toBe(true)
+  it("旧灵魂库与拆书库不再占用整窗", () => {
+    expect(isFullWindowView("soul")).toBe(false)
+    expect(isFullWindowView("bookAnalysis")).toBe(false)
   })
 
   /*
@@ -41,8 +41,8 @@ describe("fullWindowViews（整窗视图清单）", () => {
    *
    * 判别力：把它从 `FULL_WINDOW_VIEWS` 删掉 ⇒ 本条红；左侧那栏会重新出现。
    */
-  it("剧情推演室是整窗视图（双栏已改为整窗单栏落地页）", () => {
-    expect(isFullWindowView("storySimulation")).toBe(true)
+  it("旧剧情推演室不再占用整窗", () => {
+    expect(isFullWindowView("storySimulation")).toBe(false)
   })
 
   /*

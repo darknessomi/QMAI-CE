@@ -365,7 +365,7 @@
   border-radius: 16px;
   background: var(--ui-paper, #fcfdfb);
   color: var(--ui-ink, #273c35);
-  font-family: var(--ui, "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif);
+  font-family: var(--ui, system-ui, sans-serif);
   box-shadow: 0 24px 80px #20362825;
 }
 .ui-test-create-project-dialog .ui-test-create-header {

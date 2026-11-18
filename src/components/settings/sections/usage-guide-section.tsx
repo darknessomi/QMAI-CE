@@ -1,25 +1,13 @@
-import { BookOpen, FileText, Sparkles } from "lucide-react"
+import { BookOpen } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { ResourceLink } from "../resource-link"
 
 const GUIDE_LINKS = [
   {
-    title: "青幕AI写作完整使用说明",
+    title: "社区版使用说明",
     description: "从安装、模型配置到资料库、小说创作流程的完整说明。",
-    url: "https://tcnk9ik08e1c.feishu.cn/wiki/EgjtwCVpCiuOISky1HMcRCQhnhf?from=from_copylink",
+    url: "https://github.com/darknessomi/QMAI-CE#readme",
     icon: BookOpen,
-  },
-  {
-    title: "青幕AI写作正式用户手册",
-    description: "适合正式使用时查阅的功能说明和操作细节。",
-    url: "https://tcnk9ik08e1c.feishu.cn/wiki/C7riwVB4HiImwjkOZ6wc7TR3n7f?from=from_copylink",
-    icon: FileText,
-  },
-  {
-    title: "青幕AI小说介绍",
-    description: "了解小说写作模式、章节库、大纲库和记忆能力。",
-    url: "https://tcnk9ik08e1c.feishu.cn/wiki/AX0cwcCL5it4fFkAi01c4oA5nFb?from=from_copylink",
-    icon: Sparkles,
   },
 ]
 

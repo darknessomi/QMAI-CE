@@ -9,15 +9,15 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Mochocyang/QMAI/releases">
-    <img src="https://img.shields.io/github/v/release/Mochocyang/QMAI?style=flat-square" alt="Release" />
+  <a href="https://github.com/darknessomi/QMAI-CE/releases">
+    <img src="https://img.shields.io/github/v/release/darknessomi/QMAI-CE?style=flat-square" alt="Release" />
   </a>
   <img src="https://img.shields.io/badge/version-4.0.0-blue?style=flat-square" alt="Version" />
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-blue?style=flat-square" alt="Platform" />
   <img src="https://img.shields.io/badge/license-GPL--3.0-blue?style=flat-square" alt="License" />
 </p>
 
-上游 [QMAI](https://github.com/Mochocyang/QMAI) 已转为闭源。QMAI-CE 由社区独立维护，基于上游转为闭源前的提交 `43fe9b9a`，沿用该版本的 [GPL-3.0 许可证](LICENSE)。
+上游 QMAI 已转为闭源。QMAI-CE 由社区独立维护，基于上游转为闭源前的提交 `43fe9b9a`，沿用该版本的 [GPL-3.0 许可证](LICENSE)。
 
 ---
 ![书架](docs/screenshots/书架.jpg)
@@ -29,8 +29,6 @@
 | ![新建小说](docs/screenshots/新建书架.jpg) | ![大纲界面](docs/screenshots/大纲界面.jpg) |
 | ![模型配置](docs/screenshots/模型配置.jpg) | ![默认模型设置](docs/screenshots/默认模型设置.jpg) |
 | ![首页与全局记忆](docs/screenshots/全局记忆.jpg) | ![记忆中心](docs/screenshots/记忆中心.jpg) |
-| ![拆书库](docs/screenshots/拆书库.jpg) | ![审查中心](docs/screenshots/审查中心.jpg) |
-| ![剧情推演室](docs/screenshots/剧情推演室.jpg) | ![创作工具](docs/screenshots/创作工具.jpg) |
 
 > 4.0.0 起界面整体重构（全新界面），顶部功能栏可自定义、窗口自绘无外框。
 
@@ -48,10 +46,8 @@
 - 网文日更作者：保持长篇连载质量、防止人设崩坏
 - 小说策划者：管理世界观、势力关系、多线剧情
 - AI 辅助写作者：让大模型在长篇创作中持续可用
-- 学习仿写者：通过拆文库拆解成熟作品的角色设定与文风
 
 ---
-![创作工具（功能入口总览）](docs/screenshots/创作工具.jpg)
 
 ## 核心功能
 
@@ -113,36 +109,7 @@
 ---
 ![记忆中心](docs/screenshots/记忆中心.jpg)
 
-### 🎭 角色灵魂系统
-
-角色灵魂系统由两个层面组成：**项目灵魂** 和 **角色视角（NvwaSKILL）**。
-
-**项目灵魂（Soul Doc）：**
-
-每个小说项目可配置独立的写作灵魂文档，定义整部小说的气质基调：
-- 叙事气质（沉浸、克制、轻松等）
-- 语言风格（口语感、文学感等）
-- 节奏控制规则
-- 对话规则与心理描写规则
-- 冲突写法与感情线规则
-- 禁区列表（禁止空泛抒情、禁止所有人物同一说话方式等）
-
-灵魂文档在每次章节生成时自动注入 LLM 提示词，确保全书风格统一。
-![项目灵魂（写作风格）](docs/screenshots/灵魂系统.jpg)
-
-**角色视角（NvwaSKILL）：**
-
-基于 SKILL 框架的角色个性化系统。每个角色视角包含：
-- 角色档案与核心设定
-- 表达 DNA（说话习惯、用词偏好、句式特征）
-- 思维模式与决策风格
-- 对话历史与观点参考
-- 时间线与关键事件
-- 动机、行为模式与代表性台词
-
-系统内置数十个预设角色视角范例（从费曼到鲁迅、从孙悟空到王阳明），用户可参照创建自己小说中的角色模版。也可以通过**拆文库**从已有作品中提取角色，一键加入自定义灵魂库。
-
-**角色认知系统：**
+### 角色认知系统
 
 追踪每个角色在每个时间节点"知道什么"和"不知道什么"：
 - `knows`：角色已知信息
@@ -152,41 +119,6 @@
 这防止了 AI 写作中最常见的错误——让角色知道了不该知道的信息。
 
 ---
-
-### 📖 拆文库（作品分析）
-
-拆文库是青幕AI写作的特色功能，让你能够**拆解成熟作品的写作秘密**，并将其复用到自己的创作中。
-
-**拆书工作流：**
-1. 导入小说作品（支持整本/多文件/章节范围选择）
-2. 章节自动切分，LLM 精准识别真实出场角色（不再用正则抽取无效候选名）
-3. 一键提取**角色 Skill**：6 维度人格分析（公开资料 / 说话风格 / 表达 DNA / 外界看法 / 决策模式 / 时间线）
-4. 一键提取**作品文风**：9 维度文风指标 + 风格宪法 + 原文代表样本
-5. 将角色 Skill 加入自定义灵魂库，或将文风绑定为当前小说的风格约束
-
-**作品文风提取（9 维度）：**
-
-| 维度 | 说明 |
-|------|------|
-| 叙事密度 / 节奏 | 推进速度与信息投放节奏 |
-| 环境描写比重 | 具体实物 vs 抒情氛围的比重 |
-| 情绪呈现 | 动作外显 vs 内心独白，以及克制度 |
-| 句式与句长 | 长短句倾向、口语化程度 |
-| 比喻 / 通感密度 | 修辞出现频率与克制程度 |
-| 场景与时间过渡 | 转场和跳时的写法 |
-| 叙述视角与声音 | 人称、视角切换与叙述腔调 |
-| 对白风格 | 口语 / 毛边 / 潜台词 |
-| 点题 / 抒情习惯 | 段尾总结、点题与抒情的频率 |
-
-启用文风约束后，每次生成章节时会自动注入文风预设，保障全书风格统一。
-
-**拆文库特性：**
-- 支持重新提取角色 / 重新提取文风
-- 后台运行：深度提取可后台执行，各任务进度显示在对应 Skill 页签内，完成后一键跳转结果
-- 别名匹配：角色光环支持拼音模糊匹配和简繁转换，昵称也能命中角色设定
-
----
-
 ### 🔍 审查系统
 
 审查系统提供多维度的章节质量把控，分为 **AI 审稿**、**连贯性检查** 和 **角色一致性检查** 三个层面。
@@ -255,7 +187,6 @@
 | AI 生成错误内容污染后续 | 草稿/正式章节分离 + 人工确认后才入库 |
 | 大纲执行偏移 | 大纲一致性审查 + 上下文强制注入大纲规则 |
 | 生成内容 AI 味重 | 去AI化改写（De-AI）+ 项目灵魂风格控制 + 作品文风约束 |
-| 不知道如何写好某种文风 | 拆文库提取成熟作品的 9 维文风，直接复用 |
 | 设定散落难以追踪 | 图谱可视化 + 结构化记忆 + 全文搜索 |
 | 长章节超出模型上下文 | 发送前按模型真实输入上限自动裁剪并重试 |
 
@@ -308,10 +239,9 @@ AI 生成的章节默认为草稿状态。草稿支持预览、编辑、重新�
 - **模型管理**：内置预设（DeepSeek、Google、智谱等）多选启用；自定义模型标签式批量管理、批量测试 + 失败重试；「默认模型」机制统筹后台任务
 - **数据管理**：一键导出/导入全部数据（AI 会话、大纲、模型、记忆），重装系统可完美恢复
 - **技能库**：集中浏览与管理内置 / 自定义写作技能（Skill），可启用、收藏并查看技能说明
-- **剧情推演室**：多 Agent 仿真推演——给定情境或注入一个触发事件，推演各角色的行为选择与连锁反应，输出推演报告
 - **界面调节**：全局界面字号调节（85%-130%）
 - **自动更新**：内置 Tauri Updater，启动时自动检测 GitHub Releases 新版本；Windows 更新前等待主程序释放文件句柄
-- **使用说明入口**：大纲、章节、技能库、图谱、记忆中心、灵魂、审查、设置等核心功能图标悬停可查看使用说明
+- **使用说明入口**：大纲、章节、技能库、图谱、记忆中心、审查、设置等核心功能图标悬停可查看使用说明
 
 ---
 
@@ -329,7 +259,7 @@ AI 生成的章节默认为草稿状态。草稿支持预览、编辑、重新�
 
 **方式一：下载安装包（推荐）**
 
-前往 [GitHub Releases](https://github.com/Mochocyang/QMAI/releases) 下载最新版本安装包。
+前往 [GitHub Releases](https://github.com/darknessomi/QMAI-CE/releases) 下载最新版本安装包。
 
 **macOS 用户须知**
 
@@ -343,7 +273,7 @@ xattr -dr com.apple.quarantine /Applications/QMaiWrite.app
 - 第一行：用 ad-hoc 签名让系统允许本地运行
 - 第二行：移除下载时附加的隔离标记
 
-macOS 暂不支持应用内自动更新，新版本请手动从 Releases 下载安装。
+社区版各平台均通过 GitHub Releases 手动更新。
 
 ### 基本使用流程
 
@@ -429,7 +359,7 @@ macOS 暂不支持应用内自动更新，新版本请手动从 Releases 下载�
 
 #### 后续流程
 
-1. **导入或生成大纲**：导入已有大纲，或通过 AI 生成；也可从拆文库提取文风作为风格约束
+1. **导入或生成大纲**：导入已有大纲，或通过 AI 生成
 2. **开始写作**：在「章节」的 AI 对话区输入写作指令（如"继续写第 30 章"）
 3. **审阅草稿**：查看生成结果，可编辑、重写或审稿
 4. **确认保存**：满意后保存为正式章节，系统自动摄取记忆
@@ -463,7 +393,7 @@ A：在该模型配置里**关闭「启用 Function Calling」**，或改用支�
 A：Release 包未做 Apple 公证，按上文「macOS 用户须知」执行两条命令即可。
 
 **Q：检查更新没反应？macOS 能自动更新吗？**
-A：macOS 暂不支持应用内自动更新，请手动到 [Releases](https://github.com/Mochocyang/QMAI/releases) 下载覆盖安装；其他平台若更新失败，同样手动下载最新包。
+A：请到社区版 [Releases](https://github.com/darknessomi/QMAI-CE/releases) 下载对应平台的安装包。
 
 **Q：数据存在哪里？换电脑怎么迁移？**
 A：所有数据以项目目录形式**本地存储**（新建小说时可指定目录，默认 `C:\QM-BOOK`），除调用 LLM 外不联网。用「设置 → 数据管理」可**一键导出 / 导入**全部数据（AI 会话、大纲、模型、记忆）。
@@ -474,6 +404,8 @@ A：当前版本**仅中文界面**（英文界面已移除）。
 ---
 
 ## 本地开发
+
+开发插件请从[插件开发入门](docs/plugins/getting-started.md)开始，按示例创建字符计数工具，在终端验证后装入 QMAI。
 
 ### 前置依赖
 
@@ -502,11 +434,10 @@ A：当前版本**仅中文界面**（英文界面已移除）。
 - 内置角色灵魂设计参考女娲.skill：https://github.com/alchaincyf/nuwa-skill
 - 拆书文风 Writing DNA 参考 writing-dna-skill：https://github.com/larashero3-dotcom/writing-dna-skill
 - 语料统计去 AI 味参考 lieflat-less-ai-tone（moxt.ai）：https://github.com/larashero3-dotcom/lieflat-less-ai-tone
-- 感谢LINUXDO提供的帮助：https://linux.do/
 
 
 ## 相关链接
 
-- 📦 [Releases 下载](https://github.com/Mochocyang/QMAI/releases)
-- 🐛 [问题反馈](https://github.com/Mochocyang/QMAI/issues)
-- 💬 [功能建议](https://github.com/Mochocyang/QMAI/issues/new)
+- 📦 [Releases 下载](https://github.com/darknessomi/QMAI-CE/releases)
+- 🐛 [问题反馈](https://github.com/darknessomi/QMAI-CE/issues)
+- 💬 [功能建议](https://github.com/darknessomi/QMAI-CE/issues/new)

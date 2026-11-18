@@ -3,7 +3,7 @@ import { renderPersonaDocumentHtml } from "./persona-document-html"
 
 /**
  * 人物 MD 视图要与卷纲 / 章纲的 HTML 预览**同一种观感**：
- * 文档型排版（居中限宽、衬线标题、字段名加粗后接正文）。
+ * 文档型排版（居中限宽、系统字体标题、字段名加粗后接正文）。
  *
  * 所以这里断言的是「结构与排版约定」，而不是像素：
  * 有没有 .doc 居中容器、有没有字段行、空字段是否收进文末汇总。
@@ -23,10 +23,10 @@ describe("renderPersonaDocumentHtml", () => {
     const html = renderPersonaDocumentHtml(base)
     expect(html).toContain("<!DOCTYPE html>")
     expect(html).toContain("<style>")
-    // 居中限宽的容器 + 衬线标题：与卷纲文档同一套观感
+    // 居中限宽的容器 + 系统字体标题：与卷纲文档同一套观感
     expect(html).toContain('class="doc"')
     expect(html).toContain("max-width: 880px")
-    expect(html).toContain("Songti SC")
+    expect(html).toContain("system-ui, sans-serif")
   })
 
   it("标题与字段行按文档格式排布", () => {

@@ -20,7 +20,7 @@ import { buildChapterEditorHeader } from "@/lib/chapter-editor-header"
 import { countChapterBodyWords } from "@/lib/chapter-word-count"
 import { resolveInspirationHint } from "@/lib/inspiration-hint"
 import { chapterHasLaterChapter, chapterOrdersFromTree, resolveDraftMemoryHint, type DraftMemoryHintArrival } from "@/lib/draft-memory-hint"
-import { saveNovelConfig, saveUiBodyFontFamily, saveUiBodyFontPx, saveUiBodyLineHeight, saveUiBodyLetterSpacing, saveUiBodyMarginX, saveUiBodySafeBottom } from "@/lib/project-store"
+import { saveNovelConfig, saveUiBodyFontPx, saveUiBodyLineHeight, saveUiBodyLetterSpacing, saveUiBodyMarginX, saveUiBodySafeBottom } from "@/lib/project-store"
 import { registerPreCloseFlush } from "@/lib/pre-close-flush"
 import { isChapterPage, isFinalChapter, parseChapterMeta, updateChapterStatus, updateChapterTitle } from "@/lib/novel/chapter-meta"
 import { isAiExcluded, setAiExcluded } from "@/lib/novel/ai-exclude"
@@ -87,7 +87,6 @@ import {
 import { shouldApplyDiskToEditor } from "@/lib/editor-disk-sync"
 import { registerEditorExternalUpdateHandler } from "@/lib/editor-external-update-session"
 import { registerChapterSaveFlush, CHAPTER_AUTOSAVE_INTERVAL_MS, OUTLINE_AUTOSAVE_DELAY_MS } from "@/lib/chapter-save-flush"
-import { notifyProjectSaved } from "@/lib/cloud-sync/save-signal"
 import { createChapterExternalUpdateCoordinator } from "@/lib/chapter-external-update-coordinator"
 import { applyOpenChapterBodyUpdate, createDeAiBatchChapterApplier } from "@/lib/novel/de-ai-batch/chapter-apply"
 import { acquireDeAiChapterSlot } from "@/lib/novel/de-ai-batch/chapter-concurrency"
@@ -125,13 +124,11 @@ import { BodyTypographyFields, type BodyTypographyValue } from "@/components/set
  */
 import "./body-font-popover.css"
 import {
-  DEFAULT_BODY_FONT_FAMILY,
   DEFAULT_BODY_FONT_PX,
   DEFAULT_BODY_LETTER_SPACING,
   DEFAULT_BODY_LINE_HEIGHT,
   DEFAULT_BODY_MARGIN_X,
   DEFAULT_BODY_SAFE_BOTTOM,
-  type BodyFontFamily,
 } from "@/lib/font-settings"
 
 const SnapshotViewer = lazy(async () => {
@@ -377,8 +374,6 @@ export function PreviewPanel() {
   const selectedFileRef = useRef<string | null>(selectedFile)
   const deAiSkillPickerRef = useRef<HTMLDivElement | null>(null)
 
-  const uiBodyFontFamily = useWikiStore((s) => s.uiBodyFontFamily)
-  const setUiBodyFontFamily = useWikiStore((s) => s.setUiBodyFontFamily)
   const uiBodyFontPx = useWikiStore((s) => s.uiBodyFontPx)
   const setUiBodyFontPx = useWikiStore((s) => s.setUiBodyFontPx)
   const uiBodyLineHeight = useWikiStore((s) => s.uiBodyLineHeight)
@@ -476,7 +471,6 @@ export function PreviewPanel() {
      * 很容易被误判成 debounced-persist 的签名写错了。
      */
     await Promise.all([
-      saveUiBodyFontFamily(s.uiBodyFontFamily),
       saveUiBodyFontPx(s.uiBodyFontPx),
       saveUiBodyLineHeight(s.uiBodyLineHeight),
       saveUiBodyLetterSpacing(s.uiBodyLetterSpacing),
@@ -498,9 +492,6 @@ export function PreviewPanel() {
     next: BodyTypographyValue[K],
   ) => {
     switch (key) {
-      case "fontFamily":
-        setUiBodyFontFamily(next as BodyFontFamily)
-        break
       case "fontPx":
         setUiBodyFontPx(next as number)
         break
@@ -537,7 +528,7 @@ export function PreviewPanel() {
       }
     }
     bodyTypographyPersist.current.schedule(persistAllBodyTypography)
-  }, [persistAllBodyTypography, setUiBodyFontFamily, setUiBodyFontPx, setUiBodyLineHeight, setUiBodyLetterSpacing, setUiBodyMarginX, setUiBodySafeBottom])
+  }, [persistAllBodyTypography, setUiBodyFontPx, setUiBodyLineHeight, setUiBodyLetterSpacing, setUiBodyMarginX, setUiBodySafeBottom])
 
   /*
    * 标题栏的「默认设置」：把 6 个参数一次性恢复成 font-settings 里的默认值。
@@ -559,7 +550,6 @@ export function PreviewPanel() {
    * 不是被忽略的副作用。
    */
   const resetBodyTypographyToDefaults = useCallback(() => {
-    applyBodyTypographyChange("fontFamily", DEFAULT_BODY_FONT_FAMILY)
     applyBodyTypographyChange("fontPx", DEFAULT_BODY_FONT_PX)
     applyBodyTypographyChange("lineHeight", DEFAULT_BODY_LINE_HEIGHT)
     applyBodyTypographyChange("letterSpacing", DEFAULT_BODY_LETTER_SPACING)
@@ -1118,7 +1108,6 @@ export function PreviewPanel() {
       bumpDataVersion()
       // 正文真的落到磁盘了才通知云同步（去抖在订阅侧做）：
       // 写失败时通知会同步一份旧内容，比不同步更糟。
-      notifyProjectSaved()
     } catch (err) {
       console.error("保存失败:", err)
       reportUiTestSave(pathAtSave, "error", persistedMarkdown, generation)
@@ -3172,7 +3161,6 @@ export function PreviewPanel() {
           <BodyTypographyFields
             idPrefix="chapter-body-typography"
             value={{
-              fontFamily: uiBodyFontFamily,
               fontPx: uiBodyFontPx,
               lineHeight: uiBodyLineHeight,
               letterSpacing: uiBodyLetterSpacing,

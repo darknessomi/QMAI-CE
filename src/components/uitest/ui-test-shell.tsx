@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react"
-import { BookOpen, Brain, Grid2X2, GitBranch, HeartHandshake, History, Library, Minus, PanelLeft, Puzzle, Search, Settings, ShieldCheck, Sparkles, Square, Trash2, Wrench, X } from "lucide-react"
+import { Brain, Grid2X2, GitBranch, History, Minus, PanelLeft, Puzzle, Search, Settings, ShieldCheck, Sparkles, Square, Trash2, Wrench, X } from "lucide-react"
 import logoImg from "@/assets/QM-LOGO.png"
 // 侧栏（人物小传区段等）也用工具样式：必须在主 chunk 引入，
 // 否则首屏会渲染出一块没有样式的裸列表（字号、图标全不对，用户实测）。
@@ -10,7 +10,6 @@ import { useOutlineGenerationStore } from "@/stores/outline-generation-store"
 import { ContentArea } from "@/components/layout/content-area"
 import { SidebarPanel } from "@/components/layout/sidebar-panel"
 import { RawSourcesSection } from "@/components/layout/knowledge-tree"
-import { BookAnalysisActivitySection } from "@/components/novel/book-analysis-activity-section"
 import { registerUiTestProject } from "@/lib/ui-test-library"
 import { ErrorBoundary } from "@/components/error-boundary"
 import { refreshProjectFileTree } from "@/lib/project-file-tree-refresh"
@@ -25,25 +24,11 @@ import { readUiTestWorkspacePreference as readPreference, uiTestWorkspaceKey as 
 import { availablePrimaryNav, movePrimaryNav, normalizePrimaryNav, PRIMARY_NAV_LONG_PRESS_MS, readPrimaryNav, writePrimaryNav, type PrimaryNavItem, type PrimaryNavView } from "@/lib/ui-test-primary-nav"
 import { isBuiltinViewEnabled } from "@/lib/plugins/builtin-state"
 import { useBuiltinPluginsState } from "@/lib/plugins/use-builtin-plugins"
-import { MemberBadge } from "@/components/membership/member-badge"
-import { MEMBER_FEATURE_VIEWS } from "@/lib/membership/access"
-import { useMembership } from "@/lib/membership/use-membership"
 import { normalizePath } from "@/lib/path-utils"
 import { getUiTestDocumentPath, UI_TEST_AI_DEFAULT_WIDTH } from "@/lib/ui-test-layout"
 import { isFullWindowView } from "@/lib/full-window-views"
 import type { WikiProject } from "@/types/wiki"
 import { UiTestShelf } from "./ui-test-shelf"
-import { ContactSupportSection } from "@/components/settings/sections/contact-support-section"
-import { useCloudSyncAutoSync } from "@/hooks/use-cloud-sync-auto-sync"
-import { useMemberCloudAutoSync } from "@/hooks/use-member-cloud-auto-sync"
-import { CloudSyncIndicator } from "@/components/layout/cloud-sync-indicator"
-import { MemberCloudIndicator } from "@/components/membership/member-cloud-indicator"
-import { CloudSyncDetailDialog } from "@/components/layout/cloud-sync-detail-dialog"
-import { CLOUD_SYNC_OPEN_SETTINGS_EVENT } from "@/lib/cloud-sync/client"
-import { useCloudSyncStore } from "@/stores/cloud-sync-store"
-import { MemberPurchaseDialog } from "@/components/membership/member-purchase-dialog"
-import { AccountDialog } from "@/components/account/account-dialog"
-import { useAccountStore } from "@/stores/account-store"
 import { confirmModelDraftLeave } from "./models/model-draft-guard"
 import { MacTrafficLights } from "./mac-traffic-lights"
 import { GuideOverlay } from "@/components/guide/guide-overlay"
@@ -75,8 +60,8 @@ interface UiTestShellProps {
 const TOOL_GROUPS = [
   // 「插件」和「技能库」同组：都是「扩展能力」类工具。放第一组而不是
   // 「维护工具」那组，是因为它是一级功能，不该埋在维护类的角落里。
-  [ { view: "lint", label: "记忆中心", icon: Brain }, { view: "graph", label: "小说图谱", icon: GitBranch }, { view: "soul", label: "灵魂", icon: Sparkles }, { view: "skillLibrary", label: "技能库", icon: Sparkles }, { view: "plugins", label: "插件", icon: Puzzle }, { view: "bookAnalysis", label: "拆书库", icon: Library } ],
-  [ { view: "storySimulation", label: "剧情推演室 · 测试版", icon: BookOpen }, { view: "reviewCenter", label: "审查中心", icon: ShieldCheck }, { view: "search", label: "剧情搜索", icon: Search } ],
+  [ { view: "lint", label: "记忆中心", icon: Brain }, { view: "graph", label: "小说图谱", icon: GitBranch }, { view: "skillLibrary", label: "技能库", icon: Sparkles }, { view: "plugins", label: "插件", icon: Puzzle } ],
+  [ { view: "reviewCenter", label: "审查中心", icon: ShieldCheck }, { view: "search", label: "剧情搜索", icon: Search } ],
   [ { view: "maintenance", label: "维护工具", icon: Wrench }, { view: "trash", label: "回收站", icon: Trash2 } ],
 ] as const
 type ToolEntry = (typeof TOOL_GROUPS)[number][number]
@@ -155,7 +140,6 @@ export function UiTestShell({ project, onOpenProject, onSelectProject, onSwitchP
   const hydrateGuide = useGuideStore((s) => s.hydrate)
   const startGuide = useGuideStore((s) => s.start)
   const [showActivity, setShowActivity] = useState(false)
-  const [showContact, setShowContact] = useState(false)
   const [libraryError, setLibraryError] = useState("")
   const [toolOpen, setToolOpen] = useState(false)
   const [primaryNav, setPrimaryNav] = useState<PrimaryNavItem[]>(() => readPrimaryNav())
@@ -171,12 +155,6 @@ export function UiTestShell({ project, onOpenProject, onSelectProject, onSwitchP
    */
   const builtinState = useBuiltinPluginsState()
   const visibleGroups = useMemo(() => visibleToolGroups(isBuiltinViewEnabled), [builtinState])
-  /*
-   * 会员标记：与内容区用的是同一套判定（`lib/membership`），
-   * 所以「菜单里有标记」与「点进去看到引导页」不会打架。
-   */
-  const { isLockedView } = useMembership()
-  const loggedIn = useAccountStore((state) => Boolean(state.session))
   /*
    * 一级导航只**渲染时**隐藏被关闭的视图，**不删存储值**。
    * 为什么：`primaryNav` 的顺序是用户自己排的（长按 → 移动/替换/删除），
@@ -230,16 +208,6 @@ export function UiTestShell({ project, onOpenProject, onSelectProject, onSwitchP
     hydrateGuide()
   }, [hydrateGuide])
 
-  /**
-   * 账号登录态只在启动时恢复一次。
-   *
-   * 这里**不订阅**整个 account store（`useAccountStore((s) => s)`）：
-   * 顶栏按钮与设置页各自按字段订阅，整体订阅会让每次 token 刷新都重渲染外壳。
-   * 失败由 store 内部静默处理（离线 / 未登录都是正常状态）。
-   */
-  useEffect(() => {
-    void useAccountStore.getState().bootstrap()
-  }, [])
   /**
    * 自动播放只在**本次启动**判断一次，而且只看「装好还没走过」这一种情况。
    *
@@ -345,12 +313,12 @@ export function UiTestShell({ project, onOpenProject, onSelectProject, onSwitchP
     setPreference((previous) => previous.files?.[view] === relativePath ? previous : { ...previous, files: { ...previous.files, [view]: relativePath } })
   }, [selectedFile, activeView, project?.id, writing])
   useEffect(() => {
-    if (!project || preferenceProject.current !== project.id || !["wiki", "sources", "soul"].includes(activeView)) return
-    const view = activeView as "wiki" | "sources" | "soul"
+    if (!project || preferenceProject.current !== project.id || !["wiki", "sources"].includes(activeView)) return
+    const view = activeView as "wiki" | "sources"
     setPreference(previous => {
       const assistant = view === "sources" ? outlineExpanded : chatExpanded
-      if (previous.lastView === view && (view === "soul" || previous.assistant?.[view] === assistant)) return previous
-      return { ...previous, lastView: view, ...(view === "soul" ? {} : { assistant: { ...previous.assistant, [view]: assistant } }) }
+      if (previous.lastView === view && previous.assistant?.[view] === assistant) return previous
+      return { ...previous, lastView: view, assistant: { ...previous.assistant, [view]: assistant } }
     })
   }, [activeView, chatExpanded, outlineExpanded, project?.id])
   useEffect(() => {
@@ -459,39 +427,6 @@ export function UiTestShell({ project, onOpenProject, onSelectProject, onSwitchP
       if (!(current ? normalizePath(current).includes(kind) : false)) useWikiStore.getState().setSelectedFile(project ? getUiTestDocumentPath(project.path, preference.files?.[view], view) : null)
     }
   }
-  /**
-   * 云同步：启动时拉一次配置/状态/历史并订阅后端事件。
-   * 主窗口才订阅（client 里按 window.label 判断），独立窗口不会重复弹泡。
-   */
-  useEffect(() => {
-    void useCloudSyncStore.getState().hydrate()
-    return () => useCloudSyncStore.getState().teardown()
-  }, [])
-
-  // 自动同步（落盘后 / 重新聚焦 / 刚连上）：判定在 lib/cloud-sync/scheduler.ts。
-  useCloudSyncAutoSync()
-
-  // 会员云空间自动同步：落盘后防抖 8 秒传一次（与云同步同一触发点）。
-  useMemberCloudAutoSync()
-
-  // 云图标/气泡里点「去登录」「查看详情」时，由外壳负责真正打开设置页：
-  // showGlobalSettings 属于外壳，组件自己改会在无项目时掉回书架。
-  const navigateRef = useRef(navigate)
-  navigateRef.current = navigate
-  useEffect(() => {
-    const handler = (event: Event) => {
-      const detail = (event as CustomEvent<{ category?: string }>).detail
-      const category = detail?.category
-      if (category) {
-        const setCategory = useWikiStore.getState().setActiveSettingsCategory
-        setCategory(category as Parameters<typeof setCategory>[0])
-      }
-      void navigateRef.current("settings")
-    }
-    window.addEventListener(CLOUD_SYNC_OPEN_SETTINGS_EVENT, handler)
-    return () => window.removeEventListener(CLOUD_SYNC_OPEN_SETTINGS_EVENT, handler)
-  }, [])
-
   const returnToShelf = async () => {
     if (!showShelf && activeView === "settings" && !(await confirmModelDraftLeave())) return
     setShowGlobalSettings(false)
@@ -613,7 +548,7 @@ export function UiTestShell({ project, onOpenProject, onSelectProject, onSwitchP
             */}
             <button type="button" className={`ui-test-nav-shelf${showShelf ? " is-active" : ""}`} data-guide="shell.shelf" aria-label="返回书架" aria-current={showShelf ? "page" : undefined} title="返回书架" onClick={() => void returnToShelf()}>书架</button>
             {visiblePrimaryNav.map((item) => <div className="ui-test-nav-slot" key={item.view} onPointerDown={(event) => pressNav(event, item.view)} onPointerMove={moveNavPress} onPointerUp={releaseNavPress} onPointerCancel={releaseNavPress} onContextMenu={(event) => openNavMenu(event, item.view)}>
-              <button type="button" disabled={!project} data-guide={item.view === "wiki" ? "shell.nav.wiki" : item.view === "soul" ? "shell.tool.soul" : item.view === "skillLibrary" ? "shell.tool.skillLibrary" : undefined} aria-current={project && activeView === item.view ? "page" : undefined} aria-haspopup="menu" className={`ui-test-nav-item${project && activeView === item.view ? " is-active" : ""}`} onClick={() => navigate(item.view)}>{item.label}{MEMBER_FEATURE_VIEWS[item.view] ? <span className="ui-test-entitlement-mark" title="会员专属功能" aria-label="会员专属功能" /> : null}</button>
+              <button type="button" disabled={!project} data-guide={item.view === "wiki" ? "shell.nav.wiki" : item.view === "skillLibrary" ? "shell.tool.skillLibrary" : undefined} aria-current={project && activeView === item.view ? "page" : undefined} aria-haspopup="menu" className={`ui-test-nav-item${project && activeView === item.view ? " is-active" : ""}`} onClick={() => navigate(item.view)}>{item.label}</button>
               {navMenu === item.view && <div ref={navMenuRef} className={`ui-test-menu-pop ui-test-nav-menu${navMenuAlign === "right" ? " is-right" : ""}`} role="menu" aria-label={`${item.label}功能菜单`} data-tauri-drag-region="false" onKeyDown={menuKeyboard} onMouseLeave={hideNavSectionSoon}>
                 <button type="button" role="menuitem" className="ui-test-menu-item" aria-expanded={navMenuSection === "move"} aria-haspopup="menu" onMouseEnter={() => showNavSection("move")} onFocus={() => showNavSection("move")}>移动</button>
                 <button type="button" role="menuitem" className="ui-test-menu-item" aria-expanded={navMenuSection === "replace"} aria-haspopup="menu" onMouseEnter={() => showNavSection("replace")} onFocus={() => showNavSection("replace")}>替换为</button>
@@ -655,16 +590,9 @@ export function UiTestShell({ project, onOpenProject, onSelectProject, onSwitchP
                 <div className="ui-test-menu-title">创作工具 · {project?.name ?? "未选择小说"}</div>
                 {visibleGroups.map((group, index) => <div className="ui-test-menu-group" key={index}>
                   {group.map(({ view, label, icon: Icon }) => {
-                    /*
-                     * 会员标记（2026-11-06）：入口**保留**，只在未开通的会员功能后面
-                     * 加一枚小标记。未登录时一律不加 —— 那时候全员都是非会员，
-                     * 全员标一遍等于没有信息量；点进去后由引导页说清怎么开通。
-                     */
-                    const memberLocked = loggedIn && Boolean(MEMBER_FEATURE_VIEWS[view]) && isLockedView(view)
                     return (
                       <button key={view} type="button" role="menuitem" className="ui-test-menu-item" disabled={!project} onClick={() => navigate(view)}>
                         <Icon /><span>{label}</span>
-                        {memberLocked ? <MemberBadge className="ml-1.5" withIcon={false} /> : null}
                       </button>
                     )
                   })}
@@ -674,17 +602,6 @@ export function UiTestShell({ project, onOpenProject, onSelectProject, onSwitchP
             <Tooltip>
               <TooltipTrigger render={<button type="button" className="ui-test-icon-btn ui-test-activity-entry" aria-label="后台活动" onClick={() => setShowActivity(true)}><History /></button>} />
               <TooltipContent>后台活动</TooltipContent>
-            </Tooltip>
-            {/*
-              会员云同步（2026-11-08 用户要求）。与右边那个 CloudSyncIndicator 是两件事：
-              那个同步到用户自己的网盘，这个备份到青幕服务器、走会员空间配额。
-              未登录或云同步插件被关闭时组件自己返回 null。
-            */}
-            <MemberCloudIndicator />
-            <CloudSyncIndicator />
-            <Tooltip>
-              <TooltipTrigger render={<button type="button" className="ui-test-icon-btn ui-test-activity-entry" aria-label="联系与支持" aria-haspopup="dialog" onClick={() => setShowContact(true)}><HeartHandshake /></button>} />
-              <TooltipContent>联系与支持</TooltipContent>
             </Tooltip>
             {!macOS && <div className="ui-test-win-actions">
               <button type="button" className="ui-test-win-btn" aria-label="最小化" title="最小化" onClick={minimizeWindow}><Minus /></button>
@@ -706,12 +623,7 @@ export function UiTestShell({ project, onOpenProject, onSelectProject, onSwitchP
         </div>
       </div>
       <CreateProjectDialog open={showCreateDialog} onOpenChange={setShowCreateDialog} onCreated={handleCreatedProject} />
-      <Dialog open={showActivity} onOpenChange={setShowActivity}><DialogContent className="ui-test-activity-dialog"><DialogHeader><DialogTitle>后台活动</DialogTitle><DialogDescription>查看进度、重试错误，不必离开写作。</DialogDescription></DialogHeader><div className="ui-test-activity-body"><RawSourcesSection uiTestActivityView onCancelExtraction={() => cancelImportRef.current?.()} /><BookAnalysisActivitySection onNavigate={() => setShowActivity(false)} /></div><DialogFooter><button type="button" className="ui-test-btn primary" onClick={() => setShowActivity(false)}>关闭</button></DialogFooter></DialogContent></Dialog>
-      <CloudSyncDetailDialog />
-      {/* 账号弹窗挂根上：侧栏面板有五套，挂在面板里会出现多层遮罩。 */}
-      <AccountDialog />
-      <MemberPurchaseDialog />
-      <Dialog open={showContact} onOpenChange={setShowContact}><DialogContent className="ui-test-contact-dialog" aria-label="联系与支持"><DialogTitle className="sr-only">联系与支持</DialogTitle><div className="ui-test-contact-body"><ContactSupportSection /></div><DialogFooter><button type="button" className="ui-test-btn primary" onClick={() => setShowContact(false)}>关闭</button></DialogFooter></DialogContent></Dialog>
+      <Dialog open={showActivity} onOpenChange={setShowActivity}><DialogContent className="ui-test-activity-dialog"><DialogHeader><DialogTitle>后台活动</DialogTitle><DialogDescription>查看进度、重试错误，不必离开写作。</DialogDescription></DialogHeader><div className="ui-test-activity-body"><RawSourcesSection uiTestActivityView onCancelExtraction={() => cancelImportRef.current?.()} /></div><DialogFooter><button type="button" className="ui-test-btn primary" onClick={() => setShowActivity(false)}>关闭</button></DialogFooter></DialogContent></Dialog>
       <GuideOverlay onDirective={runGuideDirective} />
     </div>
     </AppearanceSkinProvider>

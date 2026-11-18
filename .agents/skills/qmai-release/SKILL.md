@@ -5,7 +5,7 @@ description: Release a stable QMAI version by updating version metadata and chan
 
 # QMAI Stable Release
 
-Use this workflow only in the `Mochocyang/QMAI` repository. Preserve the user's authorization boundary: preparing a release does not authorize pushing, tagging, or publishing unless the user requested those external mutations.
+Use this workflow only in the `darknessomi/QMAI-CE` repository. Preserve the user's authorization boundary: preparing a release does not authorize pushing, tagging, or publishing unless the user requested those external mutations.
 
 ## Release invariants
 
@@ -20,7 +20,7 @@ Use this workflow only in the `Mochocyang/QMAI` repository. Preserve the user's 
 
 1. Confirm the repository and release target.
    
-   - Verify the remote is `Mochocyang/QMAI`.
+   - Verify the `origin` push URL targets `darknessomi/QMAI-CE`.
    - Require a clean worktree before switching or pulling.
    - Fetch `origin/main` and tags, switch to `main`, and update with `--ff-only`.
    - Confirm the requested version is a stable semantic version and the tag does not already exist locally or remotely.

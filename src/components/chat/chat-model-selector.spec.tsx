@@ -2,11 +2,9 @@ import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { describe, expect, it } from "vitest"
 import {
-  formatModelRatio,
   getChatModelDropdownStyle,
   modelRowMark,
   resolveModelItemLabel,
-  resolveModelRowDecoration,
   sameDropdownStyle,
 } from "./chat-model-selector"
 
@@ -61,9 +59,6 @@ describe("chat model dropdown density", () => {
     expect(source).not.toContain("py-2.5")
   })
 
-  it("倍率列 44px 定宽右对齐、等宽数字", () => {
-    expect(source).toContain("w-11 shrink-0 text-right text-xs tabular-nums text-muted-foreground")
-  })
 
   it("分组标题吸顶、加粗，且按需求没有搜索框与分隔线", () => {
     expect(source).toContain("sticky top-0 z-10 rounded-t-md bg-popover")
@@ -101,10 +96,9 @@ describe("chat model dropdown density", () => {
 })
 
 describe("内置与自定义分开呈现（方案 F + D）", () => {
-  it("内置模型区永远完整可见，且只在这里显示倍率", () => {
+  it("预设提供方的模型完整可见", () => {
     // 内置分组独立渲染，不经过自定义的开关
     expect(source).toContain("builtinGroups.map((group) => (")
-    expect(source).toContain("resolveModelRowDecoration(model)")
   })
 
   it("自定义区默认收起，靠开关展开", () => {
@@ -133,46 +127,6 @@ describe("内置与自定义分开呈现（方案 F + D）", () => {
     expect(source).toContain("next.add(selectedCustomProviderId)")
   })
 
-  it("打开下拉会刷新一次倍率（控制台改完立刻能看到）", () => {
-    expect(source).toContain("refreshBuiltinModels()")
-  })
-})
-
-describe("formatModelRatio", () => {
-  it("按控制台的两位小数展示并去掉末尾的 0", () => {
-    expect(formatModelRatio(0.08)).toBe("0.08x")
-    expect(formatModelRatio(0.06)).toBe("0.06x")
-    expect(formatModelRatio(0.3)).toBe("0.3x")
-    expect(formatModelRatio(1)).toBe("1x")
-    expect(formatModelRatio(1.25)).toBe("1.25x")
-  })
-
-  it("没有倍率时不显示任何占位（自定义模型没有倍率）", () => {
-    expect(formatModelRatio(undefined)).toBeNull()
-    expect(formatModelRatio(null)).toBeNull()
-    expect(formatModelRatio(Number.NaN)).toBeNull()
-  })
-})
-
-describe("resolveModelRowDecoration", () => {
-  it("内置模型带上倍率与时段规则名", () => {
-    expect(resolveModelRowDecoration({
-      id: "builtin-qmai-standard",
-      name: "青幕标准版",
-      model: "qmai-standard",
-      createdAt: 0,
-      rating: { ratio: 0.08, rule: "夜间折扣", syncedAt: 0 },
-    })).toEqual({ ratio: "0.08x", rule: "夜间折扣" })
-  })
-
-  it("没有 rating 的自定义模型既不显示倍率也不显示规则", () => {
-    expect(resolveModelRowDecoration({
-      id: "model-1",
-      name: "glm-5.3",
-      model: "glm-5.3",
-      createdAt: 0,
-    })).toEqual({ ratio: null, rule: null })
-  })
 })
 
 describe("modelRowMark", () => {

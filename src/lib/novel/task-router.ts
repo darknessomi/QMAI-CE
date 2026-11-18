@@ -26,10 +26,6 @@ export type NovelTaskIntent =
   | "timeline_query"       // 时间线查询
   | "setting_query"        // 设定查询
   | "general_chat"         // 一般对话
-  | "story_framework_generate"  // 故事框架生成
-  | "multi_agent_simulate"      // 多智能体推演
-  | "character_interview"       // 角色采访
-  | "scenario_simulate"         // 舞台情景（人物对话模拟）
 
 const MODIFY_INTENTS: Set<NovelTaskIntent> = new Set([
   "rewrite_chapter",
@@ -56,10 +52,6 @@ export const NOVEL_TASK_INTENT_LABELS: Record<NovelTaskIntent, string> = {
   timeline_query: "时间线查询",
   setting_query: "设定查询",
   general_chat: "一般对话",
-  story_framework_generate: "故事框架生成",
-  multi_agent_simulate: "多智能体推演",
-  character_interview: "角色采访",
-  scenario_simulate: "舞台情景",
 }
 
 export function isNovelTaskIntent(value: string): value is NovelTaskIntent {
@@ -272,10 +264,6 @@ export function buildTaskDirective(route: TaskRouteResult): string {
     timeline_query: `用户在查询本书时间线。请根据时间线数据回答当前时间进展。${LIBRARY_QUERY_BOUNDARY}`,
     setting_query: `用户在查询本书设定。请先用本地工具查正史设定与世界观。${LIBRARY_QUERY_BOUNDARY}`,
     general_chat: "",
-    story_framework_generate: "用户要求生成故事框架。请跳转到剧情推演室进行框架生成。",
-    multi_agent_simulate: "用户要求多智能体推演。请跳转到剧情推演室进行推演。",
-    character_interview: "用户要求角色采访。请跳转到剧情推演室进行角色采访。",
-    scenario_simulate: "用户要求舞台情景模拟。请跳转到剧情推演室的「舞台情景」配置角色与情景规则。",
   }
 
   const directive = directives[route.intent]

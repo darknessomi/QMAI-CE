@@ -6,7 +6,7 @@ import { isTauri, pickDirectory } from "@/lib/platform"
 import { useChatStore } from "@/stores/chat-store"
 import { useOutlineChatStore } from "@/stores/outline-chat-store"
 import { openProject, fileExists } from "@/commands/fs"
-import { getLastProject, saveLastProject, loadLlmConfig, loadAiChatModel, loadAiWorkflowMode, loadAiWorkflowModeBeforeDiscuss, loadDefaultLlmModel, loadEmbeddingConfig, loadProviderConfigs, loadActivePresetId, loadProxyConfig, loadNovelMode, loadNovelConfig, loadRevisionFeedbackWindowConfig, loadTheme, loadMaxHistoryMessages, loadUiFontFamily, loadUiBodyFontFamily, loadUiBodyFontPx, loadUiBodyLineHeight, loadUiBodyLetterSpacing, loadUiBodyMarginX, loadUiBodySafeBottom, loadVisualStyle, saveLlmConfig, loadLastReadChapter, loadSearchApiConfig, loadOutlineWorkflowMode } from "@/lib/project-store"
+import { getLastProject, saveLastProject, loadLlmConfig, loadAiChatModel, loadAiWorkflowMode, loadAiWorkflowModeBeforeDiscuss, loadDefaultLlmModel, loadEmbeddingConfig, loadProviderConfigs, loadActivePresetId, loadProxyConfig, loadNovelMode, loadNovelConfig, loadRevisionFeedbackWindowConfig, loadTheme, loadMaxHistoryMessages, loadUiBodyFontPx, loadUiBodyLineHeight, loadUiBodyLetterSpacing, loadUiBodyMarginX, loadUiBodySafeBottom, loadVisualStyle, saveLlmConfig, loadLastReadChapter, loadSearchApiConfig, loadOutlineWorkflowMode } from "@/lib/project-store"
 import { openProjectWithPluginSync, syncPluginsProject } from "@/lib/plugins/project-sync"
 import { loadReviewItems, loadChatHistory, saveChatHistory, saveReviewItems } from "@/lib/persist"
 import { initializeAiOutlineModelFromStorage } from "@/lib/ai-outline-model-initialization"
@@ -14,10 +14,6 @@ import { setupAutoSave, teardownAutoSave } from "@/lib/auto-save"
 import { flushAppState } from "@/lib/web-store"
 import { runPreCloseFlushes } from "@/lib/pre-close-flush"
 import { flushPendingChapterSave } from "@/lib/chapter-save-flush"
-import { checkForAppUpdate, prefetchAppUpdate } from "@/lib/app-updater"
-import { loadAppUpdateAutoPrompt } from "@/lib/app-update-notice"
-import { wireBuiltinAuth } from "@/lib/builtin-models/wire"
-import { initAnalytics } from "@/lib/analytics"
 import { confirmAppQuit } from "@/components/uitest/models/model-draft-guard"
 import { restoreUiTestWorkspace, readUiTestWorkspacePreference } from "@/lib/ui-test-workspace-preferences"
 import { UiTestShell } from "@/components/uitest/ui-test-shell"
@@ -30,7 +26,7 @@ import { resolveConfig } from "@/components/settings/preset-resolver"
 import { toast } from "@/lib/toast"
 import type { WikiProject } from "@/types/wiki"
 import { applyTheme, watchSystemTheme } from "@/lib/theme-utils"
-import { applyBodyTypography, applyBodyFontFamily, applyUiFontFamily } from "@/lib/font-settings"
+import { applyBodyTypography } from "@/lib/font-settings"
 import { publishReaderWindowAppearance } from "@/lib/reader-window-appearance"
 import { useDocumentAppearance } from "@/lib/html-document-appearance"
 import { applyVisualStyle } from "@/lib/visual-style-settings"
@@ -42,9 +38,6 @@ import { registerShelfOpener } from "@/lib/mcp/bookshelf"
 import { initializeProjectContextCache } from "@/lib/context-hub/context-hub"
 import { useEnsureAiChatModel } from "@/lib/ensure-ai-chat-model"
 import { MemoryMaintenanceReminder } from "@/components/novel/memory-maintenance-reminder"
-import { AnnouncementDialog } from "@/components/announcements/announcement-dialog"
-import { useAnnouncementStore } from "@/stores/announcement-store"
-import { useModelSyncAutoSync } from "@/hooks/use-model-sync-auto-sync"
 import { syncPluginProviders } from "@/lib/plugins/provider-sync"
 import {
   describeNavigationBlocked,
@@ -56,16 +49,12 @@ import { syncPluginHooks } from "@/lib/plugins/hooks/runtime"
 
 function App() {
   useEnsureAiChatModel()
-  // 模型配置云同步：常驻心跳 + 聚焦时补一次（内部按节流规则决定是否联网）。
-  useModelSyncAutoSync()
   const project = useWikiStore((s) => s.project)
   const setProject = useWikiStore((s) => s.setProject)
   const setFileTree = useWikiStore((s) => s.setFileTree)
   const setSelectedFile = useWikiStore((s) => s.setSelectedFile)
   const setActiveView = useWikiStore((s) => s.setActiveView)
   const uiFontSizeScale = useWikiStore((s) => s.uiFontSizeScale)
-  const uiFontFamily = useWikiStore((s) => s.uiFontFamily)
-  const uiBodyFontFamily = useWikiStore((s) => s.uiBodyFontFamily)
   const uiBodyFontPx = useWikiStore((s) => s.uiBodyFontPx)
   const uiBodyLineHeight = useWikiStore((s) => s.uiBodyLineHeight)
   const uiBodyLetterSpacing = useWikiStore((s) => s.uiBodyLetterSpacing)
@@ -93,18 +82,6 @@ function App() {
     runUserMemoryMaintenance()
   }, [])
 
-  /*
-   * 公告与项目无关，启动就该读缓存、拉一次最新：角标要马上对，
-   * 而拉取失败只是保留缓存（store 内部静默处理），不影响启动流程。
-   * 回归守卫见 src/lib/announcement-wiring.test.ts —— 这段被删掉后
-   * 单测不会红，只会表现为「公告永远是 0 条」。
-   */
-  useEffect(() => {
-    void (async () => {
-      await useAnnouncementStore.getState().hydrate()
-      await useAnnouncementStore.getState().refresh()
-    })()
-  }, [])
 
   useEffect(() => {
     let stop = () => {}
@@ -238,15 +215,6 @@ function App() {
     document.documentElement.style.fontSize = `${Math.round(uiFontSizeScale * 100)}%`
   }, [uiFontSizeScale])
 
-  useEffect(() => {
-    applyUiFontFamily(uiFontFamily)
-  }, [uiFontFamily])
-
-  // 正文字体独立应用：只写 --qmai-body-font-family，不碰界面字体。
-  useEffect(() => {
-    applyBodyFontFamily(uiBodyFontFamily)
-  }, [uiBodyFontFamily])
-
   /*
    * 正文排版参数：一次写齐 5 个 CSS 变量。
    *
@@ -295,8 +263,6 @@ function App() {
   }, [
     documentSkin,
     uiFontSizeScale,
-    uiFontFamily,
-    uiBodyFontFamily,
     uiBodyFontPx,
     uiBodyLineHeight,
     uiBodyLetterSpacing,
@@ -444,19 +410,6 @@ function App() {
         const visualStyleToUse = savedVisualStyle ?? useWikiStore.getState().visualStyle
         useWikiStore.getState().setVisualStyle(visualStyleToUse)
         applyVisualStyle("classic")
-        const savedUiFontFamily = await loadUiFontFamily()
-        if (savedUiFontFamily) {
-          useWikiStore.getState().setUiFontFamily(savedUiFontFamily)
-          applyUiFontFamily(savedUiFontFamily)
-        }
-
-        // 正文字体与界面字体各自独立读回，缺一不可
-        const savedUiBodyFontFamily = await loadUiBodyFontFamily()
-        if (savedUiBodyFontFamily) {
-          useWikiStore.getState().setUiBodyFontFamily(savedUiBodyFontFamily)
-          applyBodyFontFamily(savedUiBodyFontFamily)
-        }
-
         /*
          * 正文排版参数：逐项读回。返回 null 表示"这个键从来没有存过"，
          * 此时保留 store 的默认值（默认值来自 font-settings.ts 的单一来源）。
@@ -594,42 +547,6 @@ function App() {
         console.error("应用初始化失败:", err)
       } finally {
         setLoading(false)
-        // 启动后检查更新：发现新版本会弹窗询问是否下载安装。
-        //
-        // 这一行在 26f80ee（"fix(ui): 调整对话输入框与界面资源"）里被误删，
-        // 之后 checkForAppUpdate 再无调用者，整个 app-updater 模块被
-        // tree-shake 掉 —— v4.0.0 到 v4.1.1 的 6 个版本，用户打开旧版本
-        // 都收不到更新提示。回归守卫见 app-updater-wiring.test.ts。
-        //
-        // 这里刻意不套 UI 测试版的编译期开关：src/lib/ui-test.ts 里那个常量
-        // 已硬编码为 true，且 vite.config.ts 没有对应的构建期替换，套上就是
-        // 恒假 —— 调用写了也等于没写，而 tsc 与测试都不会报错。
-        // 非 Tauri 环境与非 Windows 平台由 checkForAppUpdate 内部自行返回。
-        //
-        // 用户在「设置 → 更新日志」关掉「有更新时自动提醒」后：不再弹窗，
-        // 只在更新日志处亮红点；同时后台把新版本预下载好，用户点安装即可装。
-        const startUpdateCheck = async () => {
-          const autoPrompt = await loadAppUpdateAutoPrompt()
-          if (autoPrompt) {
-            await checkForAppUpdate({ prompt: true })
-            return
-          }
-          // 先记录有没有新版本（红点来源），再静默预下载。
-          await checkForAppUpdate({ prompt: false })
-          void prefetchAppUpdate()
-        }
-        void startUpdateCheck()
-
-        // 启动静默上报（/open + 心跳 + 关窗 /close），无 UI，失败不影响使用。
-        // 与上面的 checkForAppUpdate 是同一场事故的两个受害者：26f80ee6 删掉了
-        // 那个"UI 测试版常量取反"的守卫块，连同块内的两个调用一起 ——
-        // initAnalytics 从此没有任何调用者，analytics.ts 被 tree-shake，
-        // 后台的下载数/独立 IP/在线人数/今日新增从那时起就不再更新。
-        // 回归守卫见 analytics-wiring.test.ts。
-        void initAnalytics()
-
-        // 内置模型：把账号登录态接到请求鉴权层（网关卡不写进配置，请求时现取）。
-        wireBuiltinAuth()
       }
     }
     init()
@@ -861,7 +778,6 @@ function App() {
       />
       <PersonaSkillCompletionDialog />
       <StyleEvolutionNoticeDialog />
-      <AnnouncementDialog />
       <MemoryMaintenanceReminder />
     </>
   )

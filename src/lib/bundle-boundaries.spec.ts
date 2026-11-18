@@ -50,7 +50,7 @@ describe("frontend bundle boundaries", () => {
     expect(sidebarPanel).not.toContain('import { UnifiedSkillLibrarySidebarPanel } from')
     expect(sidebarPanel).not.toContain('import { SoulSidebarPanel } from')
     expect(sidebarPanel).not.toContain('await import("./soul-sidebar-panel")')
-    expect(sidebarPanel).toContain('await import("./book-analysis-sidebar-panel")')
+    expect(sidebarPanel).not.toContain('await import("./book-analysis-sidebar-panel")')
   })
 
   it("keeps the lazy-loading fallback user-facing text in Chinese", () => {

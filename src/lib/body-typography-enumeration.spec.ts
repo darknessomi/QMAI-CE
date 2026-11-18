@@ -36,7 +36,7 @@
  *
  * ── 这个守卫做什么 ──
  *
- * 对上述各层逐个断言"6 个字段名一个都不缺"。
+ * 对上述各层逐个断言"5 个字段名一个都不缺"。
  * 它不能替你写出第 7 个参数的正确逻辑，但能让"漏了一层"从静默变成失败。
  *
  * ⚠ 它**不能**自动发现"新增了第 7 层"。这一层靠 LAYERS 的条数下限断言：
@@ -47,9 +47,8 @@ import { describe, expect, it } from "vitest"
 import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
 
-/** store 里这一组参数的 6 个字段名（唯一真源是 wiki-store.ts，这里只做副本比对）。 */
+/** store 里这一组参数的 5 个字段名（唯一真源是 wiki-store.ts，这里只做副本比对）。 */
 const STORE_FIELDS = [
-  "uiBodyFontFamily",
   "uiBodyFontPx",
   "uiBodyLineHeight",
   "uiBodyLetterSpacing",
@@ -57,7 +56,7 @@ const STORE_FIELDS = [
   "uiBodySafeBottom",
 ] as const
 
-/** 按名字手抄了这 6 个字段的层。新增一层时必须加进这里（见文件头的已知边界）。 */
+/** 按名字手抄了这 5 个字段的层。新增一层时必须加进这里（见文件头的已知边界）。 */
 const LAYERS: { label: string; file: string }[] = [
   { label: "preview-panel：现场改值 + 落全套 + 草稿 switch", file: "src/components/layout/preview-panel.tsx" },
   { label: "settings-view：设置页保存", file: "src/components/settings/settings-view.tsx" },
@@ -81,7 +80,7 @@ function missingFields(source: string, fields: readonly string[]): string[] {
 }
 
 describe("6 参数 × 各层：枚举不许漏层", () => {
-  it.each(LAYERS.map((l) => [l.label, l.file]))("%s 提到了全部 6 个字段", (_label, file) => {
+  it.each(LAYERS.map((l) => [l.label, l.file]))("%s 提到了全部 5 个字段", (_label, file) => {
     const missing = missingFields(read(file), STORE_FIELDS)
     expect(
       missing,
@@ -100,7 +99,7 @@ describe("6 参数 × 各层：枚举不许漏层", () => {
       LAYERS.length,
       "登记的层数变了：新增/删除/合并层时请同步更新 LAYERS 与文件头说明",
     ).toBe(5)
-    expect(STORE_FIELDS.length).toBe(6)
+    expect(STORE_FIELDS.length).toBe(5)
   })
 
   /**
@@ -115,7 +114,7 @@ describe("6 参数 × 各层：枚举不许漏层", () => {
    * 两处都留着是有意的：只查一边的话，"字段名还在但没人用"这类
    * 半拉子状态会从两边都漏过去。
    */
-  it("被移出设置页的那一层，不得再出现这 6 个字段名", () => {
+  it("被移出设置页的那一层，不得再出现这 5 个字段名", () => {
     const src = read(REMOVED_LAYER.file)
     const back = STORE_FIELDS.filter((f) => src.includes(f))
     expect(
@@ -132,9 +131,9 @@ describe("6 参数 × 各层：枚举不许漏层", () => {
   })
 
   it("反向控制：判定函数必须能识破缺字段的输入", () => {
-    // 把 6 个字段只留 5 个，必须被报出恰好缺的那一个。
-    const incomplete = "uiBodyFontPx uiBodyLineHeight uiBodyLetterSpacing uiBodyMarginX uiBodySafeBottom"
-    expect(missingFields(incomplete, STORE_FIELDS)).toEqual(["uiBodyFontFamily"])
+    // 把 5 个字段只留 5 个，必须被报出恰好缺的那一个。
+    const incomplete = "uiBodyLineHeight uiBodyLetterSpacing uiBodyMarginX uiBodySafeBottom"
+    expect(missingFields(incomplete, STORE_FIELDS)).toEqual(["uiBodyFontPx"])
     // 全空必须报满 6 个（否则"缺一个"和"全缺"分不出来）
     expect(missingFields("", STORE_FIELDS)).toEqual([...STORE_FIELDS])
     // 齐全必须返回空 —— 否则这条判据是"凡输入皆红"
@@ -151,7 +150,7 @@ describe("6 参数 × 各层：枚举不许漏层", () => {
       "共用控件里出现了 store 字段名：控件应当只认值对象（BodyTypographyValue），不认状态存放位置",
     ).toEqual([])
     // 但它必须仍然认这 6 个**值**键（否则控件漏了一个参数的控制项）
-    for (const key of ["fontFamily", "fontPx", "lineHeight", "letterSpacing", "marginX", "safeBottom"]) {
+    for (const key of ["fontPx", "lineHeight", "letterSpacing", "marginX", "safeBottom"]) {
       expect(src, `共用控件缺少 ${key} 这个参数`).toContain(key)
     }
   })

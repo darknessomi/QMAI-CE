@@ -1,9 +1,9 @@
-// 测试不同 headers 组合找出 403 的原因（本地调试：API_KEY=xxx node scripts/dev/test-api-403.js）
+// 检查模型列表请求的 403 响应。运行前请设置 BASE_URL 和 API_KEY。
 const API_KEY = process.env.API_KEY ?? "";
-const BASE_URL = process.env.BASE_URL ?? "https://hub.linux.do/v1";
+const BASE_URL = process.env.BASE_URL?.trim().replace(/\/+$/, "");
 
-if (!API_KEY) {
-  console.error("请设置环境变量 API_KEY");
+if (!BASE_URL || !API_KEY) {
+  console.error("请设置环境变量 BASE_URL 和 API_KEY");
   process.exit(1);
 }
 

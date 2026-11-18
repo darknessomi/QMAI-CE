@@ -84,8 +84,6 @@ export interface PersonaSkillProfilePanelProps {
   /** 从人物列表里移除这个角色（档案文件保留）。 */
   onDeletePersona?: () => void
   /** 中栏面板模式下注入的「关闭」按钮（放在顶栏右侧，避免绝对定位压住保存按钮）。 */
-  /** 当前项目路径：读角色灵魂库要用。 */
-  projectPath?: string
   /** 判断某个人名有没有档案（用于关系列表的「可跳转」标记）。 */
   hasCharacter?: (name: string) => boolean
 }
@@ -413,8 +411,6 @@ export function PersonaSkillProfilePanel(props: PersonaSkillProfilePanelProps) {
                   tags={personality.tags}
                   boundSoul={personality.boundSoul}
                   raw={personality.raw}
-                  projectPath={props.projectPath}
-                  characterName={meta.characterName}
                   onChange={(next) => {
                     setField("性格", renderPersonalitySection({ tags: next.tags, boundSoul: next.boundSoul }))
                   }}

@@ -24,17 +24,9 @@ vi.mock("@/components/chat/ai-chat-tab-container", () => ({
 vi.mock("@/components/settings/sections/plugin-section", () => ({
   PluginSection: () => <div data-testid="stub-plugin-section" />,
 }))
-// 市场命令在 jsdom 里没有宿主，直接给一个空索引；渲染路径与真实命令一致。
 // 启停/卸载也要给桩：新版页面自己渲染「已安装」列表并调这些命令（不再委托 PluginSection）。
 vi.mock("@/lib/plugins/api", () => ({
   pluginsApi: {
-    marketIndex: vi.fn().mockResolvedValue({
-      plugins: [],
-      fromCache: false,
-      fetchedAt: null,
-      sourceUrl: "",
-    }),
-    marketInstall: vi.fn(),
     list: vi.fn().mockResolvedValue([]),
     install: vi.fn(),
     installLocal: vi.fn(),
@@ -84,7 +76,7 @@ describe("ContentArea → 插件页面", () => {
     }
     expect(host.querySelector('[data-ui-page="plugins"]')).not.toBeNull()
     expect(host.querySelector('[data-testid="stub-ai-chat-tab"]')).toBeNull()
-    // 空索引下会走到诚实空状态（这条同时证明市场 tab 默认打开）
-    expect(host.textContent).toContain("市场里还没有插件")
+    expect(host.textContent).toContain("还没有安装第三方插件")
+    expect(host.textContent).not.toContain("插件市场")
   })
 })

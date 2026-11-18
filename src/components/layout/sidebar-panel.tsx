@@ -1,8 +1,7 @@
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { UiTestDirectoryHeader } from "@/components/uitest/ui-test-directory"
 import { UiTestOutlineTools } from "@/components/uitest/ui-test-outline-tools"
-import { RefreshCw } from "lucide-react"
 import { KnowledgeTree, type KnowledgeCreateRequest } from "./knowledge-tree"
 import { PersonaTreeSection } from "./persona-tree-section"
 import { TrashPanel } from "./trash-panel"
@@ -38,12 +37,8 @@ import { buildPureOutlineMarkdown } from "@/lib/novel/outline-markdown"
 import { useImportProgressStore } from "@/stores/import-progress-store"
 import { openExternalUrl } from "@/lib/open-external-url"
 import type { ReferenceToken } from "@/lib/reference/types"
-const BookAnalysisSidebarPanel = lazy(async () => {
-  const mod = await import("./book-analysis-sidebar-panel")
-  return { default: mod.BookAnalysisSidebarPanel }
-})
 
-const USAGE_GUIDE_URL = "https://tcnk9ik08e1c.feishu.cn/wiki/FWiSwYQKoifpwBk6mSRcSlB8nrh?from=from_copylink"
+const USAGE_GUIDE_URL = "https://github.com/darknessomi/QMAI-CE#readme"
 
 function SearchHistoryPanel() {
   const { t } = useTranslation()
@@ -84,15 +79,6 @@ function SearchHistoryPanel() {
   )
 }
 
-function SidebarPanelLoading() {
-  const { t } = useTranslation()
-  return (
-    <div className="flex h-full items-center justify-center gap-2 text-xs text-muted-foreground">
-      <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-      <span>{t("common.loading", { defaultValue: "加载中..." })}</span>
-    </div>
-  )
-}
 
 function inferModeFromPath(path: string): "knowledge" | "files" {
   const normalized = normalizePath(path)
@@ -761,30 +747,12 @@ export function SidebarPanel({ onUiTestCloseDirectory, onUiTestRegisterCancel }:
     return () => onUiTestRegisterCancel(null)
   }, [onUiTestRegisterCancel])
 
-  /*
-   * 「剧情推演室」分支已删除。
-   *
-   * 它原本在这里渲染「故事框架」列表（StorySimulationSidebarPanel），
-   * 与右侧内容区构成双栏。改造后剧情推演室是**整窗单页**（见
-   * `@/lib/full-window-views` 的清单），入口页把「剧情推演式」与
-   * 「舞台情景」并列成两个同级卡片 —— 两个功能彼此独立，不再有
-   * 「谁挂在谁下面」的层级，也就没有左侧目录栏要放。
-   */
-
   if (activeView === "graph") {
     return <GraphSidebarPanel />
   }
 
   if (activeView === "reviewCenter") {
     return <ReviewCenterSidebarPanel />
-  }
-
-  if (activeView === "bookAnalysis") {
-    return (
-      <Suspense fallback={<SidebarPanelLoading />}>
-        <BookAnalysisSidebarPanel />
-      </Suspense>
-    )
   }
 
   if (activeView === "search") {

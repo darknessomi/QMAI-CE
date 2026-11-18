@@ -6,7 +6,6 @@ import { LlmProviderSection } from "./llm-provider-section"
 import { EmbeddingSection } from "./embedding-section"
 import { RerankSection } from "./rerank-section"
 import { DefaultModelSettingsPanel } from "./default-model-settings-panel"
-import { ModelTutorialLink } from "../model-tutorial-link"
 
 type ModelTabId = ModelSettingsTabId
 
@@ -40,7 +39,6 @@ export function ModelSettingsSection({ draft, setDraft }: Props) {
   const setRequestedTab = useWikiStore((s) => s.setActiveModelSettingsTab)
   const [active, setActive] = useState<ModelTabId>(() => requestedTab ?? "llm")
   // 三个「要自己填密钥/地址」的页签才给教程入口。
-  const showsTutorial = active === "llm" || active === "rerank" || active === "embedding"
 
   useEffect(() => {
     if (!requestedTab) return
@@ -83,7 +81,6 @@ export function ModelSettingsSection({ draft, setDraft }: Props) {
             )
           })}
         </div>
-        {showsTutorial && <ModelTutorialLink />}
       </div>
 
       <div className="min-h-0 pt-2">

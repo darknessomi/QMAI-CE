@@ -19,9 +19,7 @@ import {
 
 const APPEARANCE = {
   skin: "zhi" as const,
-  uiFontFamily: "microsoft-yahei",
   uiFontSizeScale: 1.25,
-  bodyFontFamily: "kaiti",
   bodyFontPx: 21,
   bodyLineHeight: 2.05,
   bodyLetterSpacing: 0.5,
@@ -103,8 +101,6 @@ describe("normalizeReaderWindowAppearance", () => {
     expect(normalized?.bodySafeBottom).toBe(BODY_SAFE_BOTTOM_MAX)
     expect(normalized?.bodyMarginX).toBe(0)
     // 字体名被清理后一定落到合法 id，而不是原样拼进 CSS
-    expect(normalized?.bodyFontFamily).not.toBe(null)
-    expect(normalized?.uiFontFamily).not.toBe(12345)
     expect(normalized?.skin).toBe("jing")
   })
 })
@@ -150,8 +146,8 @@ describe("applyReaderWindowAppearance", () => {
   it("字体两项各写各的变量，互不覆盖（正文不能拖着界面一起变）", () => {
     applyReaderWindowAppearance(APPEARANCE)
     const style = document.documentElement.style
-    expect(style.getPropertyValue("--qmai-ui-font-family")).toContain("Microsoft YaHei")
-    expect(style.getPropertyValue("--qmai-body-font-family")).toContain("KaiTi")
+    expect(style.getPropertyValue("--qmai-ui-font-family")).toBe("")
+    expect(style.getPropertyValue("--qmai-body-font-family")).toBe("")
   })
 
   it("参数残缺也不抛错：返回实际生效的那份快照", () => {

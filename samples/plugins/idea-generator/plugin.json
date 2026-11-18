@@ -4,7 +4,7 @@
   "name": "脑洞生成器",
   "version": "1.0.0",
   "description": "根据一句话灵感生成书名、标签、简介与人设；附 30 条网文灵感切入点。纯声明式，不执行任何代码。",
-  "author": { "name": "QMAI", "url": "https://github.com/Mochocyang/QMAI" },
+  "author": { "name": "QMAI" },
   "license": "MIT",
   "requires": { "qmai": ">=4.4.0" },
   "kind": ["declarative"],

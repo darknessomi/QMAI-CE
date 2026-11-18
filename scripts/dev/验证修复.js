@@ -40,8 +40,8 @@ function withCustomOriginHeader(headers, url) {
 // 测试用例
 const testCases = [
   {
-    name: "远程中转站 (hub.linux.do)",
-    url: "https://hub.linux.do/v1/chat/completions",
+    name: "远程自定义接口",
+    url: "https://models.example.invalid/v1/chat/completions",
     input: { Authorization: "Bearer sk-test", "Content-Type": "application/json" },
     expectedHasOrigin: false,
   },

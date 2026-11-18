@@ -1,11 +1,8 @@
 mod app_state;
 mod atomic_file;
-mod cloud_sync;
 mod commands;
 mod mcp;
 mod plugins;
-mod font_install;
-mod fonts;
 #[cfg(target_os = "macos")]
 mod macos_window;
 mod panic_guard;
@@ -13,7 +10,6 @@ mod platform_guard;
 mod proxy;
 mod secret_store;
 mod types;
-mod updater;
 // 启动前确认系统 WebView2 运行时可用（缺失时中文提示并引导安装）。
 // 必须由 `main` 在 `run()` 之前调用：进入 `tauri::Builder` 之后缺失只会变成
 // wry 内部一条日志，用户看到的是「双击没反应」。
@@ -22,53 +18,6 @@ mod webview2_check;
 pub use platform_guard::assert_supported_platform;
 #[cfg(windows)]
 pub use webview2_check::ensure_webview2_or_guide;
-
-/// 阶段 3：列出本机**实际安装**的中文字体。
-///
-/// 为什么必须由 Rust 侧提供而不是前端猜：CSS 无法枚举系统字体，前端只能靠
-/// 「写一个字体名再看宽度变不变」来试探，那种探测既不可靠（度量相近的字体
-/// 测不出差别）又昂贵。DirectWrite 能直接回答"这个族有没有这个字"。
-///
-/// 失败时返回 `Err` 而不是空列表：空列表会被前端当成"本机没有中文字体"，
-/// 那是个会被用户信以为真的假结论（前端据此应回退到内置列表并说明原因）。
-#[tauri::command]
-fn list_system_cjk_fonts() -> Result<Vec<fonts::CjkFont>, String> {
-    fonts::list_cjk_fonts()
-}
-
-/// 阶段 4：把随包字体安装到本用户，并回报每个字体的真实状态。
-///
-/// 启动时会自动跑一次（见 `setup`）；这个命令供界面在用户手动重试时调用。
-#[tauri::command]
-fn ensure_bundled_fonts(app: tauri::AppHandle) -> Result<font_install::InstallReport, String> {
-    use tauri::Manager;
-    let resource_dir = app
-        .path()
-        .resource_dir()
-        .map_err(|e| format!("无法定位资源目录：{e}"))?;
-    let app_data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("无法定位应用数据目录：{e}"))?;
-    Ok(font_install::ensure_fonts_installed(
-        &resource_dir.join("fonts"),
-        &app_data_dir,
-    ))
-}
-
-/// 阶段 4：清理本用户已安装的随包字体。
-///
-/// 供便携版（没有 NSIS 卸载器）与"设置里卸载随包字体"使用。
-/// 安装版的正规卸载仍由 NSIS 卸载器处理（它读同一个记录文件）。
-#[tauri::command]
-fn remove_bundled_fonts(app: tauri::AppHandle) -> Result<font_install::RemovalReport, String> {
-    use tauri::Manager;
-    let app_data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("无法定位应用数据目录：{e}"))?;
-    Ok(font_install::remove_installed_fonts(&app_data_dir))
-}
 
 #[tauri::command]
 fn set_proxy_env(config: proxy::ProxyConfig) -> String {
@@ -118,8 +67,6 @@ pub fn run() {
     // 必须在 build() 之前：wry 建窗失败只走 log::error!，不装接收器就永远查不到原因。
     commands::reader_window::init_diagnostics();
     tauri::Builder::default()
-        // 云同步的运行时状态（是否在跑、跑到第几个、失败数）
-        .manage(cloud_sync::CloudSyncState::default())
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             use tauri::Manager;
             if let Some(window) = app.get_webview_window("main") {
@@ -136,7 +83,6 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_http::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             use tauri::Manager;
@@ -144,35 +90,6 @@ pub fn run() {
                 commands::fs::set_resource_dir_hint(dir);
             }
             app_state::prepare_app_state_store(app.handle());
-            /*
-             * 阶段 4：先装随包字体，再让任何字体枚举发生。
-             *
-             * 顺序是**语义要求**，不只是性能考虑：本进程一旦创建过 DirectWrite
-             * 系统字体集合，新装的字体在本次启动里可能不可见（集合是缓存的），
-             * 于是出现"字体装上了，但下拉里没有它"。放在 setup 最前面保证
-             * 枚举（由前端在 webview 加载后触发）一定晚于安装。
-             */
-            match (app.path().resource_dir(), app.path().app_data_dir()) {
-                (Ok(res), Ok(data)) => {
-                    let report = font_install::ensure_fonts_installed(&res.join("fonts"), &data);
-                    eprintln!("[fonts] {}", report.summary());
-                    for outcome in report.outcomes.iter().filter(|o| o.status == "failed") {
-                        eprintln!(
-                            "[fonts] 安装失败：{}（{}）：{}",
-                            outcome.display,
-                            outcome.id,
-                            outcome.error.as_deref().unwrap_or("未知原因")
-                        );
-                    }
-                }
-                (res, data) => {
-                    eprintln!(
-                        "[fonts] 跳过随包字体安装：resource_dir={:?} app_data_dir={:?}",
-                        res.err().map(|e| e.to_string()),
-                        data.err().map(|e| e.to_string())
-                    );
-                }
-            }
             if let Ok(dir) = app.path().app_data_dir() {
                 let store_path = dir.join("app-state.json");
                 eprintln!("[proxy] reading from {}", store_path.display());
@@ -213,30 +130,6 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-                        commands::account_credential::account_credential_save,
-                        commands::account_credential::account_credential_load,
-                        commands::account_credential::account_credential_clear,
-                        commands::cloud_sync::cloud_sync_get_config,
-            commands::cloud_sync::cloud_sync_set_config,
-            commands::cloud_sync::cloud_sync_status,
-            commands::cloud_sync::cloud_sync_begin_login,
-            commands::cloud_sync::cloud_sync_cancel_login,
-            commands::cloud_sync::cloud_sync_connect_webdav,
-            commands::cloud_sync::cloud_sync_connect_folder,
-    commands::cloud_sync::cloud_sync_connect_github,
-    commands::cloud_sync::cloud_sync_github_auth_state,
-    commands::cloud_sync::cloud_sync_github_repos,
-    commands::cloud_sync::cloud_sync_github_create_repo,
-    commands::cloud_sync::cloud_sync_github_make_private,
-            commands::cloud_sync::cloud_sync_stop,
-            commands::cloud_sync::cloud_sync_logout,
-            commands::cloud_sync::cloud_sync_run_now,
-            commands::cloud_sync::cloud_sync_history,
-        commands::cloud_sync::cloud_sync_resolve_conflict,
-            commands::cloud_sync::cloud_sync_clear_history,
-            commands::cloud_sync::cloud_sync_reveal_remote,
-    commands::cloud_sync::cloud_sync_reveal_target_remote,
-commands::device::device_fingerprint,
             commands::fs::read_file,
             commands::fs::write_file,
             commands::fs::write_file_if_absent,
@@ -315,18 +208,6 @@ commands::device::device_fingerprint,
             app_state::write_app_state_atomic,
             commands::writing_wake_lock::acquire_writing_wake_lock,
             commands::writing_wake_lock::release_writing_wake_lock,
-            commands::updater_channels::updater_channel_plan,
-            // 按通道下载更新包：供前端把「检查更新」接到我们选出的通道上。
-            // 白名单校验在命令内部完成（前端可任意调用，不能变成通用下载器）。
-            commands::updater_channels::updater_download_bytes,
-    commands::updater_channels::updater_check,
-    // 安装我们自己下载好的更新包：先验签再启动安装器（见命令内说明）。
-    commands::updater_channels::updater_install_package,
-    commands::updater_download::updater_download_package,
-    // 本地密钥小仓库（系统加密）：目前只存模型配置同步用的同步密码。
-    secret_store::secret_set,
-    secret_store::secret_get,
-    secret_store::secret_clear,
     // 模型配置的本地加密存储（系统凭据加密，替代明文的 app-state.json 副本）。
     secret_store::model_configs_save,
     secret_store::model_configs_load,
@@ -338,9 +219,6 @@ commands::device::device_fingerprint,
             log_error,
             log_diagnostic,
             restore_macos_window_frame,
-            list_system_cjk_fonts,
-            ensure_bundled_fonts,
-            remove_bundled_fonts,
             mcp::mcp_set_enabled,
             mcp::mcp_status,
             mcp::mcp_respond,
@@ -349,10 +227,6 @@ commands::device::device_fingerprint,
             // 插件管理：列表/安装/启停/卸载，以及运行期工具清单与调用。
             plugins::plugins_list,
             plugins::plugins_install,
-            // 插件市场：远端索引（本地缓存 + 离线降级）与「从市场安装」。
-            // 市场安装复用上面同一条安装编排，前端只需把 entry.repo 原样交回来。
-            plugins::plugins_market_index,
-            plugins::plugins_market_install,
             // 从本地目录安装：插件作者在本机迭代、验收时手工装测试插件都走这条。
             plugins::plugins_install_local,
             plugins::plugins_enable,

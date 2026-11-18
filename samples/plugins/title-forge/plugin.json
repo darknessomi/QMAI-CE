@@ -5,8 +5,7 @@
   "version": "0.1.0",
   "description": "读取书架上的书，按四字格玄奇 / 玄幻爽文 / 番茄式反转三种风格生成书名候选",
   "author": {
-    "name": "QMAI",
-    "url": "https://github.com/Mochocyang/QMAI"
+    "name": "QMAI"
   },
   "license": "MIT",
   "requires": {

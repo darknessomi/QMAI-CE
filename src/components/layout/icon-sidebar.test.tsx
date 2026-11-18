@@ -11,11 +11,11 @@ describe("icon-sidebar", () => {
     expect(iconSidebarSource).not.toContain("getIconSidebarAppTitle")
   })
 
-  it("keeps the soul entry wired into the content area route", () => {
-    expect(iconSidebarSource).toContain('view: "soul"')
-    expect(iconSidebarSource).toContain('labelKey: "novel.nav.soul"')
-    expect(contentAreaSource).toContain('case "soul"')
-    expect(contentAreaSource).toContain("<SoulView />")
+  it("不显示已停用的创作工具", () => {
+    for (const view of ["soul", "bookAnalysis", "storySimulation"]) {
+      expect(iconSidebarSource).not.toContain(`view: "${view}"`)
+      expect(contentAreaSource).not.toContain(`case "${view}"`)
+    }
   })
 
   it("clears the selected file when switching to outline sources", () => {
@@ -101,7 +101,6 @@ describe("icon-sidebar", () => {
       "sidebar-panel.tsx",
       "graph-sidebar-panel.tsx",
       "review-center-sidebar-panel.tsx",
-      "book-analysis-sidebar-panel.tsx",
       "trash-panel.tsx",
     ]
     for (const panel of panels) {
@@ -124,14 +123,10 @@ describe("icon-sidebar", () => {
    * 底栏现在是账号入口：头像 + 用户名一起显示，点它展开
    * 「账号 / 外观 / 设置 / 维护工具」。这条钉住入口仍可读、四类入口都在。
    */
-  it("底栏账号入口显示头像与用户名，菜单里有账号/外观/设置/维护", () => {
+  it("底栏提供外观、设置与维护", () => {
     const bottomActions = readFileSync(resolve(__dirname, "sidebar-bottom-actions.tsx"), "utf8")
-    expect(bottomActions).toContain('data-ui="sidebar-account-avatar"')
-    expect(bottomActions).toContain('aria-label="账号与外观"')
-    expect(bottomActions).toContain("<AccountAvatar")
-    expect(bottomActions).toContain("ui-test-account-name")
-    expect(bottomActions).toContain("<AnnouncementBell />")
-    expect(bottomActions).toContain('data-ui="sidebar-avatar-account-entry"')
+    expect(bottomActions).toContain('data-ui="sidebar-options"')
+    expect(bottomActions).toContain('aria-label="设置与外观"')
     expect(bottomActions).toContain('data-ui="sidebar-appearance-entry"')
     expect(bottomActions).toContain('data-ui="sidebar-settings-entry"')
     expect(bottomActions).toContain('data-ui="sidebar-maintenance-entry"')

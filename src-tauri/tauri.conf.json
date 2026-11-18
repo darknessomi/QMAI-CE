@@ -52,15 +52,5 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
-  },
-  "plugins": {
-    "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEFFRTYxMjcyNzdDQkIzRDkKUldUWnM4dDNjaExtcmkvVGxmWFU1L3U4R1Z1b1BPV1lxaDZJWGROK3lyUy9GREd6b0JmWnNXb1kK",
-      "endpoints": [
-        "https://gh-proxy.com/https://github.com/Mochocyang/QMAI/releases/latest/download/latest.json",
-        "https://ghproxy.net/https://github.com/Mochocyang/QMAI/releases/latest/download/latest.json",
-        "https://github.com/Mochocyang/QMAI/releases/latest/download/latest.json"
-      ]
-    }
   }
 }

@@ -63,7 +63,7 @@ export function BuiltinPluginCard({ plugin, enabled, onToggle }: BuiltinPluginCa
         <div className="flex min-w-0 items-center gap-1.5">
           <span className="truncate text-sm font-medium">{plugin.name}</span>
           <span
-            title="随软件提供的功能，不是从市场安装的第三方插件"
+            title="随软件提供的功能"
             className="shrink-0 rounded border px-1 text-[11px] leading-4 text-muted-foreground"
           >
             内置

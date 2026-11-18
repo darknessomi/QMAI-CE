@@ -8,41 +8,10 @@
      必须用 rem —— 否则界面字号放大时行高不动，实测会漏缩放 11 个元素
      （侧边栏各分区的「设置」项，13px→19.5px 生效但行高恒为 28px）。 */
   --ui-heading-top: 22px; --ui-heading-line: 1.75rem;
-  /* 界面字体**必须**派生自用户选择，不能硬编码字体栈。
-     此前这里写死了 "PingFang SC", "Microsoft YaHei UI", … 的栈，
-     于是 applyUiFontFamily 虽然把选择写进了 --qmai-ui-font-family，
-     界面元素却全部使用 var(--ui) —— 两者之间没有任何连接，
-     用户在「外观与界面」里换任何字体都毫无效果（已实测：改
-     --qmai-ui-font-family 后 32 个界面文字元素中有 0 个发生变化，
-     而直接改 --ui 有 32 个变化，证明通路本身是活的、只是没接上）。
-     --qmai-ui-font-family 由 index.css 的 :root 提供默认值，
-     并由 applyUiFontFamily 写到 documentElement 行内样式（可继承、优先级最高）。 */
   --ui: var(--qmai-ui-font-family);
-  /* --serif 是**界面**的衬线层：品牌名、工具页标题、对话框标题、
-     参考对话框 h3、书封标题、模型设置 / 去AI味空状态标题。
-     它的取值**固定**，**不**跟随「正文字体」。
-
-     ⚠ 这里曾经写成 `var(--qmai-body-font-family, <回退栈>)`，即让整个界面
-     衬线层跟随正文字体。当时的理由是"必须派生而不是硬编码，否则会重演
-     --ui 设了没效果的老毛病"—— 但那个担心用错了办法：「正文字体」
-     **本来就不该**作用于界面。实测后果：用户在写作现场（章节浮层）改一下
-     正文字体，品牌名、工具页标题、书封标题、对话框标题会**一起**换字形，
-     用户报为"整个界面的字体都变了"。
-     正确的分法是**两层各自一个变量**：界面看 --serif（固定），
-     文档正文看 --body-font（派生）。 */
-  --serif: "Noto Serif SC", "Source Han Serif SC", "Songti SC", SimSun, serif;
-  /* --body-font 是**文档正文**层：章节与大纲（Milkdown）的正文段落与列表。
-     **只有它**跟随「外观与界面 → 正文字体」（App 写 --qmai-body-font-family）。
-
-     回退栈与改造前 --serif 的取值**逐字一致**：未设置时（首屏、以及任何
-     不经过 JS 的场景）正文观感与改造前完全相同 —— 这与正文字号的
-     「缺省 18px 等于改造前 100% 档」是同一条不变量的两个面。
-
-     与 --ui、正文字号一样写成"读一个从 html 继承下来的变量"而不是让 App
-     直接写使用点变量：本规则块的宿主 .ui-test-root 比 html **更近**，
-     App 写在 html 上的同名变量会被本块盖掉（理由详见下面
-     --qmai-body-font-size 的注释）。 */
-  --body-font: var(--qmai-body-font-family, "Noto Serif SC", "Source Han Serif SC", "Songti SC", SimSun, serif);
+  --serif: var(--ui);
+  --ui-serif: var(--ui);
+  --body-font: var(--ui);
   /* 正文字号：**绝对像素**，由 App 写 --qmai-body-font-px（documentElement 行内样式）。
      改造前是 calc(1.125rem * var(--qmai-body-font-scale, 1))，语义是
      「正文字号 = 界面字号 × 倍数」；现在正文与界面字号彻底解耦
@@ -432,7 +401,6 @@ html[data-ui-test-skin] [data-slot="dialog-close"] { top: 19px; right: 19px; col
 html[data-ui-test-skin] [data-slot="input"], html[data-ui-test-skin] [data-slot="textarea"] { background: var(--ui-panel); color: var(--ui-ink); border-color: transparent; box-shadow: none; border-radius: 8px; }
 html[data-ui-test-skin] [data-slot="dropdown-menu-content"], html[data-ui-test-skin] [data-slot="popover-content"], html[data-ui-test-skin] [data-slot="select-content"] { background: var(--ui-paper); color: var(--ui-ink); max-height: min(75dvh, var(--available-height, 75dvh)); max-width: calc(100vw - 24px); overflow-y: auto; border-color: var(--ui-line); border-radius: 12px; box-shadow: 0 12px 40px #17251c20; font-family: var(--ui); }
 html[data-ui-test-skin] .ui-test-activity-dialog { width: min(600px, calc(100vw - 32px)); }
-html[data-ui-test-skin] .ui-test-contact-dialog { width: min(920px, calc(100vw - 32px)); }
 .ui-test-activity-body:empty::before { content: "当前没有后台活动，可以安心写作。"; display: block; padding: 42px 18px; text-align: center; color: var(--ui-muted); background: var(--ui-panel); border-radius: 12px; }
 .ui-test-activity-body > div { border: 0; background: var(--ui-panel); border-radius: 12px; }
 .ui-test-activity-body .max-h-64 { max-height: none; }
@@ -558,29 +526,6 @@ html[data-ui-test-skin] .ui-test-wizard-chips button[aria-pressed="true"] { back
   border-radius: 0;
   clip-path: none;
   box-shadow: none;
-}
-
-/*
- * 侧栏底部的头像入口：按钮是 28px 的方形、p-0，而 .account-avatar 默认 30px
- * 且 display:inline-grid，会被父级裁掉一圈（用户截图：头像下半被切平）。
- * 这里显式居中，并把头像压到 28px。
- *
- * ⚠️ 千万不要在这里写 width/height: 100%：这个 span 自己就是 28px 的圆形容器
- * （Tailwind size-7），百分比会把它撑成「按钮剩余宽度」（实测 216px）——
- * 头像被居中到一片空白里，用户名被挤成 0 宽后彻底看不见。
- * 用户 2026-10-28 两次报的「头像右边没有用户名」就是这个。
- */
-.ui-test-root .sidebar-account-avatar {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex: 0 0 auto;
-}
-.ui-test-root .sidebar-account-avatar .account-avatar {
-  /* 头像占满 28px 的容器（原先压到 24px，看起来比用户名还小，不够醒目） */
-  width: 28px;
-  height: 28px;
-  font-size: 0.75rem;
 }
 
 /*

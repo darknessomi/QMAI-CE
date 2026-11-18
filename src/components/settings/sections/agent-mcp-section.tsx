@@ -1,15 +1,14 @@
+import { openExternalUrl } from "@/lib/open-external-url"
 import { useEffect, useState } from "react"
 import { invoke } from "@tauri-apps/api/core"
 import { Button } from "@/components/ui/button"
 import { copyDirectory, createDirectory, deleteFile, fileExists } from "@/commands/fs"
 import { buildMcpConfigInstallText, buildSkillInstallText } from "@/lib/mcp/copy-text"
 import { applyMcpSettings, readBundledSkillInstallInfo } from "@/lib/mcp/startup"
-import { openExternalUrl } from "@/lib/open-external-url"
 import { pickDirectory } from "@/lib/platform"
 import { joinPath } from "@/lib/path-utils"
 import { loadMcpSettings, saveMcpSettings } from "@/lib/project-store"
 
-const MCP_DOC_URL = "https://github.com/Mochocyang/QMAI/blob/cursor/mcp-agent-tools-f62a/docs/mcp-agent-tools-%E5%88%86%E6%94%AF%E8%AF%B4%E6%98%8E.md"
 
 interface InstallInfo {
   skillDir: string
@@ -105,7 +104,7 @@ export function AgentMcpSection() {
       await openPath(localDoc)
       return
     }
-    await openExternalUrl(MCP_DOC_URL)
+    await openExternalUrl("https://github.com/darknessomi/QMAI-CE/blob/main/docs/mcp-agent-tools-分支说明.md")
   }
 
   return (

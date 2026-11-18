@@ -22,12 +22,9 @@ describe("sidebar nav preferences", () => {
       "sources",
       "graph",
       "lint",
-      "soul",
       "skillLibrary",
       "plugins",
-      "bookAnalysis",
       "reviewCenter",
-      "storySimulation",
       "search",
       "trash",
     ])
@@ -46,13 +43,10 @@ describe("sidebar nav preferences", () => {
       "sources",
       "graph",
       "lint",
-      "soul",
       "skillLibrary",
       // 追加项按 DEFAULT_SIDEBAR_NAV_ORDER 的顺序补齐（"plugins" 同理）
       "plugins",
-      "bookAnalysis",
       "reviewCenter",
-      "storySimulation",
     ])
   })
 

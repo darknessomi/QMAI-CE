@@ -30,8 +30,6 @@ async function render(props: Partial<Parameters<typeof PersonaPersonalityTab>[0]
         boundSoul={props.boundSoul ?? ""}
         raw={props.raw ?? ""}
         onChange={onChange}
-        projectPath={props.projectPath}
-        characterName={props.characterName}
       />,
     ),
   )
@@ -98,31 +96,22 @@ describe("PersonaPersonalityTab（T2 精简版：无题材包）", () => {
     expect(host.textContent).toContain("未按标签管理")
   })
 
-  it("绑定灵魂显示当前灵魂名，并提供更换与解绑", async () => {
+  it("已有角色可以查看和解除旧绑定", async () => {
     const onChange = await render({
       boundSoul: "严肃沉稳",
-      projectPath: "/tmp/project",
     })
     expect(host.textContent).toContain("严肃沉稳")
-    expect(host.textContent).toContain("更换灵魂")
+    expect(host.textContent).not.toContain("更换灵魂")
 
     const clear = host.querySelector<HTMLElement>('[data-testid="persona-soul-clear"]')!
     await act(async () => clear.click())
     expect(onChange).toHaveBeenCalledWith({ tags: [], boundSoul: "" })
   })
 
-  it("没有绑定灵魂时按钮是「绑定灵魂」，且未打开项目时禁用", async () => {
+  it("新角色不显示灵魂库入口", async () => {
     await render({ boundSoul: "" })
-    const open = host.querySelector<HTMLButtonElement>('[data-testid="persona-soul-open"]')!
-    expect(open.textContent?.trim()).toBe("绑定灵魂")
-    expect(open.disabled).toBe(true)
+    expect(host.querySelector('[data-testid="persona-soul-open"]')).toBeNull()
+    expect(host.querySelector('[data-testid="persona-soul-clear"]')).toBeNull()
   })
 
-  it("点「绑定灵魂」打开灵魂库弹窗", async () => {
-    await render({ boundSoul: "", projectPath: "/tmp/project" })
-    const open = host.querySelector<HTMLButtonElement>('[data-testid="persona-soul-open"]')!
-    expect(open.disabled).toBe(false)
-    await act(async () => open.click())
-    expect(host.ownerDocument.querySelector('[data-testid="persona-soul-picker"]')).not.toBeNull()
-  })
 })

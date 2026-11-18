@@ -8,52 +8,7 @@ const source = readFileSync(
 )
 
 describe("sidebar-bottom-actions", () => {
-  it("底栏左侧是头像+用户名（名字在头像右侧），右侧是公告铃铛", () => {
-    expect(source).toContain('data-ui="sidebar-bottom-actions"')
-    expect(source).toContain('data-ui="sidebar-account-avatar"')
-    expect(source).toContain("ui-test-account-name")
-    expect(source).toContain("{accountDisplayNameText}")
-    /*
-     * 顺序（用户 2026-10-28 最终确认）：**头像在最左，用户名在头像右侧**。
-     * 在账号块窗口内，`sidebar-account-avatar` 必须早于 `ui-test-account-name`。
-     */
-    const blockStart = source.indexOf('data-ui="sidebar-account-avatar"')
-    /*
-     * 窗口 1400 → 2400 → 4000（2026-11-08）。
-     *
-     * 每次都是同一个原因：账号块里新增内容后，`ui-test-account-name` 被推到
-     * 窗口外，断言拿到 -1 而不是真实位置。这次加的是「会员金框 + 名字前的
-     * VIP 标签」两个分支与说明注释。
-     *
-     * 窗口只用来「在局部找相对顺序」，放大不削弱断言 ——
-     * 真正的约束是下面的 `nameAt > avatarAt`。
-     */
-    const blockWindow = source.slice(blockStart, blockStart + 4000)
-    const avatarAt = blockWindow.indexOf("sidebar-account-avatar", 10)
-    const nameAt = blockWindow.indexOf("ui-test-account-name")
-    expect(avatarAt).toBeGreaterThan(-1)
-    expect(nameAt).toBeGreaterThan(avatarAt)
-    /*
-     * 用户名必须真的占住「头像右侧」那块宽度（用户 2026-10-28 复报「头像右侧没有名字」）：
-     * 账号块 `w-fit` 在 WebView2 里会按 max-content 收回，`truncate` 的名字只剩零宽。
-     * 所以账号块要 `flex-1 min-w-0`，名字要 `min-w-0 flex-1`。
-     */
-    expect(source).not.toContain("min-w-0 shrink items-center")
-    expect(source).toContain("flex min-w-0 flex-1 items-center gap-1.5")
-    expect(source).toContain("ui-test-account-name min-w-0 flex-1 truncate")
-    /*
-     * 左内边距 10px（用户 2026-10-28 定：头像原来贴侧栏边界太靠左），
-     * 叠上按钮自身的 2px 内衬后头像左边缘在 12px，与面板标题文字左边对齐。
-     */
-    expect(source).toContain("pr-1.5 pl-2.5")
-    // 设置入口只在账号菜单里，不再有独立齿轮
-    expect(source).not.toContain('data-ui="sidebar-settings-gear"')
-  })
 
-  it("公告铃铛用 ml-auto 靠最右", () => {
-    expect(source).toContain("<AnnouncementBell />")
-    expect(source).toContain('className="ml-auto flex shrink-0 items-center"')
-  })
 
   it("外观默认折叠，点击或悬停都能展开三个主题且不带副标题", () => {
     expect(source).toContain('data-ui="sidebar-appearance-entry"')
@@ -72,42 +27,14 @@ describe("sidebar-bottom-actions", () => {
   })
 
   it("菜单里的入口都绑了点击处理", () => {
-    expect(source).toContain("onClick={openAccount}")
     expect(source).toContain("onClick={openGeneralSettings}")
     expect(source).toContain("onClick={openMaintenance}")
     expect(source).toContain("onClick={() => selectSkin(item.id)}")
     expect(source).toContain("onClick={() => setAppearancePinned((open) => !open)}")
   })
 
-  it("已登录时菜单里有「退出账号」，点它会调 logout", () => {
-    expect(source).toContain('data-ui="sidebar-logout-entry"')
-    expect(source).toContain("void handleLogout()")
-    // 只在已登录时出现：未登录时没有可退的会话
-    const idx = source.indexOf('data-ui="sidebar-logout-entry"')
-    const window = source.slice(Math.max(0, idx - 400), idx)
-    expect(window).toContain("{accountUser ? (")
-    // 位置在「维护工具」之后
-    expect(source.indexOf('data-ui="sidebar-maintenance-entry"')).toBeLessThan(idx)
-  })
 
-  it("退出后底栏显示「未登录」", () => {
-    // accountUser 为空时用「未登录」
-    expect(source).toContain('? accountDisplayName(accountUser.displayName, accountUser.email)')
-    expect(source).toContain(': "未登录"')
-    // 未登录时账号条目提示「点击登录账号」
-    expect(source).toContain("点击登录账号")
-  })
 
-  it("未登录时点账号条目直接弹登录窗，不跳设置页", () => {
-    // 未登录分支走 openDialog("login")
-    expect(source).toContain('useAccountStore.getState().openDialog("login")')
-    const idx = source.indexOf('const openAccount = () => {')
-    const block = source.slice(idx, idx + 600)
-    expect(block).toContain('if (accountUser)')
-    expect(block).toContain('goToSettings("account")')
-    // 登录分支必须在「未登录 → 弹窗」之前 return，否则会先跳设置
-    expect(block.indexOf('return')).toBeGreaterThan(block.indexOf('goToSettings("account")'))
-  })
 
   it("外观子菜单弹在右侧，而不是列在「外观」下面", () => {
     const css = readFileSync(
@@ -147,11 +74,6 @@ describe("sidebar-bottom-actions", () => {
     expect(source).not.toContain('closest?.(".ui-test-skin-menu")')
   })
 
-  it("跳设置时同时下发分区与视图，并防止分区被旧值吃掉", () => {
-    expect(source).toContain("setActiveSettingsCategory(category)")
-    expect(source).toContain('setActiveView("settings")')
-    expect(source).toContain("queueMicrotask")
-  })
 
   it("no longer owns a light/dark theme dropdown", () => {
     expect(source).not.toContain("applyTheme")
@@ -182,17 +104,4 @@ describe("sidebar-bottom-actions", () => {
     expect(source).not.toContain("maxHeight")
   })
 
-  it("头像容器不能按百分比撑满账号块（否则用户名被挤成 0 宽）", () => {
-    const css = readFileSync(resolve(__dirname, "../uitest/ui-test.css"), "utf8")
-    /*
-     * `.sidebar-account-avatar` 自己就是 28px 的圆形容器（class 里有 size-7）。
-     * 旧规则给它 `width/height: 100%`，实测被撑到 216px：头像居中在一片空白里，
-     * 用户名 `flex-1 min-w-0 truncate` 只好收缩到 0 宽 —— 用户两次报的
-     * 「头像右边没有用户名」就是这个，光改 flex 布局没用。
-     */
-    const rule = css.match(/\.ui-test-root \.sidebar-account-avatar \{[^}]*\}/)
-    expect(rule).toBeTruthy()
-    expect(rule![0]).not.toContain("width: 100%")
-    expect(rule![0]).not.toContain("height: 100%")
-  })
 })

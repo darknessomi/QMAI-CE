@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils"
  * 「内置插件」的一行。
  *
  * ── 为什么不复用 `InstalledRow` ────────────────────────────────
- * `InstalledRow` 吃的是 `PluginSummary`（来自后端的市场插件清单：进程状态、
+ * `InstalledRow` 吃的是 `PluginSummary`（来自后端的第三方插件清单：进程状态、
  * 已授权限、版本、工具数量…）。内置插件根本没有进程 —— 它是我们自己的功能，
  * 字段对不上。硬塞就要先造一个假的 `PluginSummary`，于是界面上会出现
  * "运行中 / 已授权"这类对内置插件**纯属虚构**的状态，那比多写一个组件更糟。
@@ -17,7 +17,7 @@ import { cn } from "@/lib/utils"
  * 这样同一页里两个分区看起来是一家人。
  *
  * ── 为什么没有「⋯」菜单 ──────────────────────────────────────
- * 市场插件的菜单里是「设置 / 卸载」。内置插件两者都不成立：
+ * 第三方插件的菜单里是「设置 / 卸载」。内置插件两者都不成立：
  *   · 没有独立配置项（开关就是它全部的设置）；
  *   · **不能卸载**（见下方诚实性说明）。留一个只有一项「恢复默认」的菜单
  *     只会让用户误以为这里也能卸载。
@@ -71,7 +71,7 @@ export function BuiltinPluginRow({ plugin, enabled, onToggle }: BuiltinPluginRow
         {/*
           图标块沿用 `PluginGlyph` 的尺寸/配色（`h-10 w-10` + 主色底），
           但图标按 `kind` 选 —— `PluginGlyph` 的三档是"provider / tools / declarative"，
-          那是市场插件的分类，跟内置插件的"能力闸门 / 界面"不是一回事。
+          那是第三方插件的分类，跟内置插件的"能力闸门 / 界面"不是一回事。
         */}
         <div
           data-builtin-plugin-glyph={builtinPluginIconId(plugin)}
@@ -85,12 +85,12 @@ export function BuiltinPluginRow({ plugin, enabled, onToggle }: BuiltinPluginRow
           <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
             <span className="truncate text-sm font-medium">{plugin.name}</span>
             {/*
-              「内置」徽章：必须让人分清"自带"和"市场装的"。
+              「内置」徽章：必须让人分清"自带"和"手动安装的"。
               没有它，用户会在插件页里找它的卸载按钮，然后找不到、以为界面坏了。
             */}
             <span
               data-builtin-plugin-badge="true"
-              title="随软件提供的功能，不是从市场安装的第三方插件"
+              title="随软件提供的功能"
               className="shrink-0 rounded border px-1 text-[11px] leading-4 text-muted-foreground"
             >
               内置
@@ -118,7 +118,7 @@ export function BuiltinPluginRow({ plugin, enabled, onToggle }: BuiltinPluginRow
           {/*
             `label` 是必填项：开关本身没有可见文字，读屏只能靠它。
             文案用「开启/关闭」而不是「启用/停用」—— 内置插件不是进程，
-            说"停用"会暗示它"本来在跑"，那又与市场插件混淆了。
+            说"停用"会暗示它"本来在跑"，那又与第三方插件混淆了。
           */}
           <Switch
             checked={enabled}

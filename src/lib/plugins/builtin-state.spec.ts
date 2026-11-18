@@ -53,7 +53,7 @@ describe("builtin-state：开关与视图联动", () => {
     expect(isBuiltinPluginEnabled("review-center")).toBe(false)
     expect(isBuiltinViewEnabled("reviewCenter")).toBe(false)
     // 邻居必须不受牵连 —— 这是"只关一个功能"的核心承诺
-    expect(isBuiltinViewEnabled("storySimulation")).toBe(true)
+    expect(isBuiltinViewEnabled("skillLibrary")).toBe(true)
     expect(isBuiltinViewEnabled("search")).toBe(true)
     expect(isBuiltinViewEnabled("wiki")).toBe(true)
   })
@@ -65,10 +65,10 @@ describe("builtin-state：开关与视图联动", () => {
   })
 
   it("重新打开后恢复可用", () => {
-    setBuiltinPluginEnabled("story-simulation", false)
-    expect(isBuiltinViewEnabled("storySimulation")).toBe(false)
-    setBuiltinPluginEnabled("story-simulation", true)
-    expect(isBuiltinViewEnabled("storySimulation")).toBe(true)
+    setBuiltinPluginEnabled("skill-library", false)
+    expect(isBuiltinViewEnabled("skillLibrary")).toBe(false)
+    setBuiltinPluginEnabled("skill-library", true)
+    expect(isBuiltinViewEnabled("skillLibrary")).toBe(true)
   })
 
   it("resetBuiltinPlugin 回到清单默认值", () => {
@@ -153,17 +153,15 @@ describe("builtin-state：存储容错", () => {
     __resetBuiltinPluginCacheForTests()
 
     expect(isBuiltinPluginEnabled("plot-search")).toBe(false)
-    expect(isBuiltinPluginEnabled("story-simulation")).toBe(true)
+    expect(isBuiltinPluginEnabled("skill-library")).toBe(true)
   })
 })
 
 describe("内置插件：覆盖范围", () => {
-  it("记忆中心 / 灵魂 / 技能库 / 拆书库 默认开启，且都能独立开关", () => {
+  it("记忆中心 / 技能库 默认开启，且都能独立开关", () => {
     const cases: Array<[Parameters<typeof setBuiltinPluginEnabled>[0], string]> = [
       ["memory-center", "lint"],
-      ["soul", "soul"],
       ["skill-library", "skillLibrary"],
-      ["book-analysis", "bookAnalysis"],
     ]
 
     for (const [id, view] of cases) {
@@ -192,7 +190,7 @@ describe("内置插件：覆盖范围", () => {
     setBuiltinPluginEnabled("memory-center", false)
     expect(isBuiltinViewEnabled("lint")).toBe(false)
     // 灵魂默认开着，不该被牵连
-    expect(isBuiltinViewEnabled("soul")).toBe(true)
+    expect(isBuiltinViewEnabled("skillLibrary")).toBe(true)
   })
 
   it("「剧本/回收站」这类不属于内置插件的视图永远可用", () => {

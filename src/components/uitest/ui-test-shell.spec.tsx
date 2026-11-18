@@ -65,7 +65,8 @@ beforeEach(() => {
   draftState.dirty = false; draftState.saving = false
   saveDraft.mockReset().mockResolvedValue(true)
   localStorage.clear()
-  useWikiStore.setState({ project, activeView: "soul", selectedFile: null, fileTree: [], chatExpanded: false })
+  localStorage.setItem("qm-uitest-primary-nav-v1", JSON.stringify(["sources", "wiki", "lint", "plugins"]))
+  useWikiStore.setState({ project, activeView: "lint", selectedFile: null, fileTree: [], chatExpanded: false })
   host = document.createElement("div"); document.body.append(host); root = createRoot(host)
 })
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.clearAllMocks(); vi.restoreAllMocks() })
@@ -193,7 +194,7 @@ describe("独立UI测试版外壳", () => {
     expect(useWikiStore.getState().activeView).toBe("lint")
     expect(host.querySelector('[role="menu"]')).toBeNull()
   })
-  it.each(["大纲", "章节", "灵魂", "创作工具"])("%s菜单点击工作区时关闭，即使工作区阻止事件冒泡", async (label) => {
+  it.each(["大纲", "章节", "记忆中心", "创作工具"])("%s菜单点击工作区时关闭，即使工作区阻止事件冒泡", async (label) => {
     await render()
     if (label === "创作工具") await click(label)
     else {
@@ -209,7 +210,7 @@ describe("独立UI测试版外壳", () => {
     await leftClick(workspace)
     expect(host.querySelector('[role="menu"]')).toBeNull()
   })
-  it.each(["大纲", "章节", "灵魂", "创作工具"])("%s菜单点击主导航按钮时关闭，包括当前菜单的触发按钮", async (label) => {
+  it.each(["大纲", "章节", "记忆中心", "创作工具"])("%s菜单点击主导航按钮时关闭，包括当前菜单的触发按钮", async (label) => {
     await render()
     if (label === "创作工具") await click(label)
     else {
@@ -217,9 +218,9 @@ describe("独立UI测试版外壳", () => {
       await act(async () => { slot.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true })) })
     }
     expect(host.querySelector('[role="menu"]')).not.toBeNull()
-    await click("灵魂")
+    await click("记忆中心")
     expect(host.querySelector('[role="menu"]')).toBeNull()
-    expect(useWikiStore.getState().activeView).toBe("soul")
+    expect(useWikiStore.getState().activeView).toBe("lint")
   })
   it("菜单外只移动鼠标不关闭，点击空白处才关闭", async () => {
     await render()
@@ -233,21 +234,9 @@ describe("独立UI测试版外壳", () => {
     await click("创作工具")
     expect(host.querySelector('[role="menu"]')).toBeNull()
   })
-  it("后台活动右侧的联系图标打开联系与支持弹窗，一屏容纳三张二维码且不显示联系作者", async () => {
+  it("顶栏没有原作者联系方式", async () => {
     await render()
-    const activityBtn = [...host.querySelectorAll("button")].find((b) => b.getAttribute("aria-label") === "后台活动")
-    const contactBtn = [...host.querySelectorAll("button")].find((b) => b.getAttribute("aria-label") === "联系与支持")
-    expect(activityBtn).toBeTruthy()
-    expect(contactBtn).toBeTruthy()
-    expect(activityBtn!.compareDocumentPosition(contactBtn!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    await click("联系与支持")
-    const dialog = document.querySelector(".ui-test-contact-dialog")
-    expect(dialog).not.toBeNull()
-    expect(dialog?.getAttribute("aria-label")).toBe("联系与支持")
-    expect(dialog?.textContent).toContain("联系与支持")
-    expect(host.textContent).not.toContain("联系作者")
-    expect(dialog?.querySelectorAll("img")).toHaveLength(3)
-    expect([...dialog!.querySelectorAll(".grid")].some((el) => el.className.includes("sm:grid-cols-3"))).toBe(true)
+    expect(host.querySelector('[aria-label="联系与支持"]')).toBeNull()
   })
   it("外观与设置已从顶栏迁出（外观移到侧栏，设置不再进创作工具）", async () => {
     await render()
@@ -316,7 +305,7 @@ describe("独立UI测试版外壳", () => {
   })
   it("无书时主工作区入口禁用，不留下看似有效却无效的按钮", async () => {
     await render(false)
-    for (const name of ["大纲", "章节", "灵魂"]) {
+    for (const name of ["大纲", "章节", "记忆中心"]) {
       const button = [...host.querySelectorAll("nav button")].find(b => b.textContent === name) as HTMLButtonElement
       expect(button.disabled).toBe(true)
     }
@@ -349,26 +338,26 @@ describe("独立UI测试版外壳", () => {
      */
     setBuiltinPluginEnabled("novel-graph", true)
     await render()
-    const soulSlot = [...host.querySelectorAll(".ui-test-nav-slot")].find((slot) => slot.textContent?.includes("灵魂")) as HTMLElement
+    const soulSlot = [...host.querySelectorAll(".ui-test-nav-slot")].find((slot) => slot.textContent?.includes("记忆中心")) as HTMLElement
     await act(async () => {
       soulSlot.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, clientX: 20, clientY: 20, button: 0, pointerType: "touch" }))
       vi.advanceTimersByTime(PRIMARY_NAV_LONG_PRESS_MS)
     })
-    expect(host.querySelector('[aria-label="灵魂功能菜单"]')).not.toBeNull()
+    expect(host.querySelector('[aria-label="记忆中心功能菜单"]')).not.toBeNull()
     await hover("移动")
     await click("左移")
     /*
-     * 期望里带「插件」：默认一级导航现在就是 ["sources","wiki","soul","plugins"]
+     * 期望里带「插件」：默认一级导航现在就是 ["sources","wiki","lint","plugins"]
      * （「插件」升为一级功能，见 lib/ui-test-primary-nav.ts）。这是默认值变更后
      * 应有的形态，不是放宽断言 —— 顺序仍然逐个写死。
      */
-    expect([...host.querySelectorAll(".ui-test-nav-item")].map((button) => button.textContent)).toEqual(["大纲", "灵魂", "章节", "插件"])
+    expect([...host.querySelectorAll(".ui-test-nav-item")].map((button) => button.textContent)).toEqual(["大纲", "记忆中心", "章节", "插件"])
     vi.useRealTimers()
     await act(async () => root.unmount())
     root = createRoot(host)
     await render()
-    expect([...host.querySelectorAll(".ui-test-nav-item")].map((button) => button.textContent)).toEqual(["大纲", "灵魂", "章节", "插件"])
-    const movedSoul = [...host.querySelectorAll(".ui-test-nav-slot")].find((slot) => slot.querySelector("button")?.textContent === "灵魂") as HTMLElement
+    expect([...host.querySelectorAll(".ui-test-nav-item")].map((button) => button.textContent)).toEqual(["大纲", "记忆中心", "章节", "插件"])
+    const movedSoul = [...host.querySelectorAll(".ui-test-nav-slot")].find((slot) => slot.querySelector("button")?.textContent === "记忆中心") as HTMLElement
     await act(async () => { movedSoul.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true })) })
     await hover("替换为")
     await click("技能库")
@@ -425,7 +414,7 @@ describe("独立UI测试版外壳", () => {
   })
   it("替换当前功能时同步切换页面，替换其他功能时保持页面", async () => {
     await render()
-    const soul = [...host.querySelectorAll(".ui-test-nav-slot")].find((slot) => slot.textContent?.includes("灵魂")) as HTMLElement
+    const soul = [...host.querySelectorAll(".ui-test-nav-slot")].find((slot) => slot.textContent?.includes("记忆中心")) as HTMLElement
     await act(async () => { soul.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 300, clientY: 20 })) })
     await hover("替换为")
     await click("技能库")
@@ -445,9 +434,9 @@ describe("独立UI测试版外壳", () => {
     expect(useWikiStore.getState().activeView).toBe("sources")
     expect([...host.querySelectorAll(".ui-test-nav-item")].map((button) => button.textContent)).toEqual(["大纲", "章节", "小说图谱", "插件"])
   })
-  it("灵魂被替换成技能库后，仍可从创作工具重新打开灵魂", async () => {
+  it("记忆中心被替换成技能库后，仍可从创作工具重新打开记忆中心", async () => {
     await render()
-    const soul = [...host.querySelectorAll(".ui-test-nav-slot")].find((slot) => slot.textContent?.includes("灵魂")) as HTMLElement
+    const soul = [...host.querySelectorAll(".ui-test-nav-slot")].find((slot) => slot.textContent?.includes("记忆中心")) as HTMLElement
     await act(async () => { soul.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 300, clientY: 20 })) })
     await hover("替换为")
     await click("技能库")
@@ -455,10 +444,10 @@ describe("独立UI测试版外壳", () => {
     expect([...host.querySelectorAll(".ui-test-nav-item")].map((button) => button.textContent)).toEqual(["大纲", "章节", "技能库", "插件"])
     await click("创作工具")
     expect(host.querySelector('[aria-label="创作工具"]')).not.toBeNull()
-    const soulEntry = [...host.querySelectorAll('[aria-label="创作工具"] [role="menuitem"]')].find((button) => button.textContent?.trim() === "灵魂")
-    expect(soulEntry, "创作工具里的灵魂入口").toBeTruthy()
+    const soulEntry = [...host.querySelectorAll('[aria-label="创作工具"] [role="menuitem"]')].find((button) => button.textContent?.trim() === "记忆中心")
+    expect(soulEntry, "创作工具里的记忆中心入口").toBeTruthy()
     await act(async () => { (soulEntry as HTMLButtonElement).click() })
-    expect(useWikiStore.getState().activeView).toBe("soul")
+    expect(useWikiStore.getState().activeView).toBe("lint")
     expect(host.querySelector('[role="menu"]')).toBeNull()
   })
   /*
@@ -478,27 +467,27 @@ describe("独立UI测试版外壳", () => {
   })
   it("取消离开确认时不替换当前功能", async () => {
     draftState.dirty = true
-    useWikiStore.setState({ activeView: "soul" })
+    useWikiStore.setState({ activeView: "lint" })
     await render()
-    const soul = [...host.querySelectorAll(".ui-test-nav-slot")].find((slot) => slot.textContent?.includes("灵魂")) as HTMLElement
+    const soul = [...host.querySelectorAll(".ui-test-nav-slot")].find((slot) => slot.textContent?.includes("记忆中心")) as HTMLElement
     await act(async () => { soul.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 300, clientY: 20 })) })
     await hover("替换为")
     // 浏览器鼠标点击会聚焦菜单项；让弹窗关闭后的焦点恢复与实际操作一致。
     await act(async () => { [...host.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(button => button.textContent?.trim() === "技能库")!.focus() })
     await click("技能库")
     await answerModelDraft("关闭")
-    expect(useWikiStore.getState().activeView).toBe("soul")
-    expect([...host.querySelectorAll(".ui-test-nav-item")].map((button) => button.textContent)).toEqual(["大纲", "章节", "灵魂", "插件"])
-    const menu = host.querySelector('[aria-label="灵魂功能菜单"]')!
-    const submenu = menu.querySelector<HTMLElement>('[aria-label="灵魂二级菜单"]')!
-    expect([...submenu.querySelectorAll(".ui-test-menu-item")].map((button) => button.textContent)).toEqual(["技能库", "小说图谱", "拆书库", "审查中心", "剧情搜索", "剧情推演", "记忆中心"])
+    expect(useWikiStore.getState().activeView).toBe("lint")
+    expect([...host.querySelectorAll(".ui-test-nav-item")].map((button) => button.textContent)).toEqual(["大纲", "章节", "记忆中心", "插件"])
+    const menu = host.querySelector('[aria-label="记忆中心功能菜单"]')!
+    const submenu = menu.querySelector<HTMLElement>('[aria-label="记忆中心二级菜单"]')!
+    expect([...submenu.querySelectorAll(".ui-test-menu-item")].map((button) => button.textContent)).toEqual(["技能库", "小说图谱", "审查中心", "剧情搜索"])
   })
   it("窄窗口中的功能菜单保持在窗口内并可滚动", async () => {
     Object.defineProperty(window, "innerWidth", { value: 390, configurable: true })
     await render()
-    const soul = [...host.querySelectorAll(".ui-test-nav-slot")].find((slot) => slot.textContent?.includes("灵魂")) as HTMLElement
+    const soul = [...host.querySelectorAll(".ui-test-nav-slot")].find((slot) => slot.textContent?.includes("记忆中心")) as HTMLElement
     await act(async () => { soul.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 360, clientY: 20 })) })
-    const menu = host.querySelector<HTMLElement>('[aria-label="灵魂功能菜单"]')!
+    const menu = host.querySelector<HTMLElement>('[aria-label="记忆中心功能菜单"]')!
     const rect = menu.getBoundingClientRect()
     expect(rect.width).toBeLessThanOrEqual(window.innerWidth - 32)
     expect(rect.left).toBeGreaterThanOrEqual(0)
@@ -506,9 +495,9 @@ describe("独立UI测试版外壳", () => {
     expect(menu.className).toContain("is-right")
   })
   it("重复点击当前主导航不改变文件选择", async () => {
-    useWikiStore.setState({ activeView: "soul", selectedFile: "/QM-BOOK-UI-TEST/sample/wiki/chapters/01.md" })
+    useWikiStore.setState({ activeView: "lint", selectedFile: "/QM-BOOK-UI-TEST/sample/wiki/chapters/01.md" })
     await render()
-    await click("灵魂")
+    await click("记忆中心")
     expect(useWikiStore.getState().selectedFile).toBe("/QM-BOOK-UI-TEST/sample/wiki/chapters/01.md")
   })
 })
@@ -519,7 +508,7 @@ it("有模型草稿时取消切换主导航，当前页与文件保持不变", a
   await render()
   await click("设置")
   expect(document.querySelector('[role="dialog"]')).toBeNull()
-  await click("灵魂")
+  await click("记忆中心")
   await answerModelDraft("关闭")
   expect(useWikiStore.getState().activeView).toBe("settings")
 })
@@ -540,13 +529,13 @@ it("主导航等待保存结果，失败留在设置，成功继续进入原目�
   useWikiStore.setState({ activeView: "settings", selectedFile: "/mock/chapter.md" })
   await render()
   saveDraft.mockResolvedValueOnce(false)
-  await click("灵魂"); await answerModelDraft("保存配置")
+  await click("记忆中心"); await answerModelDraft("保存配置")
   expect(useWikiStore.getState().activeView).toBe("settings")
   expect(useWikiStore.getState().selectedFile).toBe("/mock/chapter.md")
   const pending = deferred<boolean>()
   saveDraft.mockReturnValueOnce(pending.promise)
-  await click("灵魂"); await answerModelDraft("保存配置")
+  await click("记忆中心"); await answerModelDraft("保存配置")
   expect(useWikiStore.getState().activeView).toBe("settings")
   await act(async () => pending.resolve(true))
-  expect(useWikiStore.getState().activeView).toBe("soul")
+  expect(useWikiStore.getState().activeView).toBe("lint")
 })

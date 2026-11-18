@@ -1,6 +1,5 @@
-import { useEffect, useId, useMemo, useState } from "react"
+import { useId } from "react"
 import {
-  BODY_FONT_OPTIONS,
   BODY_FONT_PX_MAX,
   BODY_FONT_PX_MIN,
   BODY_FONT_PX_PRESETS,
@@ -13,79 +12,9 @@ import {
   BODY_SAFE_BOTTOM_MAX,
   BODY_SAFE_BOTTOM_MIN,
   defaultBodyMarginXForViewport,
-  type BodyFontFamily,
   type BodyTypographySettings,
 } from "@/lib/font-settings"
-import {
-  loadSystemCjkFonts,
-  newSystemFontsOnly,
-  systemFontValue,
-  type SystemCjkFont,
-} from "@/lib/system-fonts"
-
-/**
- * 本机字体（阶段 3）。
- *
- * ── 为什么用独立组件 / 独立 hook ──
- * 枚举是异步的（要跨 IPC 问 Rust），若把状态放在调用方里，
- * 每次无关重渲染都会重走一遍列表构造。抽出来后"异步加载"只有一个归属，
- * 失败态也能局部呈现。`loadSystemCjkFonts` 本身是模块级缓存，
- * 重复调用不会额外付出代价。
- *
- * ── 失败与"没有"必须分开呈现 ──
- * error 非空 = 枚举**失败**（例如非 Windows 平台），此时只显示内置项并说明原因；
- * 把失败说成"本机没有中文字体"是个会被用户信以为真的假结论。
- *
- * ── 返回**原始**枚举结果，去重留给调用方 ──
- * 界面下拉与正文下拉的内置表不是同一张，一个字体可能被界面表覆盖、
- * 却没被正文表覆盖。在这里就用某一张表过滤，另一张就会缺项。
- */
-export function useSystemFonts(): { fonts: SystemCjkFont[]; error: string | null } {
-  const [fonts, setFonts] = useState<SystemCjkFont[]>([])
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    let cancelled = false
-    void loadSystemCjkFonts().then((result) => {
-      // 组件已卸载时不再 setState（浮层会被频繁开关）
-      if (cancelled) return
-      setFonts(result.fonts)
-      setError(result.error)
-    })
-    return () => { cancelled = true }
-  }, [])
-
-  return { fonts, error }
-}
-
-/**
- * 6 个排版参数的一组取值。受控：值只从 `value` 来，改动只通过 `onChange` 出去。
- *
- * 用 extends 而不是把那 5 个字段再抄一遍：调用方有「控件键 → 字段」的手写映射，
- * 两份结构相同的类型正是 fontPx / lineHeight 被写反时不会报错的地方。
- * 继承之后字段只有一处定义。
- *
- * 注意：`defaultBodyMarginXForViewport` 与它依赖的三个范围常量
- * **不在本文件**，它们和其余范围一起住在 `@/lib/font-settings`
- * —— CSS 兜底值 clamp(20px,4vw,48px) 也必须只有一个来源，
- * 否则显示的「当前边距」会和真实渲染对不上。
- */
-export interface BodyTypographyValue extends BodyTypographySettings {
-  fontFamily: BodyFontFamily
-}
-
-/*
- * 编译期把这条关系钉死。
- *
- * 为什么需要一行看着多余的赋值：`extends` 是**单向**的，日后有人
- * 为了"灵活"把 BodyTypographyValue 改成独立接口、字段顺序一乱，
- * `applyBodyTypography(value)` 这种"整体传下去"的调用仍然会过 ——
- * 直到某个字段被写反。这一行让"两者必须互相兼容"变成编译错误，
- * 而不是运行时才发现行间距被当成了字号。
- * 用 `void` 消费掉，避免 noUnusedLocals 报未使用。
- */
-const _bodyTypographyValueIsBodyTypographySettings: BodyTypographySettings = {} as BodyTypographyValue
-void _bodyTypographyValueIsBodyTypographySettings
+export type BodyTypographyValue = BodyTypographySettings
 
 interface Props {
   value: BodyTypographyValue
@@ -171,14 +100,6 @@ function SliderRow({ id, label, min, max, step, value, display, onChange }: Slid
 export function BodyTypographyFields({ value, onChange, idPrefix }: Props) {
   const generatedId = useId()
   const id = idPrefix ?? generatedId
-  const { fonts: rawSystemFonts, error: systemFontError } = useSystemFonts()
-
-  // 按**正文**内置表去重（与界面字体那张表不是同一张，见 useSystemFonts 的说明）
-  const bodySystemFonts = useMemo(
-    () => newSystemFontsOnly(rawSystemFonts, BODY_FONT_OPTIONS.map((option) => option.cssFamily)),
-    [rawSystemFonts],
-  )
-
   const sizePreset = BODY_FONT_PX_PRESETS.find((preset) => preset.value === value.fontPx)
   // 兜底边距来自 font-settings 的单一来源（与 ui-test-editor.css 的
   // clamp(20px,4vw,48px) 由静态守卫绑在一起）。
@@ -194,37 +115,6 @@ export function BodyTypographyFields({ value, onChange, idPrefix }: Props) {
      * 后者是设置页那套懒加载样式的入口属性，浮层用它会回到"首帧无样式"的老问题。
      */
     <div className="body-font-fields">
-      {/* 正文字体：只有下拉，故横跨数值列与滑块列 */}
-      <div className="body-font-field">
-        <label className="body-font-field__label" htmlFor={`${id}-body-font`}>正文字体</label>
-        <select
-          className="body-font-field__select"
-          id={`${id}-body-font`}
-          aria-label="正文字体"
-          value={value.fontFamily}
-          onChange={(event) => onChange("fontFamily", event.target.value as BodyFontFamily)}
-        >
-          <optgroup label="推荐">
-            {BODY_FONT_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>{option.label}</option>
-            ))}
-          </optgroup>
-          {/*
-            没有枚举结果时**不显示空分组** —— 一个空的 optgroup 会让用户
-            以为自己机器上没装中文字体，而更常见的原因只是还没加载完。
-          */}
-          {bodySystemFonts.length > 0 && (
-            <optgroup label="本机中文字体">
-              {bodySystemFonts.map((font) => {
-                const fontValue = systemFontValue(font.family)
-                // sanitize 不通过的族名不进列表
-                return fontValue ? <option key={fontValue} value={fontValue}>{font.display}</option> : null
-              })}
-            </optgroup>
-          )}
-        </select>
-      </div>
-
       {/*
         正文字号：预设下拉在上、滑块在下，两者都是"正文字号"的控件。
         自动排布顺序即 [标签][下拉] / [数值][滑块]，正好落在与其它行相同的三列轨道上。
@@ -308,11 +198,6 @@ export function BodyTypographyFields({ value, onChange, idPrefix }: Props) {
         onChange={(next) => onChange("safeBottom", next)}
       />
 
-      {systemFontError && (
-        <p role="status" className="body-font-popover__error">
-          未能读取本机字体（{systemFontError}），正文字体下拉只显示推荐的随包字体。
-        </p>
-      )}
     </div>
   )
 }

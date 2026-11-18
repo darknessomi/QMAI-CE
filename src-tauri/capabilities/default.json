@@ -27,7 +27,6 @@
     "dialog:default",
     "dialog:allow-confirm",
     "store:default",
-    "updater:default",
     "notification:default",
     {
       "identifier": "http:default",

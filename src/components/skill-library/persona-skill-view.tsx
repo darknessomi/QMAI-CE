@@ -671,7 +671,6 @@ export function PersonaSkillView({ paneMode = false }: PersonaSkillViewProps = {
         onRegenerateResearch={() => void handleRegenerateResearch()}
         onOpenCharacter={handleOpenCharacter}
         hasCharacter={hasCharacter}
-        projectPath={projectPath}
         onDemote={() => void handleDemote(selected)}
         onToggleImportant={(next) => void handleToggleImportant(selected, next)}
         onToggleAutoUpdate={(next) => void handleToggleAutoUpdate(selected, next)}

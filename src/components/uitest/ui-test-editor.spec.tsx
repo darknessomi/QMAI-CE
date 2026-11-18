@@ -60,7 +60,6 @@ const fixture = vi.hoisted(() => ({
    * 所以这里用真 spy 从行为上钉住它。
    */
   saved: {
-    fontFamily: vi.fn(async () => {}),
     fontPx: vi.fn(async () => {}),
     lineHeight: vi.fn(async () => {}),
     letterSpacing: vi.fn(async () => {}),
@@ -113,7 +112,6 @@ vi.mock("@/lib/project-store", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/project-store")>(),
   saveNovelConfig: vi.fn(async () => {}),
   /* 6 个正文排版落盘函数换成 spy：只观察调用，不改行为。 */
-  saveUiBodyFontFamily: fixture.saved.fontFamily,
   saveUiBodyFontPx: fixture.saved.fontPx,
   saveUiBodyLineHeight: fixture.saved.lineHeight,
   saveUiBodyLetterSpacing: fixture.saved.letterSpacing,
@@ -753,7 +751,7 @@ describe("编辑器异常与原业务回归", () => {
   it.each([
     ["章节", chapterPath],
     ["大纲", outlinePath],
-  ])("%s写作现场的字体设置浮层暴露全部 6 个控件，且显示的是 store 里的真值", async (_kind, path) => {
+  ])("%s写作现场的字体设置浮层暴露全部 5 个控件，且显示的是 store 里的真值", async (_kind, path) => {
     /*
      * ── 这条覆盖的到底是什么（措辞经代码质量审查 C2 校正过）──
      * 它覆盖的是**取值**这一半：浮层里每个控件显示的必须是 store 里的真值。
@@ -787,7 +785,7 @@ describe("编辑器异常与原业务回归", () => {
     expect(dialog).not.toBeNull()
 
     // 六个控件都在（标签与 body-typography-fields.tsx 里的 aria-label 一致）
-    for (const label of ["正文字体", "正文字号预设", "正文字号", "行间距", "字间距", "左右边距", "底部安全距离"]) {
+    for (const label of ["正文字号预设", "正文字号", "行间距", "字间距", "左右边距", "底部安全距离"]) {
       expect(
         dialog.querySelector(`[aria-label="${label}"]`),
         `浮层里应有「${label}」控件`,
@@ -904,7 +902,6 @@ describe("编辑器异常与原业务回归", () => {
      * 正文字体是唯一一个非数字字段，单独断言"被调用过"——
      * 它的值取决于 store 当前字体，用具体值会让用例依赖默认字体设置。
      */
-    expect(fixture.saved.fontFamily, "落盘应包含正文字体（漏一个有字段就永远存不下去）").toHaveBeenCalled()
   })
 
   it("卸载写作现场时，还没到去抖窗口的排版改动**必须落盘**（不能丢）", async () => {

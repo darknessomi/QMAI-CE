@@ -734,16 +734,8 @@ describe("streamChat usage", () => {
 
 
 describe("实际外发请求的离线稳定前缀验收（非供应商命中率）", () => {
-  it.each(["chat", "outline", "characters", "story", "style"] as const)("%s 稳定材料占多数时，任务变化不破坏前面至少95%的可复用输入", async (surface) => {
+  it.each(["chat", "outline", "style"] as const)("%s 稳定材料占多数时，任务变化不破坏前面至少95%的可复用输入", async (surface) => {
     const { buildAgentRequestMessages } = await import("./agent/cache-aware-messages")
-    const { buildSimpleExtractionPromptParts } = await import("./novel/book-analysis/simple-extraction-prompts")
-    const { buildSimpleExtractionMessages } = await import("./novel/book-analysis/simple-extraction-messages")
-    const { buildStoryMapCacheContent } = await import("./novel/book-analysis/story-map-prompts")
-    // 旧 ./novel/book-analysis/style-prompts 的 buildStyleExtractionPrompt(sampleText, bookTitle)
-    // 已在 15c00e3「用 Writing DNA 替换拆书文风模块」随模块整体删除，替代物是分层蒸馏的
-    // writing-dna-prompts：L1/L6 语言与节奏 prompt 承接了原文风提取 prompt 的核心维度
-    // （narrativeDensity / sentenceStyle / rhetoricDensity / dialogueStyle /
-    //  vocabularyPreferences / avoidPatterns），且两种深度都会发送，故用它保持同一验收意图。
     const { buildLanguageAndRhythmPrompt } = await import("./novel/book-analysis/writing-dna-prompts")
     const { computeStyleMetrics } = await import("./novel/book-analysis/style-metrics")
     const material = "长篇小说的稳定作品资料与章节原文。".repeat(1000)
@@ -753,14 +745,6 @@ describe("实际外发请求的离线稳定前缀验收（非供应商命中率�
         { role: "user", content: "已确认故事目标" }, { role: "assistant", content: "此前方案" },
         { role: "user", content: `继续处理${target}` },
       ], `目标契约：${target}`)
-      if (surface === "characters") {
-        const parts = buildSimpleExtractionPromptParts({ chapterSamples: material, characterNames: [target] })
-        return buildSimpleExtractionMessages(parts.stablePrefix + parts.dynamicSuffix, parts.stablePrefix)
-      }
-      if (surface === "story") return [{ role: "user", content: buildStoryMapCacheContent({ bookTitle: "测试作品",
-        chapters: [{ id: "ch-1", title: "第一章", order: 1, content: material }],
-        temporaryCharacters: [{ name: target, aliases: [], category: "主角" }],
-      }) }]
       return [{ role: "user", content: [{ type: "text", text: buildLanguageAndRhythmPrompt(computeStyleMetrics([material]), material, "测试作品"), cacheControl: true }] }]
     }
     mocks.fetch.mockReset()

@@ -79,4 +79,10 @@ describe("已移除 provider 的清理", () => {
     expect(untouched.cleared).toBe(false)
     expect(untouched.config.provider).toBe("deepseek")
   })
+
+  it("移除已停用的会员提供方，保留自定义接口", () => {
+    const mine = { provider: "custom", model: "local", customEndpoint: "http://localhost:8000/v1", apiKey: "local" }
+    expect(clearObsoleteLlmProvider(mine).config).toBe(mine)
+    expect(pruneObsoleteProviders({ "qmai-builtin": {}, "custom-local": mine }).configs).toEqual({ "custom-local": mine })
+  })
 })

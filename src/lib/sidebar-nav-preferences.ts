@@ -5,7 +5,6 @@ export const DEFAULT_SIDEBAR_NAV_ORDER = [
   "sources",
   "graph",
   "lint",
-  "soul",
   "skillLibrary",
   /*
    * 「插件」放在技能库之后、拆书库之前。
@@ -16,9 +15,7 @@ export const DEFAULT_SIDEBAR_NAV_ORDER = [
    * 这里只决定新装用户的初始顺序。
    */
   "plugins",
-  "bookAnalysis",
   "reviewCenter",
-  "storySimulation",
   "search",
   "trash",
 ] as const

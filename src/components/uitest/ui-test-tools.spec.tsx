@@ -9,11 +9,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import i18n from "@/i18n"
 import { useWikiStore } from "@/stores/wiki-store"
 import { SettingsView } from "@/components/settings/settings-view"
-import { SoulView } from "@/components/novel/soul-view"
 import { LLM_PRESETS } from "@/components/settings/llm-presets"
 import type { SettingsDraft } from "@/components/settings/settings-types"
 import { DEFAULT_SIDEBAR_NAV_CONFIG } from "@/lib/sidebar-nav-preferences"
-import { UI_FONT_OPTIONS } from "@/lib/font-settings"
 import { readUiTestSkin, writeUiTestSkin } from "@/lib/ui-test"
 
 const ui = vi.hoisted(() => ({ enabled: true }))
@@ -48,7 +46,6 @@ vi.mock("@/lib/novel/project-soul-style-store", async (importOriginal) => ({
   })),
   saveProjectSoulStyleStore: persistence.saveSoul,
 }))
-vi.mock("@/components/novel/character-aura-view", () => ({ CharacterAuraView: ({ hideSidebar }: { hideSidebar?: boolean }) => <div data-existing-aura-view data-hide-sidebar={String(hideSidebar)} /> }))
 vi.mock("@/components/layout/panel-header-with-help", () => ({ PanelHeaderWithHelp: ({ title }: { title: string }) => <span>{title}</span> }))
 
 // 隔离业务I/O，验证正式入口与测试版四子页仍可达；具体保存与测试在models专项运行。
@@ -71,12 +68,10 @@ vi.mock("@/components/settings/sections/maintenance-section", () => ({ Maintenan
 vi.mock("@/components/settings/sections/data-management-section", () => ({ DataManagementSection: () => <div data-capability="data-management" /> }))
 vi.mock("@/components/settings/sections/export-center-section", () => ({ ExportCenterSection: () => <div data-capability="export-center" /> }))
 vi.mock("@/components/settings/sections/feedback-section", () => ({ FeedbackSection: () => <div data-capability="feedback" /> }))
-vi.mock("@/components/settings/sections/contact-support-section", () => ({ ContactSupportSection: () => <div data-capability="contact-support" /> }))
 vi.mock("@/components/settings/sections/classification-section", () => ({ ClassificationSection: () => <div data-capability="classification" /> }))
 vi.mock("@/components/settings/sections/changelog-section", () => ({ ChangelogSection: () => <div data-capability="changelog" /> }))
-vi.mock("@/components/settings/sections/account-section", () => ({ AccountSection: () => <div data-capability="account" /> }))
 
-const categories = ["account", "model", "novel", "network", "web-search", "interface", "user-memory", "data-management", "feedback", "contact-support", "changelog"]
+const categories = ["model", "novel", "network", "web-search", "interface", "user-memory", "data-management", "feedback", "changelog"]
 let container: HTMLDivElement
 let root: Root
 
@@ -118,30 +113,11 @@ async function click(selector: string) {
 }
 
 describe("测试版设置布局与正式版隔离", () => {
-  it("只保留十三个设置分类，不显示路径、导出、使用说明和意图路由", async () => {
+  it("只保留十个设置分类，不显示路径、导出、使用说明和意图路由", async () => {
     await render(<SettingsView />)
     expect(container.querySelector('[data-ui-page="settings"]')).not.toBeNull()
     expect(container.querySelectorAll('aside')).toHaveLength(1)
-    /*
-     * 这里的数字是**有意的变更护栏**，不是「渲染结果与数据源一致」的校验：
-     * 导航按钮和窄屏 select 都由 settings-view 的 CATEGORIES.map 直接渲染，
-     * 若改成和 CATEGORIES.length 比对就永远为真，等于删掉这条断言。
-     * 所以新增 / 删除分类时必须同步改本用例的两个数字（导航 13、select 13），
-     * 并在下面补一行变更记录，让 review 看得到「分类变了」。
-     *
-     * 10 → 11：远端「把写作能力开放给本机 Agent」新增了应用级分类
-     * 「外部 Agent（MCP）」（settings-view 的 CATEGORIES 里的 mcp）。
-     * 11 → 12：新增「云同步」（紧跟模型设置），用于把书籍备份到用户自己的网盘。
-     * 12 → 13：新增「账号」（注册 / 登录 / 头像 / 改密码），排在第一位。
-     * 14 → 13：删除「插件」分类 —— 插件统一收进创作中心的「插件」页，
-   * 设置里不再保留第二份入口（两处入口会让人以为是两套东西）。
-     * 13 → 14：新增「会员云空间」（紧跟「云同步」）—— 备份到我们自己的服务器，
-     * 与「云同步」（用户自己的网盘）是两回事，需要独立入口。
-     * 独立「新手引导」分类早已按用户要求撤掉，仍只是写作设置里的一个开关。
-     * 其余被隐藏的分类（维护 / 导出 / 使用说明 / 分类规则）保持隐藏，
-     * 下面几条反向断言不变。
-     */
-    expect(container.querySelectorAll('[data-ui="settings-navigation"] button')).toHaveLength(13)
+    expect(container.querySelectorAll('[data-ui="settings-navigation"] button')).toHaveLength(10)
     /*
      * 「维护工具」已按用户要求从设置搬到顶栏「创作工具」（见 ui-test-shell
      * 的 TOOL_GROUPS 与 layout/content-area 的 maintenance 视图）。
@@ -167,7 +143,7 @@ describe("测试版设置布局与正式版隔离", () => {
     const select = container.querySelector<HTMLSelectElement>('select[aria-label="设置分类"]')
     expect(select).not.toBeNull()
     // 窄屏下拉与左侧导航同源（同一份 CATEGORIES），数量护栏同上一条用例。
-    expect(select?.options).toHaveLength(13)
+    expect(select?.options).toHaveLength(10)
     await act(async () => {
       select!.value = "interface"
       select!.dispatchEvent(new Event("change", { bubbles: true }))
@@ -222,8 +198,8 @@ describe("真实外观页的测试皮肤", () => {
        * 本文件其余用例不需要这些字段，但草稿是共享的，所以一并给全。
        */
       const [draft, setDraft] = useState<SettingsDraft>({
-        uiLanguage: "zh", uiFontFamily: "system", uiFontSizeScale: 1,
-        uiBodyFontFamily: "serif-default", uiBodyFontPx: 18, uiBodyLineHeight: 1.95,
+        uiLanguage: "zh", uiFontSizeScale: 1,
+        uiBodyFontPx: 18, uiBodyLineHeight: 1.95,
         uiBodyLetterSpacing: 0, uiBodyMarginX: null, uiBodySafeBottom: 51,
         visualStyle: "fangzheng", sidebarNavConfig: DEFAULT_SIDEBAR_NAV_CONFIG,
       } as SettingsDraft)
@@ -280,13 +256,9 @@ describe("真实外观页的测试皮肤", () => {
     }
   })
 
-  it("字体、字号及语言控件仍更新原草稿", async () => {
+  it("界面使用系统字体，字号仍可保存", async () => {
     const setDraft = await renderInterface()
-    const font = container.querySelector<HTMLSelectElement>('select[aria-label="界面字体"]')!
-    expect(font).not.toBeNull()
-    expect(Array.from(font.options).map((option) => option.value)).toEqual(UI_FONT_OPTIONS.map((option) => option.value))
-    await act(async () => { font.value = "simsun"; font.dispatchEvent(new Event("change", { bubbles: true })) })
-    expect(setDraft).toHaveBeenLastCalledWith("uiFontFamily", "simsun")
+    expect(container.querySelector('[aria-label="界面字体"]')).toBeNull()
     expect(container.querySelector('[aria-label="界面语言"]')).toBeNull()
     const scale = container.querySelector<HTMLSelectElement>('select[aria-label="字号预设"]')!
     expect(scale).not.toBeNull()
@@ -377,41 +349,6 @@ describe("真实模型列表的测试版分组", () => {
 
 })
 
-describe("测试版灵魂单列与旧编辑能力", () => {
-  it("项目灵魂单列展示页签与长规则，无面包屑，保留全部风格动作", async () => {
-    await render(<SoulView />)
-    expect(container.querySelector('[data-ui-page="soul"][data-ui-soul="project"]')).not.toBeNull()
-    expect(container.querySelector('[aria-label="面包屑"]')).toBeNull()
-    expect(container.querySelector('[data-ui="soul-project-editor"] textarea')?.textContent).toBe("既有长规则。".repeat(1000))
-    expect(container.querySelectorAll('input[type="checkbox"]')).toHaveLength(2)
-    expect(container.querySelectorAll('input[type="checkbox"]:checked')).toHaveLength(1)
-    expect(container.querySelector('[title="删除写作风格"]')).not.toBeNull()
-    const save = Array.from(container.querySelectorAll("button")).find((button) => button.textContent?.includes("保存项目灵魂"))!
-    expect(save).toBeDefined()
-    await act(async () => { save.click() })
-    expect(persistence.saveSoul).toHaveBeenCalledWith("/ui-test/project", expect.objectContaining({ enabledStyleId: "style-a", styles: expect.arrayContaining([expect.objectContaining({ content: "既有长规则。".repeat(1000) })]) }))
-  })
-
-  it.each(["builtIn", "custom"] as const)("%s 先展示单列画廊，点开再复用原角色组件，不增加内层侧栏", async (section) => {
-    useWikiStore.setState({ selectedSoulTab: "character", selectedSoulId: section === "custom" ? "new-custom-soul" : "existing-aura", selectedSoulSection: section })
-    await render(<SoulView />)
-    expect(container.querySelector(`[data-ui-soul="${section === "custom" ? "custom" : "role"}"]`)).not.toBeNull()
-    expect(container.querySelector('[aria-label="面包屑"]')).toBeNull()
-    // 画廊优先：初始不直接挂载编辑组件，也不渲染任何内侧栏。
-    expect(container.querySelector('[data-existing-aura-view]')).toBeNull()
-    expect(container.querySelector('[aria-label="灵魂分组"]')).not.toBeNull()
-    // 自定义灵魂有新建入口，进入后复用原角色组件（hideSidebar）。
-    if (section === "custom") {
-      const createBtn = Array.from(container.querySelectorAll("button")).find((button) => button.textContent?.includes("新建灵魂"))
-      expect(createBtn).not.toBeUndefined()
-      await act(async () => { createBtn!.click() })
-      expect(container.querySelector('[data-existing-aura-view][data-hide-sidebar="true"]')).not.toBeNull()
-    }
-  })
-
-
-})
-
 const cssPath = resolve(__dirname, "ui-test-tools.css")
 function cssRoot() { return postcss.parse(existsSync(cssPath) ? readFileSync(cssPath, "utf8") : "") }
 function hasDeclaration(selector: string, property: string, value: string) {
@@ -480,8 +417,6 @@ describe("工具页样式规格及作用域", () => {
 
   it.each([
     ["memory", "novel/memory-center-view.tsx"],
-    ["analysis", "novel/book-analysis-view.tsx"],
-    ["simulation", "novel/story-simulation/story-simulation-view.tsx"],
     ["review", "review/review-center-view.tsx"],
     ["graph", "graph/graph-view.tsx"],
     ["search", "search/search-view.tsx"],

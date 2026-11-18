@@ -18,6 +18,6 @@ describe("content-area novel lint slot", () => {
 
   it("renames dashboard navigation labels away from English in Chinese locale", () => {
     expect(zh).toContain('"reviewCenter": "审查中心"')
-    expect(zh).toContain('"soul": "灵魂"')
+    expect(zh).not.toContain('"soul": "灵魂"')
   })
 })

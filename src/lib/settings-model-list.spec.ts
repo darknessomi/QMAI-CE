@@ -23,7 +23,7 @@ function customConfig(overrides: Partial<LlmConfig> = {}): LlmConfig {
     apiKey: "sk-test",
     model: "gpt-4o",
     ollamaUrl: "http://localhost:11434",
-    customEndpoint: "https://hub.linux.do/v1",
+    customEndpoint: "https://models.example.invalid/v1",
     maxContextSize: 128000,
     apiMode: "chat_completions",
     reasoning: { mode: "off" },
@@ -49,7 +49,7 @@ describe("settings model list", () => {
     const { fetchLlmModelList } = await import("./settings-model-list")
     const result = await fetchLlmModelList(customConfig())
 
-    expect(fetchMock).toHaveBeenCalledWith("https://hub.linux.do/v1/models", {
+    expect(fetchMock).toHaveBeenCalledWith("https://models.example.invalid/v1/models", {
       method: "GET",
       headers: {
         Authorization: "Bearer sk-test",
@@ -63,7 +63,7 @@ describe("settings model list", () => {
     fetchMock
       .mockResolvedValueOnce(new Response("forbidden", { status: 403 }))
       .mockResolvedValueOnce(
-        new Response(JSON.stringify({ data: [{ id: "linux-do-model" }] }), {
+        new Response(JSON.stringify({ data: [{ id: "example-model" }] }), {
           status: 200,
           headers: { "Content-Type": "application/json" },
         }),
@@ -74,7 +74,7 @@ describe("settings model list", () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(2)
     expect(fetchMock.mock.calls[1]).toEqual([
-      "https://hub.linux.do/v1/models",
+      "https://models.example.invalid/v1/models",
       {
         method: "GET",
         headers: expect.objectContaining({
@@ -84,7 +84,7 @@ describe("settings model list", () => {
         }),
       },
     ])
-    expect(result.models).toEqual(["linux-do-model"])
+    expect(result.models).toEqual(["example-model"])
   })
 
   it("keeps the original 403 diagnostic when the compatibility retry cannot be sent", async () => {

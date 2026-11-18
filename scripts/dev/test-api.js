@@ -1,9 +1,9 @@
-// 测试 linux.do 的 API 接口（本地调试：API_KEY=xxx node scripts/dev/test-api.js）
+// 测试模型接口。运行前请设置 BASE_URL 和 API_KEY。
 const API_KEY = process.env.API_KEY ?? "";
-const BASE_URL = process.env.BASE_URL ?? "https://hub.linux.do/v1";
+const BASE_URL = process.env.BASE_URL?.trim().replace(/\/+$/, "");
 
-if (!API_KEY) {
-  console.error("请设置环境变量 API_KEY");
+if (!BASE_URL || !API_KEY) {
+  console.error("请设置环境变量 BASE_URL 和 API_KEY");
   process.exit(1);
 }
 
@@ -12,7 +12,6 @@ async function testModelList() {
   const url = `${BASE_URL}/models`;
 
   console.log(`请求 URL: ${url}`);
-  console.log(`API Key: ${API_KEY.substring(0, 10)}...`);
 
   try {
     // 测试 1: 标准请求

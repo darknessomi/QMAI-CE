@@ -2664,7 +2664,7 @@
   border-radius: 16px;
   background: color-mix(in srgb, var(--ui-accent) 12%, var(--ui-paper));
   color: var(--ui-accent);
-  font-family: var(--ui-serif, "Songti SC", Georgia, serif);
+  font-family: var(--ui);
   font-size: 26px;
   font-weight: 600;
 }
@@ -2676,7 +2676,7 @@
 
 .ui-test-root .ui-test-pband-copy h3 {
   margin: 0 0 4px;
-  font-family: var(--ui-serif, "Songti SC", Georgia, serif);
+  font-family: var(--ui);
   font-size: 24px;
   font-weight: 600;
   letter-spacing: .01em;
@@ -3130,7 +3130,7 @@
   border-radius: 8px;
   background: var(--ui-soft);
   color: var(--ui-accent);
-  font-family: var(--ui-serif, "Songti SC", Georgia, serif);
+  font-family: var(--ui);
   font-size: 0.75rem;
   font-style: normal;
   font-weight: 600;
@@ -3248,7 +3248,7 @@ html[data-ui-test-skin] .ui-test-soul-card-avatar {
   border-radius: 7px;
   background: var(--ui-soft);
   color: var(--ui-accent);
-  font-family: var(--ui-serif, "Songti SC", Georgia, serif);
+  font-family: var(--ui);
   font-size: 0.7rem;
   font-weight: 600;
 }
@@ -3485,7 +3485,7 @@ html[data-ui-test-skin] .ui-test-soul-card-meta {
   outline: none;
   background: transparent;
   color: var(--ui-ink);
-  font-family: ui-monospace, "Cascadia Mono", Consolas, "Songti SC", monospace;
+  font-family: ui-monospace, monospace;
   font-size: 0.78rem;
   line-height: 1.85;
   resize: vertical;
@@ -3836,7 +3836,7 @@ html[data-ui-test-skin] .ui-test-soul-card-meta {
   min-width: 0;
   overflow: hidden;
   color: var(--ui-ink);
-  font-family: var(--ui-serif, "Songti SC", Georgia, serif);
+  font-family: var(--ui);
   font-size: 1rem;
   font-weight: 600;
   white-space: nowrap;
@@ -4058,7 +4058,7 @@ html[data-ui-test-skin] .ui-test-soul-card-meta {
   outline: none;
   background: transparent;
   color: var(--ui-ink);
-  font-family: ui-monospace, "Cascadia Mono", Consolas, "Songti SC", monospace;
+  font-family: ui-monospace, monospace;
   font-size: 0.78rem;
   line-height: 1.85;
   resize: vertical;
@@ -4095,7 +4095,7 @@ html[data-ui-test-skin] .ui-test-soul-card-meta {
 
 .ui-test-root .ui-test-pdoc-doc h1 {
   margin: 0 0 3px;
-  font-family: var(--ui-serif, "Songti SC", Georgia, serif);
+  font-family: var(--ui);
   font-size: 1.1875rem;
   font-weight: 600;
   letter-spacing: .02em;
@@ -4325,7 +4325,7 @@ html[data-ui-test-skin] .ui-test-soul-card-meta {
 
 .ui-test-root .ui-test-cand-head h3 {
   margin: 0 0 3px;
-  font-family: var(--ui-serif, "Songti SC", Georgia, serif);
+  font-family: var(--ui);
   font-size: 1.25rem;
   font-weight: 600;
 }

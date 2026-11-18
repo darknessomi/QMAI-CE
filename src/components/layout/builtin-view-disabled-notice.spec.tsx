@@ -56,8 +56,8 @@ describe("BuiltinViewDisabledNotice", () => {
   })
 
   it("说清关闭的后果（来自内置插件清单里的 offEffect）", () => {
-    render("storySimulation")
-    expect(text()).toContain("剧情推演室")
+    render("lint")
+    expect(text()).toContain("记忆中心")
     // 清单里写的是「入口从创作工具中消失，已保存的推演结果不会被删除」
     expect(text()).toContain("不会被删除")
   })

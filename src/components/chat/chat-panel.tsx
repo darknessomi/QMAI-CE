@@ -23,7 +23,6 @@ import { useShallow } from "zustand/react/shallow"
 import { useOutlineChatStore } from "@/stores/outline-chat-store"
 import { useWikiStore } from "@/stores/wiki-store"
 import { useWritingStatsStore } from "@/stores/writing-stats-store"
-import { useStorySimulationStore } from "@/stores/story-simulation-store"
 import { ReferenceInput, type InsertReferenceTokens } from "@/components/reference/ReferenceInput"
 import { ReferencePickerDialog } from "@/components/reference/ReferencePickerDialog"
 import { ConversationRunStatusIcon } from "@/components/common/conversation-run-status-icon"
@@ -522,12 +521,6 @@ function resolveChatContextIntent(
   return "generate"
 }
 
-const SIMULATION_INTENTS = new Set([
-  "story_framework_generate",
-  "multi_agent_simulate",
-  "character_interview",
-  "scenario_simulate",
-])
 
 interface ChatSendOptions {
   /** Internal recovery path for a failed mandatory chapter workflow. */
@@ -1024,7 +1017,6 @@ export function ChatPanel() {
   // 角色灵魂绑定表没有 zustand 镜像：临时绑定写入/还原后靠它触发重新读盘（丁-4）。
   const bumpDataVersion = useWikiStore((s) => s.bumpDataVersion)
   const novelMode = useWikiStore((s) => s.novelMode)
-  const setActiveView = useWikiStore((s) => s.setActiveView)
   const llmConfig = useWikiStore((s) => s.llmConfig)
   const bindingVersion = useWikiStore((s) => s.bindingVersion)
   const aiChatModel = useWikiStore((s) => s.aiChatModel)
@@ -2040,29 +2032,6 @@ export function ChatPanel() {
       if (controller.signal.aborted) {
         finishAgentSession()
         useChatStore.getState().stopConversationRun(capturedConvId, runId)
-        await releaseMessageSoulBinding()
-        return
-      }
-
-      if (taskRoute && SIMULATION_INTENTS.has(taskRoute.intent)) {
-        const hasFramework = !!activeBinding
-        useStorySimulationStore.getState().initWithPreset({
-          intent: taskRoute.intent,
-          userInput: plainText,
-          hasFramework,
-        })
-        setActiveView("storySimulation")
-        updateAgentAssistantMessage(assistantMessage.id, (message) => ({
-          ...message,
-          content: "已为你打开剧情推演室并预填配置，请在推演室中继续操作。",
-          isAgentRunning: false,
-        }))
-        finishAgentSession()
-        useChatStore.getState().finishConversationRun(
-          capturedConvId,
-          useChatStore.getState().activeConversationId,
-          runId,
-        )
         await releaseMessageSoulBinding()
         return
       }

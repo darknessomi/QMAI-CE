@@ -39,9 +39,6 @@ const listMock = vi.hoisted(() => vi.fn())
 const enableMock = vi.hoisted(() => vi.fn())
 // 卸载命令的 spy：用来验证「隐藏安装入口时，卸载失败的提示条仍然看得见」。
 const uninstallMock = vi.hoisted(() => vi.fn())
-// 市场命令的桩：「插件」页（集成用例）一挂载就会去读索引。
-const marketIndexMock = vi.hoisted(() => vi.fn())
-const marketInstallMock = vi.hoisted(() => vi.fn())
 
 // 卡片挂载时只调 `pluginsApi.list`；启停/卸载等命令这些用例不点，给了桩只是为了
 // 误触时显式失败，而不是掉进真实的 Tauri invoke。
@@ -53,8 +50,6 @@ vi.mock("@/lib/plugins/api", () => ({
     uninstall: uninstallMock,
     install: vi.fn(),
     installLocal: vi.fn(),
-    marketIndex: marketIndexMock,
-    marketInstall: marketInstallMock,
   },
 }))
 
@@ -526,15 +521,6 @@ function panelTestBed() {
     root = createRoot(host)
     listMock.mockReset()
     uninstallMock.mockReset()
-    marketIndexMock.mockReset()
-    marketInstallMock.mockReset()
-    // 市场索引给空：本组用例不验市场，只要它别把页面卡在加载态。
-    marketIndexMock.mockResolvedValue({
-      plugins: [],
-      fromCache: false,
-      fetchedAt: null,
-      sourceUrl: "",
-    })
   })
 
   afterEach(async () => {
@@ -583,7 +569,7 @@ function panelTestBed() {
     })
   }
 
-  /** 渲染完整的「插件」页（市场 + 已安装），默认停在市场 tab。 */
+  /** 渲染插件管理页。 */
   async function renderPluginCenter(): Promise<void> {
     listMock.mockResolvedValue([panelPlugin()])
     await act(async () => {

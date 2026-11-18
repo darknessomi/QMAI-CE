@@ -18,7 +18,7 @@
  * 新增已移除 provider 时只需往 `OBSOLETE_PROVIDER_IDS` 里加 id。
  */
 
-export const OBSOLETE_PROVIDER_IDS = ["workbuddy"] as const
+export const OBSOLETE_PROVIDER_IDS = ["workbuddy", "qmai-builtin"] as const
 
 const OBSOLETE = new Set<string>(OBSOLETE_PROVIDER_IDS)
 
@@ -61,7 +61,7 @@ export function pruneObsoleteProviders<T extends Record<string, unknown>>(config
  * 清空后界面表现为「未选择模型」，用户重新选一个即可。
  */
 export function clearObsoleteLlmProvider<
-  T extends { provider: string; model?: string; customEndpoint?: string },
+  T extends { provider: string; model?: string; customEndpoint?: string; apiKey?: string },
 >(config: T): { config: T; cleared: boolean } {
   if (!isObsoleteProviderId(config.provider)) return { config, cleared: false }
   const next = { ...config, provider: "", model: "" }
@@ -69,5 +69,6 @@ export function clearObsoleteLlmProvider<
   if (typeof next.customEndpoint === "string" && next.customEndpoint.length > 0) {
     next.customEndpoint = ""
   }
+  if (config.apiKey) next.apiKey = ""
   return { config: next as T, cleared: true }
 }

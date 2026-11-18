@@ -93,9 +93,7 @@ export function buildReaderWindowUrl(payload: ReaderWindowPayload, base?: string
   const appearance = payload.appearance
   if (appearance) {
     params.set("skin", appearance.skin)
-    params.set("ui-font", appearance.uiFontFamily)
     params.set("ui-scale", String(appearance.uiFontSizeScale))
-    params.set("body-font", appearance.bodyFontFamily)
     params.set("font-px", String(appearance.bodyFontPx))
     params.set("leading", String(appearance.bodyLineHeight))
     params.set("spacing", String(appearance.bodyLetterSpacing))
@@ -118,9 +116,7 @@ function parseAppearanceParams(params: URLSearchParams): ReaderWindowAppearance 
   const number = (key: string) => params.get(key) ?? undefined
   return normalizeReaderWindowAppearance({
     skin: params.get("skin"),
-    uiFontFamily: number("ui-font"),
     uiFontSizeScale: number("ui-scale"),
-    bodyFontFamily: number("body-font"),
     bodyFontPx: number("font-px"),
     bodyLineHeight: number("leading"),
     bodyLetterSpacing: number("spacing"),

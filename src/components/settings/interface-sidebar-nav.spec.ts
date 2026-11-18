@@ -28,7 +28,6 @@ describe("settings sidebar nav preferences", () => {
     expect(interfaceSectionSource).toContain('data-ui="interface-skins"')
     expect(interfaceSectionSource).toContain("data-ui-skin-choice")
     expect(interfaceSectionSource).toContain('aria-label="推荐外观"')
-    expect(interfaceSectionSource).toContain('setDraft("uiFontFamily"')
     expect(interfaceSectionSource).toContain('setDraft("uiFontSizeScale"')
     expect(interfaceSectionSource).toContain('type="range"')
   })
@@ -94,30 +93,11 @@ describe("settings sidebar nav preferences", () => {
    * 一正一反合起来比原来强：原来只要求设置页有，现在既要求浮层有、
    * 又要求设置页没有，"搬了一半"这种状态会被抓住。
    */
-  it("正文字体接成完整一条链路：控件、草稿字段、store、持久化", () => {
-    // 1) 控件在**共享组件**里，接线在**渲染它的那个模块**里
-    //    （本轮从设置页搬到了章节浮层所在的 preview-panel.tsx）
-    expect(bodyTypographySource).toContain("BODY_FONT_OPTIONS")
-    expect(bodyTypographySource).toContain('aria-label="正文字体"')
-    expect(previewPanelSource).toContain('applyBodyTypographyChange("fontFamily"')
-    // 反向：设置页不许再接线这 6 项（用户明确要求移走）
-    expect(
-      interfaceSectionSource,
-      "设置页不得再给正文字体接线——这 6 项属于章节浮层",
-    ).not.toContain('setDraft("uiBodyFontFamily"')
-    // 2) 草稿类型里有该字段（否则 setDraft 的类型对不上，tsc 会先报错）
-    expect(settingsTypesSource).toContain("uiBodyFontFamily")
-    // 3) store 有状态与 setter，且用**独立**的 localStorage 键
-    expect(wikiStoreSource).toContain("uiBodyFontFamily: readStoredBodyFontFamily()")
-    expect(wikiStoreSource).toContain("setUiBodyFontFamily:")
-    expect(wikiStoreSource).toContain('const BODY_FONT_FAMILY_KEY = "qmai-body-font-family"')
-    // 共用同一个键会让两个设置互相覆盖 —— 这正是要防的
-    expect(wikiStoreSource).not.toContain('const BODY_FONT_FAMILY_KEY = "qmai-ui-font-family"')
-    // 4) 保存时既写 store 也持久化（只做一个会"这次生效下次丢失"或反之）
-    expect(settingsViewSource).toContain("setUiBodyFontFamily(draft.uiBodyFontFamily)")
-    expect(settingsViewSource).toContain("saveUiBodyFontFamily(draft.uiBodyFontFamily")
-    // 5) 界面字体也要照旧保存，不能被新字段挤掉
-    expect(settingsViewSource).toContain("saveUiFontFamily(draft.uiFontFamily)")
+  it("界面和正文统一使用系统字体", () => {
+    const css = readFileSync(resolve(__dirname, "../../index.css"), "utf8")
+    expect(css).toContain("--qmai-ui-font-family: system-ui, sans-serif")
+    expect(bodyTypographySource).not.toContain('aria-label="正文字体"')
+    expect(interfaceSectionSource).not.toContain('setDraft("uiFontFamily"')
   })
 
   /**
@@ -151,8 +131,6 @@ describe("settings sidebar nav preferences", () => {
     //
     // 为什么必须看共享组件：控件只有这一个实现，接线只有这一处。
     // 只看设置页会漏掉"接线搬到浮层了"这种情况（本轮就是）。
-    expect(bodyTypographySource).toContain("BODY_FONT_OPTIONS")
-    expect(bodyTypographySource).toContain('aria-label="正文字体"')
     expect(bodyTypographySource).toContain('aria-label="正文字号预设"')
     expect(bodyTypographySource).toContain('aria-label="正文字号"')
     // 这 4 个滑块用**动态**属性 aria-label={label}，字面量只以 label="行间距" 这个
@@ -165,7 +143,7 @@ describe("settings sidebar nav preferences", () => {
     }
     // 2) 接线在 preview-panel，且**穷尽**覆盖 6 个键；
     //    设置页必须一个都不再有（用户要求：它们属于章节，不属于全局设置）
-    for (const key of ["fontFamily", "fontPx", "lineHeight", "letterSpacing", "marginX", "safeBottom"]) {
+    for (const key of ["fontPx", "lineHeight", "letterSpacing", "marginX", "safeBottom"]) {
       expect(
         previewPanelSource,
         `preview-panel 的 applyBodyTypographyChange 必须覆盖 ${key}`,
@@ -193,7 +171,7 @@ describe("settings sidebar nav preferences", () => {
       ).not.toContain(field)
     }
     // 3) 草稿类型里有这 6 个字段
-    for (const field of ["uiBodyFontFamily", "uiBodyFontPx", "uiBodyLineHeight", "uiBodyLetterSpacing", "uiBodyMarginX", "uiBodySafeBottom"]) {
+    for (const field of ["uiBodyFontPx", "uiBodyLineHeight", "uiBodyLetterSpacing", "uiBodyMarginX", "uiBodySafeBottom"]) {
       expect(settingsTypesSource).toContain(field)
     }
     // 4) store：5 个新状态 + 5 个 setter + 5 个**互不相同**的 localStorage 键
@@ -215,8 +193,6 @@ describe("settings sidebar nav preferences", () => {
       expect(seenKeys.has(key), `键 ${key} 被两个参数共用`).toBe(false)
       seenKeys.add(key)
     }
-    // 正文字体仍有自己的键
-    expect(wikiStoreSource).toContain('"qmai-body-font-family"')
     // 迁移必须走单一来源的纯函数，并且把**界面字号**传进去 ——
     // 自己写 bodyScale × 18 会让界面字号非 100% 的用户一升级正文就变小
     /*
@@ -278,7 +254,6 @@ describe("settings sidebar nav preferences", () => {
     expect(settingsViewSource).toContain("saveUiBodyMarginX(draft.uiBodyMarginX)")
     // 6) 界面字号与界面字体照旧保存，不能被新字段挤掉
     expect(settingsViewSource).toContain("saveUiFontSizeScale(draft.uiFontSizeScale")
-    expect(settingsViewSource).toContain("saveUiFontFamily(draft.uiFontFamily)")
   })
 
   /**

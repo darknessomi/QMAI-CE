@@ -60,7 +60,7 @@ export function CustomModelMark() {
         fontSize="13.5"
         fontWeight="500"
         fill={CUSTOM_MARK_COLOR}
-        fontFamily='"PingFang SC", "Microsoft YaHei", "Noto Sans SC", "Source Han Sans SC", sans-serif'
+        fontFamily="system-ui, sans-serif"
       >
         自
       </text>

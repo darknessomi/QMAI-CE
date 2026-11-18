@@ -415,7 +415,6 @@ describe("字体设置浮层的值接线（三处手抄必须各自配对）", (
   it("switch 的每个 case 各自调用同名的 setter（且不夹带别的 setter）", () => {
     const bodies = caseBodies()
     const ALL_SETTERS = [
-      "setUiBodyFontFamily",
       "setUiBodyFontPx",
       "setUiBodyLineHeight",
       "setUiBodyLetterSpacing",
@@ -424,7 +423,6 @@ describe("字体设置浮层的值接线（三处手抄必须各自配对）", (
     ] as const
 
     for (const [key, setter] of [
-      ["fontFamily", "setUiBodyFontFamily"],
       ["fontPx", "setUiBodyFontPx"],
       ["lineHeight", "setUiBodyLineHeight"],
       ["letterSpacing", "setUiBodyLetterSpacing"],
@@ -452,7 +450,7 @@ describe("字体设置浮层的值接线（三处手抄必须各自配对）", (
     }
   })
 
-  it("value 对象的 6 个字段各自对着正确的 store 字段", () => {
+  it("value 对象的 5 个字段各自对着正确的 store 字段", () => {
     // 串味之后这里必须红：值都是 number，tsc 拦不住
     for (const [field, storeField] of [
       ["fontPx", "uiBodyFontPx"],
@@ -463,7 +461,6 @@ describe("字体设置浮层的值接线（三处手抄必须各自配对）", (
     ] as const) {
       expect(source).toContain(`${field}: ${storeField}`)
     }
-    expect(source).toContain("fontFamily: uiBodyFontFamily")
   })
 
   it("落盘时每个字段各自读同名的 store 字段", () => {
@@ -474,7 +471,6 @@ describe("字体设置浮层的值接线（三处手抄必须各自配对）", (
      * 写错、或整行删掉，都必须红。
      */
     for (const [saver, storeField] of [
-      ["saveUiBodyFontFamily", "s.uiBodyFontFamily"],
       ["saveUiBodyFontPx", "s.uiBodyFontPx"],
       ["saveUiBodyLineHeight", "s.uiBodyLineHeight"],
       ["saveUiBodyLetterSpacing", "s.uiBodyLetterSpacing"],
@@ -545,7 +541,7 @@ describe("字体设置浮层的「默认设置」按钮", () => {
     expect(resetIdx, "「默认设置」必须排在关闭按钮之前（即显示在它的左侧）").toBeLessThan(closeIdx)
   })
 
-  it("一次复位全部 6 个参数，且值取自 font-settings 的默认常量", () => {
+  it("一次复位全部 5 个参数，且值取自 font-settings 的默认常量", () => {
     const body = resetBody()
 
     /*
@@ -553,7 +549,7 @@ describe("字体设置浮层的「默认设置」按钮", () => {
      * 漏一个的后果很隐蔽：按钮"看起来能用"，只是那一项没回去 ——
      * 用户会以为是自己没点中。所以逐个断言，而不是数一下调用次数。
      */
-    const keys = ["fontFamily", "fontPx", "lineHeight", "letterSpacing", "marginX", "safeBottom"] as const
+    const keys = ["fontPx", "lineHeight", "letterSpacing", "marginX", "safeBottom"] as const
     for (const key of keys) {
       expect(body, `「默认设置」必须复位 ${key}`).toContain(`applyBodyTypographyChange("${key}"`)
     }
@@ -570,7 +566,6 @@ describe("字体设置浮层的「默认设置」按钮", () => {
      * 改不到这个按钮 —— 出现"点『默认设置』得到的不是默认值"。
      */
     for (const constName of [
-      "DEFAULT_BODY_FONT_FAMILY",
       "DEFAULT_BODY_FONT_PX",
       "DEFAULT_BODY_LINE_HEIGHT",
       "DEFAULT_BODY_LETTER_SPACING",

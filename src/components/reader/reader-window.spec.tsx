@@ -66,9 +66,7 @@ vi.mock("@/components/editor/outline-dual-preview", () => ({
 
 const APPEARANCE: ReaderWindowAppearance = {
   skin: "zhi",
-  uiFontFamily: "microsoft-yahei",
   uiFontSizeScale: 1.25,
-  bodyFontFamily: "kaiti",
   bodyFontPx: 21,
   bodyLineHeight: 2.05,
   bodyLetterSpacing: 0.5,
@@ -137,8 +135,8 @@ describe("独立窗口跟随外观与格式设置", () => {
     expect(style.getPropertyValue("--qmai-body-margin-x")).toBe("40px")
     expect(style.getPropertyValue("--qmai-body-safe-bottom")).toBe("80px")
     // 正文字体与界面字体各写各的变量
-    expect(style.getPropertyValue("--qmai-body-font-family")).toContain("KaiTi")
-    expect(style.getPropertyValue("--qmai-ui-font-family")).toContain("Microsoft YaHei")
+    expect(style.getPropertyValue("--qmai-body-font-family")).toBe("")
+    expect(style.getPropertyValue("--qmai-ui-font-family")).toBe("")
   })
 
   it("根节点必须带 data-skin —— 基础令牌声明在 .ui-test-root 上，只给 html 挂属性会被它盖掉", () => {

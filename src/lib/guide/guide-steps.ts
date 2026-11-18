@@ -51,7 +51,7 @@ const chapterChapter: GuideChapter = {
 const featuresChapter: GuideChapter = {
   id: "features",
   title: "四个核心能力",
-  summary: "记忆、灵魂、技能库、拆书库，决定长期写下去的质量。",
+  summary: "记忆与技能库，决定长期写下去的质量。",
 }
 
 export const GUIDE_CHAPTERS: GuideChapter[] = [
@@ -538,7 +538,7 @@ export const GUIDE_STEPS: GuideStep[] = [
     ],
     bullets: [
       { title: "① 点橡皮图标", text: "弹出「去 AI 味」技能选择。" },
-      { title: "② 选一个技能", text: "内置的，或你自己从拆书库里提炼的；选完开始处理。" },
+      { title: "② 选一个技能", text: "内置的，或你自己创建的；选完开始处理。" },
       { title: "③ 看草稿再决定", text: "结果另存为**草稿预览**，不会直接覆盖原文；满意才替换，不满意直接关掉。" },
     ],
     anchor: "chapter.deai",
@@ -613,7 +613,7 @@ export const GUIDE_STEPS: GuideStep[] = [
     chapter: "chapter",
     title: "文风模式",
     body: [
-      "笔形按钮。选一条**文风预设**（可以是你自己从拆书库里提炼的，也可以是内置的），这一轮就按那个文风写。",
+      "笔形按钮。选一条**文风预设**（可以是你自己创建的，也可以是内置的），这一轮就按那个文风写。",
       "浮层里还能选「本次不用文风」。文风只影响这一次生成，不会永久改掉项目设定。",
     ],
     anchor: "chapter.style",
@@ -664,36 +664,15 @@ export const GUIDE_STEPS: GuideStep[] = [
     placement: "center",
   },
   {
-    id: "feature-soul",
-    chapter: "features",
-    title: "灵魂",
-    body: [
-      "「灵魂」分两层：**项目灵魂**是这本书的整体气质与叙事偏好；**角色灵魂**是每个角色的说话方式、行为逻辑、底线。",
-      "绑定后，写这个角色的对话时会自动带上他的「味儿」，避免所有角色说话都像同一个人。",
-    ],
-    anchor: "shell.tool.soul",
-    padding: 8,
-  },
-  {
     id: "feature-skill",
     chapter: "features",
     title: "技能库",
     body: [
       "「技能库」管理三类可复用的写作能力：**去 AI 味技能**、**写作 Skill**、**文风**。",
-      "可以从拆书库里提炼，也可以自己写；生成时按需选用，或在输入框 @ 引用。",
+      "可以自行编写；生成时按需选用，或在输入框 @ 引用。",
     ],
     anchor: "shell.tool.skillLibrary",
     padding: 8,
-  },
-  {
-    id: "feature-book-analysis",
-    chapter: "features",
-    title: "拆书库",
-    body: [
-      "「拆书库」导入你喜欢的作品，分析它的结构、节奏、人物与文风，产出可复用的写作 DNA、故事导图和文风预设。",
-      "这是把「我喜欢这本」变成「我能写出这种感觉」的地方。入口在顶栏「创作工具」菜单。",
-    ],
-    placement: "center",
   },
   {
     id: "feature-done",
@@ -728,7 +707,6 @@ export const GUIDE_ANCHORS = [
   "shell.settings",
   "shell.shelf",
   "shell.nav.wiki",
-  "shell.tool.soul",
   "shell.tool.skillLibrary",
   "settings.model-tab.llm",
   "settings.model-tab.default",

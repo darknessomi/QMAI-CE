@@ -12,10 +12,6 @@ import {
   clampBodyMarginX,
   clampBodySafeBottom,
   resolveMigratedBodyFontPx,
-  normalizeBodyFontFamily,
-  normalizeUiFontFamily,
-  type BodyFontFamily,
-  type UiFontFamily,
 } from "@/lib/font-settings"
 import {
   VISUAL_STYLE_STORAGE_VERSION,
@@ -41,7 +37,7 @@ import {
   type AiWorkflowMode,
   type OutlineWorkflowMode,
 } from "@/lib/agent/workflow-mode"
-import { clearObsoleteLlmProvider } from "@/lib/obsolete-providers"
+import { clearObsoleteLlmProvider, isObsoleteProviderId } from "@/lib/obsolete-providers"
 
 const RECENT_PROJECTS_KEY = "recentProjects"
 const LAST_PROJECT_KEY = "lastProject"
@@ -247,9 +243,14 @@ export async function saveAiChatModel(model: string): Promise<void> {
   await store.set(AI_CHAT_MODEL_KEY, model)
 }
 
-export async function loadAiChatModel(): Promise<string | null> {
+async function loadSelectedModel(key: string): Promise<string | null> {
   const store = await getStore()
-  return (await store.get<string>(AI_CHAT_MODEL_KEY)) ?? null
+  const value = await store.get<string>(key)
+  return value && !isObsoleteProviderId(value.split("/")[0]) ? value : null
+}
+
+export async function loadAiChatModel(): Promise<string | null> {
+  return loadSelectedModel(AI_CHAT_MODEL_KEY)
 }
 
 export async function saveAiOutlineModel(model: string): Promise<void> {
@@ -266,8 +267,7 @@ export async function saveAiOutlineModel(model: string): Promise<void> {
 }
 
 export async function loadAiOutlineModel(): Promise<string | null> {
-  const store = await getStore()
-  return (await store.get<string>(AI_OUTLINE_MODEL_KEY)) ?? null
+  return loadSelectedModel(AI_OUTLINE_MODEL_KEY)
 }
 
 export async function saveAiWorkflowMode(mode: AiWorkflowMode): Promise<void> {
@@ -310,8 +310,7 @@ export async function saveDefaultLlmModel(model: string): Promise<void> {
 }
 
 export async function loadDefaultLlmModel(): Promise<string | null> {
-  const store = await getStore()
-  return (await store.get<string>(DEFAULT_LLM_MODEL_KEY)) ?? null
+  return loadSelectedModel(DEFAULT_LLM_MODEL_KEY)
 }
 
 /**
@@ -930,8 +929,6 @@ export async function loadVisualStyle(): Promise<VisualStyle | null> {
 }
 
 const UI_FONT_SIZE_SCALE_KEY = "uiFontSizeScale"
-const UI_FONT_FAMILY_KEY = "uiFontFamily"
-const BODY_FONT_FAMILY_KEY = "uiBodyFontFamily"
 /*
  * 旧键（倍数）保留**只读**：新版本不再写它，但读回时要用它做一次性迁移。
  * 不删除的理由与 wiki-store.ts 那边一致 —— 用户回滚到旧版本时旧设置仍在。
@@ -948,31 +945,6 @@ export async function saveUiFontSizeScale(scale: number, _projectId?: string, _p
   const store = await getStore()
   await store.set(UI_FONT_SIZE_SCALE_KEY, scale)
   await store.save()
-}
-
-export async function saveUiFontFamily(fontFamily: UiFontFamily): Promise<void> {
-  const store = await getStore()
-  await store.set(UI_FONT_FAMILY_KEY, normalizeUiFontFamily(fontFamily))
-  await store.save()
-}
-
-export async function loadUiFontFamily(): Promise<UiFontFamily | null> {
-  const store = await getStore()
-  const saved = await store.get<string>(UI_FONT_FAMILY_KEY)
-  return saved ? normalizeUiFontFamily(saved) : null
-}
-
-/** 持久化正文字体。与界面字体各用各的键，互不覆盖。 */
-export async function saveUiBodyFontFamily(fontFamily: BodyFontFamily): Promise<void> {
-  const store = await getStore()
-  await store.set(BODY_FONT_FAMILY_KEY, normalizeBodyFontFamily(fontFamily))
-  await store.save()
-}
-
-export async function loadUiBodyFontFamily(): Promise<BodyFontFamily | null> {
-  const store = await getStore()
-  const saved = await store.get<string>(BODY_FONT_FAMILY_KEY)
-  return saved ? normalizeBodyFontFamily(saved) : null
 }
 
 /* ── 正文排版参数（5 个键，各自独立） ──

@@ -4,7 +4,7 @@
   "name": "章节体检",
   "version": "1.0.0",
   "description": "统计章节字数、对话占比、句长分布与重复句，纯本地计算、不联网",
-  "author": { "name": "QMAI", "url": "https://github.com/Mochocyang/QMAI" },
+  "author": { "name": "QMAI" },
   "license": "MIT",
   "requires": { "qmai": ">=4.4.0" },
   "runtime": { "type": "node", "entry": "index.js", "keepAlive": true, "startTimeoutMs": 10000 },

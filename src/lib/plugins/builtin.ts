@@ -3,8 +3,8 @@ import type { WikiState } from "@/stores/wiki-store"
 /**
  * 「内置插件」清单。
  *
- * ── 它和市场上的插件有什么不同 ──────────────────────────────
- * 市场插件是**第三方代码**：跑在独立进程里，只能通过 MCP + 宿主 HTTP 接口做事，
+ * ── 它和手动安装的插件有什么不同 ──────────────────────────────
+ * 外部插件是**第三方代码**：跑在独立进程里，只能通过 MCP + 宿主 HTTP 接口做事，
  * 因此碰不到应用内部状态（当前章节、审查结果、大纲树），也画不进主界面。
  *
  * 这里的「内置插件」是**我们自己的功能**，代码一行都没搬走，只是给它套上了
@@ -21,13 +21,9 @@ export type BuiltinPluginId =
   | "web-search"
   | "memory-center"
   | "novel-graph"
-  | "soul"
   | "skill-library"
-  | "book-analysis"
-  | "story-simulation"
   | "review-center"
   | "plot-search"
-  | "cloud-sync"
 
 export interface BuiltinPlugin {
   id: BuiltinPluginId
@@ -54,7 +50,7 @@ export interface BuiltinPlugin {
 /**
  * 顺序即插件页里的显示顺序：能力类在前，界面类在后。
  *
- * 剧情搜索 / 审查中心 / 剧情推演 之所以只能做成内置插件（而不是市场插件），
+ * 剧情搜索 / 审查中心 / 剧情推演 之所以只能做成内置插件（而不是外部插件），
  * 是因为它们都依赖宿主独有能力：
  *   · 剧情搜索 用**向量检索**（需要 embedding 模型）+ 点结果要跳转章节；
  *   · 审查中心 读写 `reviewRun` / `selectedFile` 这些 store 状态；
@@ -102,39 +98,12 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
     defaultEnabled: false,
   },
   {
-    id: "soul",
-    name: "灵魂",
-    description: "沉淀作品的气质与文风取向，供生成时参考。",
-    kind: "view",
-    view: "soul",
-    offEffect: "关闭后「灵魂」入口从创作工具中消失，已沉淀的内容不会被删除。",
-    defaultEnabled: true,
-  },
-  {
     id: "skill-library",
     name: "技能库",
     description: "管理可复用的写作技能与提示词模板。",
     kind: "view",
     view: "skillLibrary",
     offEffect: "关闭后「技能库」入口从创作工具中消失，已保存的技能不会被删除。",
-    defaultEnabled: true,
-  },
-  {
-    id: "book-analysis",
-    name: "拆书库",
-    description: "导入参考作品，拆解结构、文风与人物后复用。",
-    kind: "view",
-    view: "bookAnalysis",
-    offEffect: "关闭后「拆书库」入口从创作工具中消失，已拆解的结果不会被删除。",
-    defaultEnabled: true,
-  },
-  {
-    id: "story-simulation",
-    name: "剧情推演室",
-    description: "按框架推演剧情走向，结果按书保存，可回看历次推演。",
-    kind: "view",
-    view: "storySimulation",
-    offEffect: "关闭后「剧情推演室」入口从创作工具中消失，已保存的推演结果不会被删除。",
     defaultEnabled: true,
   },
   {
@@ -153,25 +122,6 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
     kind: "view",
     view: "search",
     offEffect: "关闭后「剧情搜索」入口从创作工具中消失；AI 对话里的本地检索不受影响。",
-    defaultEnabled: true,
-  },
-  {
-    /*
-     * 云同步（2026-11-08 用户要求做成插件）。
-     *
-     * 它是 `capability` 而不是 `view`：没有独立的一级视图，关闭后是
-     * 「不再发生同步这件事」—— 自动同步停摆、手动备份按钮消失、
-     * 右上角云图标消失、设置里的「会员云空间」入口也一并隐藏。
-     *
-     * 云端已备份的数据不动：用户是用自己的账号备的，随时可以从别处取回。
-     * 所以 offEffect 里不写「会清理」，避免吓到用户。
-     */
-    id: "cloud-sync",
-    name: "云同步",
-    description: "把当前作品备份到青幕服务器，换电脑或误删后可以恢复回来。",
-    kind: "capability",
-    offEffect:
-      "关闭后不再自动备份，也无法手动备份；右上角的云同步图标与设置里的「会员云空间」入口都会隐藏。已备份到云端的数据不会被删除，重新打开即可继续使用。",
     defaultEnabled: true,
   },
 ]

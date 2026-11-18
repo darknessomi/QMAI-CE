@@ -1,68 +1,14 @@
-import { useState, useSyncExternalStore } from "react"
+import { useState } from "react"
 import { useTranslation } from "react-i18next"
-import { RefreshCw, Download, CheckCircle, AlertCircle, Globe } from "lucide-react"
 import { allChangelog } from "@/lib/changelog"
-import {
-  APP_AUTO_UPDATE_RELEASES_URL,
-  APP_AUTO_UPDATE_UNSUPPORTED_MESSAGE,
-  isAppAutoUpdateSupported,
-} from "@/lib/app-update-support"
-import {
-  getAppUpdateNoticeSnapshot,
-  setAppUpdateAutoPrompt,
-  subscribeAppUpdateNotice,
-} from "@/lib/app-update-notice"
-import { Switch } from "@/components/ui/switch"
-import {
-  checkForChangelogUpdate,
-  downloadChangelogUpdate,
-  getChangelogUpdateSnapshot,
-  installChangelogUpdate,
-  prepareAndInstallPrefetchedUpdate,
-  redownloadChangelogUpdate,
-  subscribeChangelogUpdateSession,
-} from "@/lib/changelog-update-session"
 
 const COLLAPSED_CHANGELOG_ITEM_COUNT = 5
-
-/** 把字节数变成 "12.4 MB"，让进度条旁边有个可读的量。 */
-function formatMb(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes <= 0) return "0 MB"
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-}
 
 export function ChangelogSection() {
   const { t, i18n } = useTranslation()
   const lang: "en" | "zh" = i18n.language?.startsWith("zh") ? "zh" : "en"
   const entries = allChangelog()
   const [expandedVersions, setExpandedVersions] = useState<Set<string>>(() => new Set())
-  const update = useSyncExternalStore(
-    subscribeChangelogUpdateSession,
-    getChangelogUpdateSnapshot,
-    getChangelogUpdateSnapshot,
-  )
-  const notice = useSyncExternalStore(
-    subscribeAppUpdateNotice,
-    getAppUpdateNoticeSnapshot,
-    getAppUpdateNoticeSnapshot,
-  )
-  const [savingAutoPrompt, setSavingAutoPrompt] = useState(false)
-  const prefetchedPath = notice.prefetch.status === "ready" ? notice.prefetch.path : ""
-  const autoUpdateSupported = isAppAutoUpdateSupported()
-  const updateStatus = update.status
-  const latestVersion = update.latestVersion
-  const updateNotes = update.updateNotes
-  const errorMessage = update.errorMessage
-  const downloadProgress = update.downloadProgress
-  const downloadSource = update.downloadSource
-  const downloadBytes = update.downloadBytes
-  const downloadTotalBytes = update.downloadTotalBytes
-  // 下载速度：用字节数变化估个即时速率，让用户确认"确实在动"。
-  const speedText = (() => {
-    if (update.status !== "downloading" || downloadTotalBytes <= 0) return ""
-    return `${formatMb(downloadBytes)} / ${formatMb(downloadTotalBytes)}`
-  })()
-
   return (
     <div className="space-y-6">
       <div>
@@ -70,199 +16,24 @@ export function ChangelogSection() {
           {t("settings.sections.changelog.title", { defaultValue: "软件更新日志" })}
         </h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          当前版本：v{__APP_VERSION__}
+          社区维护版 v{__APP_VERSION__}
         </p>
       </div>
 
-      {/* 有更新时自动提醒：关掉后启动不再弹窗，只在「更新日志」亮红点 */}
-      <div className="flex items-start justify-between gap-4 rounded-lg border border-border p-4">
-        <div>
-          <h3 className="text-sm font-medium">有更新时自动提醒</h3>
-          {notice.autoPrompt ? null : (
-            <p className="mt-1 text-sm text-muted-foreground">
-              不再弹窗打扰。有新版本时会在「更新日志」这里显示红点，新版本会先在后台下载好，你随时可以来安装。
-            </p>
-          )}
-        </div>
-        <Switch
-          checked={notice.autoPrompt}
-          disabled={savingAutoPrompt}
-          onChange={(next) => {
-            setSavingAutoPrompt(true)
-            void setAppUpdateAutoPrompt(next).finally(() => setSavingAutoPrompt(false))
-          }}
-          label="有更新时自动提醒"
-          data-ui="app-update-auto-prompt-switch"
-        />
-      </div>
-
-      {/* 检查更新区域 */}
-      <div className="rounded-lg border border-border p-4">
-        {autoUpdateSupported ? (
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={() => void checkForChangelogUpdate()}
-              disabled={updateStatus === "checking" || updateStatus === "downloading"}
-              className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <RefreshCw className={`h-4 w-4 ${updateStatus === "checking" ? "animate-spin" : ""}`} />
-              {updateStatus === "checking" ? "正在检查..." : "检查更新"}
-            </button>
-
-            {updateStatus === "up-to-date" ? (
-              <span className="inline-flex items-center gap-1.5 text-sm text-emerald-600 dark:text-emerald-400">
-                <CheckCircle className="h-4 w-4" />
-                当前已是最新版本
-              </span>
-            ) : null}
-
-            {updateStatus === "error" ? (
-              <div className="flex flex-col gap-1">
-                <span className="inline-flex items-center gap-1.5 text-sm text-red-600 dark:text-red-400">
-                  <AlertCircle className="h-4 w-4" />
-                  {errorMessage || "检查更新失败"}
-                </span>
-                <span className="inline-flex items-center gap-1.5 text-sm text-muted-foreground">
-                  可前往官网下载最新版本：
-                  <a
-                    href="https://www.qmai.pro"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="font-medium text-primary hover:underline"
-                  >
-                    www.qmai.pro
-                  </a>
-                </span>
-              </div>
-            ) : null}
-          </div>
-        ) : (
-          <p className="text-sm leading-relaxed text-muted-foreground">
-            {APP_AUTO_UPDATE_UNSUPPORTED_MESSAGE}
-            {" "}
-            <a
-              href={APP_AUTO_UPDATE_RELEASES_URL}
-              target="_blank"
-              rel="noreferrer"
-              className="font-medium text-primary hover:underline"
-            >
-              GitHub Releases
-            </a>
-          </p>
-        )}
-
-        {/* 后台已预下载好：用户可以立即安装，不用再等下载 */}
-        {autoUpdateSupported && prefetchedPath && ["idle", "up-to-date", "error"].includes(updateStatus) ? (
-          <div
-            data-ui="changelog-prefetched-package"
-            className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 p-3 dark:border-emerald-900/60 dark:bg-emerald-950/40"
-          >
-            <div className="flex items-center justify-between gap-3">
-              <p className="text-sm text-emerald-900 dark:text-emerald-200">
-                新版本 v{notice.prefetch.version} 已在后台下载完成，现在安装无需等待下载。
-              </p>
-              <button
-                type="button"
-                onClick={() => void prepareAndInstallPrefetchedUpdate()}
-                className="shrink-0 inline-flex items-center gap-1.5 rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700"
-              >
-                <Download className="h-3.5 w-3.5" />
-                立即安装
-              </button>
-            </div>
-          </div>
-        ) : null}
-
-        {updateStatus === "available" ? (
-          <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3 dark:border-amber-900/60 dark:bg-amber-950/40">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-amber-900 dark:text-amber-200">
-                  发现新版本：v{latestVersion}
-                </p>
-                {updateNotes ? (
-                  <p className="mt-1 text-xs text-amber-800 dark:text-amber-300">{updateNotes}</p>
-                ) : null}
-              </div>
-              <button
-                type="button"
-                onClick={() => void downloadChangelogUpdate()}
-                className="inline-flex items-center gap-1.5 rounded-md bg-amber-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-700"
-              >
-                <Download className="h-3.5 w-3.5" />
-                下载更新
-              </button>
-            </div>
-          </div>
-        ) : null}
-
-        {updateStatus === "downloading" ? (
-          <div className="mt-3 space-y-2" data-ui="changelog-download-progress">
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-muted-foreground">
-                正在下载更新{downloadSource ? `（${downloadSource}）` : ""}...
-              </span>
-              <span className="font-medium">
-                {speedText ? `${speedText} · ` : ""}
-                {downloadProgress}%
-              </span>
-            </div>
-            <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
-              <div
-                className="h-full rounded-full bg-primary transition-all duration-300"
-                style={{ width: `${downloadProgress}%` }}
-              />
-            </div>
-          </div>
-        ) : null}
-
-        {updateStatus === "ready" ? (
-          <div className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 p-3 dark:border-emerald-900/60 dark:bg-emerald-950/40">
-            <p className="text-sm font-medium text-emerald-900 dark:text-emerald-200">
-              v{latestVersion} 已下载完成。安装时会关闭当前软件，请确保已保存编辑内容。
-            </p>
-            {errorMessage ? (
-              <p className="mt-2 text-sm text-red-600 dark:text-red-400">{errorMessage}</p>
-            ) : null}
-            <div className="mt-2 flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                onClick={() => void installChangelogUpdate()}
-                className="inline-flex items-center gap-1.5 rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
-              >
-                <Download className="h-4 w-4" />
-                安装
-              </button>
-              <button
-                type="button"
-                onClick={() => void redownloadChangelogUpdate()}
-                className="inline-flex items-center gap-1.5 rounded-md border border-emerald-600 px-4 py-2 text-sm font-medium text-emerald-800 hover:bg-emerald-100 dark:text-emerald-200 dark:hover:bg-emerald-950"
-              >
-                <RefreshCw className="h-4 w-4" />
-                重新下载
-              </button>
-            </div>
-          </div>
-        ) : null}
-      </div>
-
-      {/* 官网 */}
       <div className="flex items-center gap-2 text-sm">
-        <Globe className="h-4 w-4 text-muted-foreground" />
         <a
-          href="https://www.qmai.pro"
+          href="https://github.com/darknessomi/QMAI-CE/releases"
           target="_blank"
           rel="noreferrer"
           className="font-medium text-primary hover:underline"
         >
-          www.qmai.pro
+          社区版发布页
         </a>
       </div>
 
       {/* 完整版本历史 */}
       <div className="space-y-4">
-        <h3 className="text-sm font-medium text-muted-foreground">版本历史</h3>
+        <h3 className="text-sm font-medium text-muted-foreground">上游版本历史</h3>
         {entries.map((entry) => {
           const lines = entry.highlights[lang]
           const isExpanded = expandedVersions.has(entry.version)
@@ -283,9 +54,6 @@ export function ChangelogSection() {
                   v{entry.version}
                 </span>
                 <span className="text-xs text-muted-foreground">{entry.date}</span>
-                {entry.version === __APP_VERSION__ ? (
-                  <span className="text-xs text-emerald-600 dark:text-emerald-400">← 当前版本</span>
-                ) : null}
               </div>
               <ul className="mt-3 space-y-2 text-sm leading-relaxed text-foreground/90">
                 {visibleLines.map((line, i) => (

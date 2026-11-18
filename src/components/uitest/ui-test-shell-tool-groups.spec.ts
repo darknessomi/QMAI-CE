@@ -24,8 +24,8 @@ describe("「插件」进入创作工具菜单", () => {
     expect(groups).toHaveLength(3)
     // 判别力：第一段确实是第一组，不是切偏了的片段
     expect(groups[0]).toContain('label: "记忆中心"')
-    expect(groups[0]).toContain('label: "拆书库"')
-    expect(groups[1]).toContain('label: "剧情推演室 · 测试版"')
+    expect(groups[0]).not.toContain('label: "拆书库"')
+    expect(groups[1]).toContain('label: "剧情搜索"')
   })
 
   it("第一组里有「插件」，位置在「技能库」之后、「拆书库」之前", () => {
@@ -36,9 +36,7 @@ describe("「插件」进入创作工具菜单", () => {
     expect(entry![2]).toBe("Puzzle")
 
     expect(first.indexOf('view: "skillLibrary"')).toBeGreaterThanOrEqual(0)
-    expect(first.indexOf('view: "bookAnalysis"')).toBeGreaterThanOrEqual(0)
     expect(first.indexOf('view: "skillLibrary"')).toBeLessThan(first.indexOf('view: "plugins"'))
-    expect(first.indexOf('view: "plugins"')).toBeLessThan(first.indexOf('view: "bookAnalysis"'))
   })
 
   it("「插件」只出现在第一组，没被埋进「维护工具」那组", () => {

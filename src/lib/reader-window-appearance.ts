@@ -4,20 +4,13 @@ import {
   DEFAULT_BODY_LINE_HEIGHT,
   DEFAULT_BODY_MARGIN_X,
   DEFAULT_BODY_SAFE_BOTTOM,
-  DEFAULT_UI_FONT_FAMILY,
-  applyBodyFontFamily,
   applyBodyTypography,
-  applyUiFontFamily,
   clampBodyFontPx,
   clampBodyLetterSpacing,
   clampBodyLineHeight,
   clampBodyMarginX,
   clampBodySafeBottom,
   clampUiFontSizeScale,
-  normalizeBodyFontFamily,
-  normalizeUiFontFamily,
-  type BodyFontFamily,
-  type UiFontFamily,
 } from "@/lib/font-settings"
 import { readDocumentAppearance } from "@/lib/html-document-appearance"
 import { isTauri } from "@/lib/platform"
@@ -54,12 +47,8 @@ export function readerWindowThemeForSkin(skin: ReaderWindowAppearance["skin"]): 
 export interface ReaderWindowAppearance {
   /** 外观皮肤：静水 / 纸间 / 星夜。 */
   skin: "jing" | "zhi" | "xing"
-  /** 界面字体（`--qmai-ui-font-family`）。 */
-  uiFontFamily: UiFontFamily
   /** 界面字号倍率（写成 `documentElement.style.fontSize` 的百分比）。 */
   uiFontSizeScale: number
-  /** 正文字体（`--qmai-body-font-family`）。 */
-  bodyFontFamily: BodyFontFamily
   /** 正文字号 px。 */
   bodyFontPx: number
   /** 正文行距（无单位倍数）。 */
@@ -91,9 +80,7 @@ export function normalizeReaderWindowAppearance(value: unknown): ReaderWindowApp
   const raw = value as Record<string, unknown>
   return {
     skin: isReaderWindowSkin(raw.skin) ? raw.skin : readUiTestSkin(),
-    uiFontFamily: normalizeUiFontFamily(raw.uiFontFamily),
     uiFontSizeScale: clampUiFontSizeScale(raw.uiFontSizeScale),
-    bodyFontFamily: normalizeBodyFontFamily(raw.bodyFontFamily),
     bodyFontPx: clampBodyFontPx(raw.bodyFontPx),
     bodyLineHeight: clampBodyLineHeight(raw.bodyLineHeight),
     bodyLetterSpacing: clampBodyLetterSpacing(raw.bodyLetterSpacing),
@@ -113,9 +100,7 @@ export function readReaderWindowAppearance(): ReaderWindowAppearance {
   const state = useWikiStore.getState()
   return {
     skin: readDocumentAppearance(),
-    uiFontFamily: state.uiFontFamily,
     uiFontSizeScale: state.uiFontSizeScale,
-    bodyFontFamily: state.uiBodyFontFamily,
     bodyFontPx: state.uiBodyFontPx,
     bodyLineHeight: state.uiBodyLineHeight,
     bodyLetterSpacing: state.uiBodyLetterSpacing,
@@ -128,9 +113,7 @@ export function readReaderWindowAppearance(): ReaderWindowAppearance {
 export function defaultReaderWindowAppearance(): ReaderWindowAppearance {
   return {
     skin: readUiTestSkin(),
-    uiFontFamily: DEFAULT_UI_FONT_FAMILY,
     uiFontSizeScale: 1,
-    bodyFontFamily: "serif-default",
     bodyFontPx: DEFAULT_BODY_FONT_PX,
     bodyLineHeight: DEFAULT_BODY_LINE_HEIGHT,
     bodyLetterSpacing: DEFAULT_BODY_LETTER_SPACING,
@@ -180,8 +163,6 @@ export function applyReaderWindowAppearance(value: unknown): ReaderWindowAppeara
   applyTheme(readerWindowThemeForSkin(appearance.skin))
   // 与 App.tsx 完全同一条写法：根字号百分比，界面里的 rem 尺寸随之缩放。
   html.style.fontSize = `${Math.round(clampUiFontSizeScale(appearance.uiFontSizeScale) * 100)}%`
-  applyUiFontFamily(appearance.uiFontFamily)
-  applyBodyFontFamily(appearance.bodyFontFamily)
   applyBodyTypography({
     fontPx: appearance.bodyFontPx,
     lineHeight: appearance.bodyLineHeight,

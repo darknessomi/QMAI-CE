@@ -31,26 +31,26 @@ describe("「插件」成为一级导航项", () => {
      * 只能通过「没有存储值」这条真实路径观察。normalize(null) 走的正是
      * readPrimaryNav 在 localStorage 为空时的分支。
      */
-    expect(views(normalizePrimaryNav(null))).toEqual(["sources", "wiki", "soul", "plugins"])
-    expect(labels(normalizePrimaryNav(null))).toEqual(["大纲", "章节", "灵魂", "插件"])
+    expect(views(normalizePrimaryNav(null))).toEqual(["sources", "wiki", "plugins"])
+    expect(labels(normalizePrimaryNav(null))).toEqual(["大纲", "章节", "插件"])
   })
 })
 
 describe("老数据向前补全「插件」", () => {
-  it("老用户存的是三项时，末尾补上「插件」，前三项顺序不变", () => {
+  it("老用户存的是三项时，末尾补上「插件」，前已停用入口移除", () => {
     const result = normalizePrimaryNav(["sources", "wiki", "soul"])
-    expect(views(result)).toEqual(["sources", "wiki", "soul", "plugins"])
+    expect(views(result)).toEqual(["sources", "wiki", "plugins"])
     // 用户的排列必须原样保留：只准往后加，不准插队
-    expect(labels(result).slice(0, 3)).toEqual(["大纲", "章节", "灵魂"])
+    expect(labels(result)).toEqual(["大纲", "章节", "插件"])
   })
 
   it("本地已存的旧配置（老用户真实路径）读出来也带「插件」", () => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(["sources", "wiki", "soul"]))
-    expect(views(readPrimaryNav())).toEqual(["sources", "wiki", "soul", "plugins"])
+    expect(views(readPrimaryNav())).toEqual(["sources", "wiki", "plugins"])
   })
 
   it("已经满 5 项时不补全：尊重用户用满的名额", () => {
-    const stashed = ["sources", "wiki", "soul", "graph", "bookAnalysis"]
+    const stashed = ["sources", "wiki", "reviewCenter", "graph", "search"]
     const result = normalizePrimaryNav(stashed)
     expect(views(result)).toEqual(stashed)
     expect(views(result)).toHaveLength(5)
@@ -68,13 +68,12 @@ describe("老数据向前补全「插件」", () => {
     expect(views(normalizePrimaryNav(["wiki", "sources", "soul"]))).toEqual([
       "wiki",
       "sources",
-      "soul",
       "plugins",
     ])
   })
 
   it("已经含「插件」的配置不会被搬到别的位置", () => {
-    const stored = ["sources", "plugins", "soul"]
+    const stored = ["sources", "plugins", "lint"]
     expect(views(normalizePrimaryNav(stored))).toEqual(stored)
   })
 })

@@ -7,16 +7,13 @@ export interface PrimaryNavItem { view: PrimaryNavView; label: string }
 export const PRIMARY_NAV_OPTIONS: PrimaryNavItem[] = [
   { view: "sources", label: "大纲" },
   { view: "wiki", label: "章节" },
-  { view: "soul", label: "灵魂" },
   { view: "skillLibrary", label: "技能库" },
   // 「插件」跟在技能库之后：两者都是「扩展能力」类入口，顺序与顶栏「创作工具」
   // 下拉里的分组保持一致（见 ui-test-shell.tsx 的 TOOL_GROUPS）。
   { view: "plugins", label: "插件" },
   { view: "graph", label: "小说图谱" },
-  { view: "bookAnalysis", label: "拆书库" },
   { view: "reviewCenter", label: "审查中心" },
   { view: "search", label: "剧情搜索" },
-  { view: "storySimulation", label: "剧情推演" },
   { view: "lint", label: "记忆中心" },
 ]
 
@@ -31,7 +28,7 @@ const PRIMARY_NAV_LIMIT = 5
  * 含 `plugins`，于是他们看不到新入口。
  */
 const BACKFILL_VIEW: PrimaryNavView = "plugins"
-const DEFAULT_PRIMARY_NAV: PrimaryNavView[] = ["sources", "wiki", "soul", "plugins"]
+const DEFAULT_PRIMARY_NAV: PrimaryNavView[] = ["sources", "wiki", "plugins"]
 const STORAGE_KEY = "qm-uitest-primary-nav-v1"
 
 function optionFor(view: PrimaryNavView) {

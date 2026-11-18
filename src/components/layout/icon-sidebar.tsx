@@ -1,6 +1,6 @@
 import { useMemo } from "react"
 import {
-  FileText, FolderOpen, Search, Network, Brain, ArrowLeftRight, Trash2, Sparkles, LayoutDashboard, BookOpen, Drama, WandSparkles, Puzzle,
+  FileText, FolderOpen, Search, Network, Brain, ArrowLeftRight, Trash2, LayoutDashboard, WandSparkles, Puzzle,
 } from "lucide-react"
 import {
   DndContext,
@@ -23,9 +23,6 @@ import { useTranslation } from "react-i18next"
 import { BrandLogo } from "@/components/brand-logo"
 import type { WikiState } from "@/stores/wiki-store"
 import { isChapterPathInProject } from "@/lib/path-utils"
-import { MEMBER_FEATURE_VIEWS } from "@/lib/membership/access"
-import { useMembership } from "@/lib/membership/use-membership"
-import { VipBadge } from "@/components/membership/vip-badge"
 import {
   isNavItemActive,
   isSidebarNavItemId,
@@ -47,7 +44,6 @@ const CONFIGURABLE_NAV_ITEMS: ConfigurableNavItem[] = [
   { id: "sources", view: "sources", icon: FolderOpen, labelKey: "novel.nav.sources" },
   { id: "graph", view: "graph", icon: Network, labelKey: "novel.nav.graph" },
   { id: "lint", view: "lint", icon: Brain, labelKey: "novel.nav.lint" },
-  { id: "soul", view: "soul", icon: Sparkles, labelKey: "novel.nav.soul" },
   { id: "skillLibrary", view: "skillLibrary", icon: WandSparkles, labelKey: "novel.nav.skillLibrary" },
   /*
    * 「插件」是顶层页面（与技能库 / 拆书库同级），不是设置里的一个分区：
@@ -55,9 +51,7 @@ const CONFIGURABLE_NAV_ITEMS: ConfigurableNavItem[] = [
    * 设置 → 插件 仍然在，它管的是同一份已安装数据（本页「已安装」tab 直接复用它）。
    */
   { id: "plugins", view: "plugins", icon: Puzzle, labelKey: "novel.nav.plugins" },
-  { id: "bookAnalysis", view: "bookAnalysis", icon: BookOpen, labelKey: "novel.nav.dismantling" },
   { id: "reviewCenter", view: "reviewCenter", icon: LayoutDashboard, labelKey: "novel.nav.reviewCenter" },
-  { id: "storySimulation", view: "storySimulation", icon: Drama, labelKey: "novel.nav.storySimulation" },
   { id: "search", view: "search", icon: Search, labelKey: "novel.nav.search" },
   { id: "trash", view: "trash", icon: Trash2, labelKey: "nav.trash" },
 ]
@@ -93,13 +87,6 @@ function SortableNavButton({ item, activeView, pendingCount, label, onClick }: S
    * 否则点开人物 Skill 页时侧边栏会没有任何图标高亮。
    */
   const isActive = isNavItemActive(item.view, activeView)
-  /*
-   * 会员标记（2026-11-06）：只给「还没开通」的会员功能挂角标。
-   * 已开通的会员不在侧栏里被反复提醒「这是会员功能」—— 那是噪音。
-   * 判定集中在 `lib/membership/access`，与路由闸门用的是同一份逻辑。
-   */
-  const { isLockedView } = useMembership()
-  const isMemberLocked = Boolean(MEMBER_FEATURE_VIEWS[item.view]) && isLockedView(item.view)
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
@@ -126,29 +113,10 @@ function SortableNavButton({ item, activeView, pendingCount, label, onClick }: S
             {pendingCount > 99 ? "99+" : pendingCount}
           </span>
         )}
-        {item.view === "storySimulation" && (
-          <span className="absolute -right-1 -top-0.5 flex h-3.5 items-center justify-center rounded bg-amber-500 px-1 text-[0.5625rem] font-bold leading-none text-white">
-            BETA
-          </span>
-        )}
-        {isMemberLocked && (
-          /*
-           * 会员标记：2026-11-08 从皇冠图标改成 VIP 胶囊。
-           *
-           * 侧栏图标只有 15px，皇冠缩到 10px 后三个尖会糊成一团 ——
-           * 用户根本认不出那是什么。而「VIP」三个字母在这个尺寸下仍然可读。
-           * 视觉与头像菜单里的会员卡片保持同一套语言（同一个 VipBadge 组件）。
-           */
-          <span className="pointer-events-none absolute -right-1 -bottom-1">
-            <VipBadge size="sm" muted />
-          </span>
-        )}
       </TooltipTrigger>
       <TooltipContent side="right">
         {label}
         {item.view === "reviewCenter" && pendingCount > 0 && ` (${pendingCount})`}
-        {item.view === "storySimulation" && " (测试版)"}
-        {isMemberLocked && " · 会员功能"}
       </TooltipContent>
     </Tooltip>
   )

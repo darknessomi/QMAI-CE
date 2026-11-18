@@ -16,13 +16,11 @@ import {
   type SidebarNavConfig,
 } from "@/lib/sidebar-nav-preferences"
 import {
-  DEFAULT_BODY_FONT_FAMILY,
   DEFAULT_BODY_FONT_PX,
   DEFAULT_BODY_LINE_HEIGHT,
   DEFAULT_BODY_LETTER_SPACING,
   DEFAULT_BODY_MARGIN_X,
   DEFAULT_BODY_SAFE_BOTTOM,
-  DEFAULT_UI_FONT_FAMILY,
   clampBodyFontPx,
   clampBodyLineHeight,
   clampBodyLetterSpacing,
@@ -30,10 +28,6 @@ import {
   clampBodySafeBottom,
   resolveMigratedBodyFontPx,
   clampUiFontSizeScale,
-  normalizeBodyFontFamily,
-  normalizeUiFontFamily,
-  type BodyFontFamily,
-  type UiFontFamily,
 } from "@/lib/font-settings"
 import {
   DEFAULT_REASONING_DEPTH,
@@ -70,9 +64,6 @@ const GRAPH_EDGE_STRENGTH_KEY = "lk-graph-edge-strength"
 const GRAPH_EDGE_STYLE_KEY = "lk-graph-edge-style"
 const GRAPH_EDGE_LABELS_ALWAYS_KEY = "lk-graph-edge-labels-always"
 const UI_FONT_SIZE_SCALE_KEY = "qmai-ui-font-size-scale"
-const UI_FONT_FAMILY_KEY = "qmai-ui-font-family"
-/** 正文字体独立键：与界面字体分开存，任何一个被改都不会覆盖另一个。 */
-const BODY_FONT_FAMILY_KEY = "qmai-body-font-family"
 /** 正文字号独立键：与界面字号分开存。 */
 const BODY_FONT_SIZE_SCALE_KEY = "qmai-ui-body-font-scale"
 /*
@@ -87,18 +78,13 @@ const BODY_SAFE_BOTTOM_KEY = "qmai-body-safe-bottom"
 const SIDEBAR_NAV_CONFIG_KEY = "qmai-sidebar-nav-config"
 
 export type SettingsCategoryId =
-  | "account"
   | "model"
-  | "cloudSync"
-  /** 会员云空间（备份到青幕服务器）。与 cloudSync 是两套独立功能。 */
-  | "memberCloud"
   | "network"
   | "interface"
   | "novel"
   | "usage-guide"
   | "data-management"
   | "feedback"
-  | "contact-support"
   | "changelog"
 
 export type ModelSettingsTabId = "default" | "llm" | "rerank" | "embedding"
@@ -113,16 +99,6 @@ const readStoredUiFontSizeScale = (): number => {
   if (typeof localStorage === "undefined") return 1
   const saved = Number(localStorage.getItem(UI_FONT_SIZE_SCALE_KEY) ?? "1")
   return Number.isFinite(saved) ? clampUiFontSizeScale(saved) : 1
-}
-
-const readStoredUiFontFamily = (): UiFontFamily => {
-  if (typeof localStorage === "undefined") return DEFAULT_UI_FONT_FAMILY
-  return normalizeUiFontFamily(localStorage.getItem(UI_FONT_FAMILY_KEY))
-}
-
-const readStoredBodyFontFamily = (): BodyFontFamily => {
-  if (typeof localStorage === "undefined") return DEFAULT_BODY_FONT_FAMILY
-  return normalizeBodyFontFamily(localStorage.getItem(BODY_FONT_FAMILY_KEY))
 }
 
 /**
@@ -570,24 +546,6 @@ type OutputLanguage =
   | "Ukrainian"
 
 /**
- * 内置模型的计费/分档信息（来自中转站 `GET /v1/models`，与控制台保持同步）。
- *
- * 只给内置模型用：用户自己的提供方没有倍率概念，字段留空。
- */
-export interface SavedModelRating {
-  /** 当前生效倍率（已应用时段规则），用于下拉框展示 */
-  ratio: number
-  /** 基础倍率（不含时段规则）。与 ratio 不同时说明正在打折/加价 */
-  baseRatio?: number
-  /** 当前命中的时段规则名（如「夜间折扣」）；没有规则时为 null */
-  rule?: string | null
-  /** 等级：lite / standard / pro / max，由控制台配置 */
-  tier?: string
-  /** 元数据同步时间（毫秒），用于判断展示值的新鲜度 */
-  syncedAt: number
-}
-
-/**
  * 已保存的模型配置项
  */
 export interface SavedModel {
@@ -603,8 +561,6 @@ export interface SavedModel {
   customEndpoint?: string
   /** 备注说明 */
   description?: string
-  /** 内置模型的倍率与分档；自定义模型不写这个字段 */
-  rating?: SavedModelRating
   /** 创建时间 */
   createdAt: number
 }
@@ -844,8 +800,6 @@ interface WikiState {
   reviewRun: ReviewRunState | null
   theme: "light" | "dark" | "system"
   uiFontSizeScale: number
-  uiFontFamily: UiFontFamily
-  uiBodyFontFamily: BodyFontFamily
   /** 正文字号（px 绝对值）。替代原 uiBodyFontSizeScale（倍数）。 */
   uiBodyFontPx: number
   /** 正文行间距（无单位倍数）。 */
@@ -939,8 +893,6 @@ interface WikiState {
   clearTransientTaskState: () => void
   setTheme: (theme: "light" | "dark" | "system") => void
   setUiFontSizeScale: (scale: number) => void
-  setUiFontFamily: (fontFamily: UiFontFamily) => void
-  setUiBodyFontFamily: (fontFamily: BodyFontFamily) => void
   setUiBodyFontPx: (value: number) => void
   setUiBodyLineHeight: (value: number) => void
   setUiBodyLetterSpacing: (value: number) => void
@@ -1036,6 +988,9 @@ export const useWikiStore = create<WikiState>((set) => ({
   setChatExpanded: (chatExpanded) => set({ chatExpanded }),
   setSearchPanelOpen: (searchPanelOpen) => set({ searchPanelOpen }),
   setActiveView: (activeView) => set((state) => {
+    if (activeView === "soul" || activeView === "bookAnalysis" || activeView === "storySimulation") {
+      activeView = "wiki"
+    }
     if (
       state.activeView === "skillLibrary"
       && activeView !== "skillLibrary"
@@ -1195,8 +1150,6 @@ export const useWikiStore = create<WikiState>((set) => ({
   reviewRun: null,
   theme: "system",
   uiFontSizeScale: readStoredUiFontSizeScale(),
-  uiFontFamily: readStoredUiFontFamily(),
-  uiBodyFontFamily: readStoredBodyFontFamily(),
   uiBodyFontPx: readStoredBodyFontPx(),
   uiBodyLineHeight: readStoredBodyLineHeight(),
   uiBodyLetterSpacing: readStoredBodyLetterSpacing(),
@@ -1290,20 +1243,6 @@ export const useWikiStore = create<WikiState>((set) => ({
       localStorage.setItem(UI_FONT_SIZE_SCALE_KEY, String(clamped))
     }
     set({ uiFontSizeScale: clamped })
-  },
-  setUiFontFamily: (fontFamily) => {
-    const normalized = normalizeUiFontFamily(fontFamily)
-    if (typeof localStorage !== "undefined") {
-      localStorage.setItem(UI_FONT_FAMILY_KEY, normalized)
-    }
-    set({ uiFontFamily: normalized })
-  },
-  setUiBodyFontFamily: (fontFamily) => {
-    const normalized = normalizeBodyFontFamily(fontFamily)
-    if (typeof localStorage !== "undefined") {
-      localStorage.setItem(BODY_FONT_FAMILY_KEY, normalized)
-    }
-    set({ uiBodyFontFamily: normalized })
   },
   /*
    * 5 个排版参数的统一写法：钳制 → 落 localStorage → 写 store。

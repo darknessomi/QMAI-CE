@@ -2,9 +2,9 @@
 import { existsSync, readFileSync } from "node:fs"
 import { resolve } from "node:path"
 import postcss from "postcss"
-import { act, useState } from "react"
+import { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import {
   BodyTypographyFields,
   type BodyTypographyValue,
@@ -13,7 +13,6 @@ import {
 // 本文件测的是"控件用了它"，不是"它算得对"——后者已在任务 1 的
 // font-settings.spec.ts 里测过，不要在这里再抄一遍期望值。
 import {
-  BODY_FONT_OPTIONS,
   BODY_FONT_PX_MAX,
   BODY_FONT_PX_MIN,
   BODY_LETTER_SPACING_MAX,
@@ -25,10 +24,7 @@ import {
   BODY_SAFE_BOTTOM_MAX,
   BODY_SAFE_BOTTOM_MIN,
   defaultBodyMarginXForViewport,
-  getBodyFontFamilyCss,
-  normalizeBodyFontFamily,
 } from "@/lib/font-settings"
-import { SYSTEM_FONT_PREFIX } from "@/lib/system-fonts"
 
 /*
  * React 19 需要这个全局，act(...) 才会正常工作且不刷警告。
@@ -39,36 +35,10 @@ import { SYSTEM_FONT_PREFIX } from "@/lib/system-fonts"
  */
 ;(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
-/*
- * 本机字体枚举的假结果。
- *
- * 这几条原先住在 `interface-section.spec.tsx` 的「阶段 3：正文字体下拉的本机分组」
- * —— 那时正文字体下拉渲染在**设置页**里。用户要求把那 6 项从设置页移走之后，
- * 正文下拉只存在于本组件里，于是这几条随控件一起搬到这里。
- * **是搬家，不是删除**：本机分组、去重不对称、归一化路径这三件事
- * 都还在被覆盖，只是换了宿主文件。
- */
-const sysFonts = vi.hoisted(() => ({
-  result: [] as { family: string; display: string }[],
-  error: null as string | null,
-  calls: 0,
-}))
-
-vi.mock("@/lib/system-fonts", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/lib/system-fonts")>()),
-  loadSystemCjkFonts: async () => {
-    sysFonts.calls += 1
-    return { fonts: sysFonts.result, error: sysFonts.error }
-  },
-}))
-
 let root: Root
 let container: HTMLDivElement
 
 beforeEach(() => {
-  sysFonts.result = []
-  sysFonts.error = null
-  sysFonts.calls = 0
   container = document.createElement("div")
   document.body.appendChild(container)
   root = createRoot(container)
@@ -79,7 +49,6 @@ afterEach(() => {
 })
 
 const BASE: BodyTypographyValue = {
-  fontFamily: "serif-default",
   fontPx: 18,
   lineHeight: 1.95,
   letterSpacing: 0,
@@ -106,13 +75,6 @@ function render(value: BodyTypographyValue, onChange: ChangeHandler = () => {}) 
   return container
 }
 
-/** 渲染并让异步的字体枚举结算（测本机字体分组时必须用它）。 */
-async function renderSettled(value: BodyTypographyValue, onChange: ChangeHandler = () => {}) {
-  render(value, onChange)
-  await act(async () => { await Promise.resolve() })
-  return container
-}
-
 function input(label: string) {
   const el = container.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`)
   if (!el) throw new Error(`找不到控件：${label}`)
@@ -127,14 +89,14 @@ function setRange(el: HTMLInputElement, next: string) {
 }
 
 const SLIDER_LABELS = ["正文字号", "行间距", "字间距", "左右边距", "底部安全距离"] as const
-const ALL_CONTROL_LABELS = ["正文字体", "正文字号预设", "正文字号", "行间距", "字间距", "左右边距", "底部安全距离"] as const
+const ALL_CONTROL_LABELS = ["正文字号预设", "正文字号", "行间距", "字间距", "左右边距", "底部安全距离"] as const
 
 // 注意：这里不再单独测「兜底边距算得对不对」—— 那是 font-settings 的
 // 职责，已在任务 1 的 font-settings.spec.ts 里用字面量钉住。
 // 本文件只负责证明「控件用的确实是那一个来源」。
 
 describe("BodyTypographyFields", () => {
-  it("6 个参数各有一个可访问的控件，标签互不重复", () => {
+  it("5 个参数各有一个可访问的控件，标签互不重复", () => {
     render(BASE)
     for (const label of ALL_CONTROL_LABELS) {
       const found = container.querySelectorAll(`[aria-label="${label}"]`)
@@ -368,7 +330,7 @@ describe("BodyTypographyFields", () => {
    * 以为还有第二个消费方。判据本身没弱化，"面板里没有说明段落"
    * 这条不变量照旧，只是换了个不含死开关的表达。
    */
-  it("面板保持紧凑：不渲染任何说明段落，但 7 个控件一个不少", () => {
+  it("面板保持紧凑：不渲染任何说明段落，但 6 个控件一个不少", () => {
     render(BASE)
     expect(
       container.querySelectorAll("p").length,
@@ -380,30 +342,6 @@ describe("BodyTypographyFields", () => {
     }
     // 显示值那一行不能被当成"说明段落"一起省掉，否则用户拖动时看不到当前值
     expect(container.querySelector('[data-ui-typography-value="左右边距"]')?.textContent).toBe("跟随窗口")
-  })
-
-  /**
-   * 上一条 `p.length === 0` 的**反向控制**。
-   *
-   * 组件在字体枚举失败时会渲染一条 `<p role="status">`。如果不证明这一点，
-   * "数不到 p" 也可能只是因为错误提示被整个删掉了 ——
-   * 那样上一条就从"面板很紧凑"悄悄退化成"任何 <p> 都不许有"，
-   * 而真正该报红的"失败态不再告诉用户原因"反倒不会被抓住。
-   *
-   * ⚠ 必须是**独立用例 + 全新挂载**，不能在一条用例里 render 两次：
-   * `useSystemFonts` 的 effect 依赖数组是 `[]`，同一个组件实例再 render
-   * 一次不会重跑 effect，于是 mock 里新设的 error 永远不会被读到，
-   * 这条反向控制会假红（我第一版就是这么写的，实测确实红了）。
-   */
-  it("枚举失败时显示原因，而不是假装「本机没有中文字体」", async () => {
-    sysFonts.error = "中文字体枚举目前仅实现 Windows（DirectWrite）"
-    await renderSettled(BASE)
-    const status = container.querySelector("p[role='status']")
-    expect(status, "枚举失败时必须渲染错误说明（也是上面 p===0 的反向控制）").not.toBeNull()
-    expect(status?.textContent).toContain("未能读取本机字体")
-    expect(status?.textContent).toContain("DirectWrite")
-    // 说明"失败了"而不是"没有" —— 后者是个会被用户信以为真的假结论
-    expect(status?.textContent).not.toContain("没有中文字体")
   })
 
   /**
@@ -444,7 +382,7 @@ describe("BodyTypographyFields", () => {
   it("底部安全距离标签单行显示，且排在所有字段的最后", () => {
     render(BASE)
     const fields = Array.from(container.querySelectorAll(".body-font-field"))
-    expect(fields.length, "应有 6 个字段").toBe(6)
+    expect(fields.length, "应有 5 个字段").toBe(5)
     const lastLabel = fields[fields.length - 1].querySelector(".body-font-field__label")?.textContent
     expect(lastLabel, "最后一个字段必须是底部安全距离").toBe("底部安全距离")
 
@@ -584,134 +522,5 @@ describe("BodyTypographyFields", () => {
     const select = container.querySelector<HTMLSelectElement>('[aria-label="正文字号预设"]')
     expect(select).not.toBeNull()
     expect(select?.value).toBe("21")
-  })
-})
-
-/*
- * ── 本机中文字体分组（原 interface-section.spec.tsx 的「阶段 3」那组）──
- *
- * 用户要求把正文字体这 6 项从设置页移走之后，正文下拉只在本组件里存在，
- * 于是这一组随控件一起搬过来。判据本身一条没少，只是宿主文件变了。
- * 界面下拉的对应判据仍留在 interface-section.spec.tsx（那个下拉还在设置页）。
- */
-function bodySelect(): HTMLSelectElement {
-  const el = container.querySelector<HTMLSelectElement>('select[aria-label="正文字体"]')
-  if (!el) throw new Error("找不到正文字体下拉")
-  return el
-}
-
-describe("正文字体下拉的本机分组", () => {
-  it("渲染本机中文字体分组，值是 sys: 前缀、展示名用 display", async () => {
-    sysFonts.result = [{ family: "yyb", display: "yyb" }]
-    await renderSettled(BASE)
-    const groups = bodySelect().querySelectorAll("optgroup")
-    expect(Array.from(groups).map((g) => g.label)).toEqual(["推荐", "本机中文字体"])
-    const sysGroup = Array.from(groups).find((g) => g.label === "本机中文字体")!
-    expect(Array.from(sysGroup.querySelectorAll("option")).map((o) => o.value))
-      .toEqual([`${SYSTEM_FONT_PREFIX}yyb`])
-  })
-
-  it("没枚举到字体时不渲染空分组——空分组会被误读成「本机没有中文字体」", async () => {
-    sysFonts.result = []
-    await renderSettled(BASE)
-    expect(bodySelect().querySelectorAll("optgroup")).toHaveLength(1)
-    expect(bodySelect().querySelector("optgroup")!.label).toBe("推荐")
-  })
-
-  it("推荐分组的取值与内置正文字体选项逐字一致", async () => {
-    sysFonts.result = [{ family: "yyb", display: "yyb" }]
-    await renderSettled(BASE)
-    const recommended = bodySelect().querySelector('optgroup[label="推荐"]')!
-    expect(Array.from(recommended.querySelectorAll("option")).map((o) => o.value))
-      .toEqual(BODY_FONT_OPTIONS.map((o) => o.value))
-  })
-
-  it("按**正文**内置表去重——不能借界面表（两个下拉各有各的表）", async () => {
-    /*
-     * 这条钉住一个真实存在的不对称：
-     *   `Source Han Serif SC` 是**正文**内置项（source-han-serif）的第一段，
-     *   却不是任何**界面**内置项的第一段。
-     * 若两个下拉共用同一份去重结果（例如都用界面表过滤），
-     * 正文下拉就会多出一个与内置「思源宋体」重复的项。
-     * 本机实测确实装着这个字体（枚举结果里就有），所以这不是假想的边界。
-     *
-     * 界面那一半（界面表没有它 → 界面下拉里**应当**出现）在
-     * interface-section.spec.tsx 里守着，两半合起来才是完整的不对称。
-     */
-    sysFonts.result = [{ family: "Source Han Serif SC", display: "Source Han Serif Heavy" }]
-    await renderSettled(BASE)
-
-    const inBody = Array.from(bodySelect().querySelectorAll("option")).map((o) => o.value)
-    const value = `${SYSTEM_FONT_PREFIX}Source Han Serif SC`
-
-    // 正文内置表已有「思源宋体」→ 正文下拉里应当被去重
-    expect(inBody, "正文表已覆盖它，不该再出现一个重复项").not.toContain(value)
-    // 但正文的内置项本身仍在
-    expect(inBody).toContain("source-han-serif")
-  })
-
-  it("选中本机正文字体后走真实归一化路径——不会弹回默认档", async () => {
-    /*
-     * 用 `LXGW WenKai`（霞鹜文楷，本项目的随包字体之一）：
-     * 它不在正文内置表里，所以**确实会**出现在正文下拉中，可以被选中。
-     * ⚠️ 不能用 `Source Han Serif SC` —— 它已被正文内置项
-     * `source-han-serif` 覆盖，按设计会被去重掉（见上一条用例），
-     * 于是"选中它"这个动作根本不可能发生。
-     */
-    sysFonts.result = [{ family: "LXGW WenKai", display: "霞鹜文楷" }]
-
-    /*
-     * ⚠ 这里必须用**有状态**的宿主，不能用 render(BASE) 渲染一个固定 value。
-     *
-     * 控件是受控的：`value` 由 prop 决定。若 value 永远是 BASE，
-     * 那么 select 的显示值**必然**弹回 BASE.fontFamily ——
-     * 于是这条用例无论"归一化是否认得 sys: 取值"都会失败，
-     * 它测到的其实是"受控组件不自己改值"这个无关事实（我第一版就是这样，
-     * 实测红了：expected 'serif-default' to be 'sys:LXGW WenKai'）。
-     * 用状态宿主把 onChange 接回去，才真的走一遍
-     * "选中 → normalizeBodyFontFamily → 值落到 value → 再渲染回 select"。
-     */
-    const seen: BodyTypographyValue[] = []
-    function Harness() {
-      const [value, setValue] = useState<BodyTypographyValue>(BASE)
-      seen.push(value)
-      return (
-        <BodyTypographyFields
-          idPrefix="t"
-          value={value}
-          onChange={(key, next) => {
-            // 归一化只作用于字体族；其余字段原样写回
-            const merged = { ...value, [key]: next } as BodyTypographyValue
-            setValue(key === "fontFamily" ? { ...merged, fontFamily: normalizeBodyFontFamily(next as string) } : merged)
-          }}
-        />
-      )
-    }
-    await act(async () => { root.render(<Harness />) })
-    await act(async () => { await Promise.resolve() })
-
-    const select = bodySelect()
-    const target = `${SYSTEM_FONT_PREFIX}LXGW WenKai`
-    // 前提自检：它必须真的在选项里，否则下面的断言是"选一个不存在的值"
-    expect(Array.from(select.querySelectorAll("option")).map((o) => o.value)).toContain(target)
-    await act(async () => {
-      select.value = target
-      select.dispatchEvent(new Event("change", { bubbles: true }))
-    })
-    /*
-     * 关键断言：select 的 value 必须真的停在选中的那个上。
-     * 若 normalizeBodyFontFamily 不认 sys: 取值，这里会看到它弹回
-     * "serif-default" —— 界面上就是"选了又跳回去"，正是本次要根除的病症。
-     */
-    expect(bodySelect().value).toBe(target)
-    expect(normalizeBodyFontFamily(target)).toBe(target)
-  })
-
-  it("正文本机字体的 CSS 栈以衬线收尾——卸载后不能掉到黑体", () => {
-    const css = getBodyFontFamilyCss("sys:霞鹜文楷")
-    expect(css.startsWith('"霞鹜文楷"')).toBe(true)
-    // 正文默认是宋体系；掉到 sans-serif 会让整篇小说静默换字形
-    expect(css.trim().endsWith("serif")).toBe(true)
-    expect(css.trim().endsWith("sans-serif")).toBe(false)
   })
 })

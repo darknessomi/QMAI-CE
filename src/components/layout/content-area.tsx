@@ -1,9 +1,6 @@
 import { Suspense, lazy } from "react";
 import { useWikiStore } from "@/stores/wiki-store";
 import { isBuiltinViewEnabled } from "@/lib/plugins/builtin-state";
-import { MemberGateNotice } from "@/components/membership/member-gate-notice";
-import { MEMBER_FEATURE_VIEWS } from "@/lib/membership/access";
-import { useMembership } from "@/lib/membership/use-membership";
 import { BuiltinViewDisabledNotice } from "./builtin-view-disabled-notice";
 import { WritingWorkspace } from "./writing-workspace";
 
@@ -51,31 +48,15 @@ const GraphView = lazy(async () => {
   return { default: mod.GraphView };
 });
 
-const SoulView = lazy(async () => {
-  const mod = await import("@/components/novel/soul-view");
-  return { default: mod.SoulView };
-});
-
 const ReviewCenterView = lazy(async () => {
   const mod = await import("@/components/review/review-center-view");
   return { default: mod.ReviewCenterView };
 });
 
-const BookAnalysisView = lazy(async () => {
-  const mod = await import("@/components/novel/book-analysis-view");
-  return { default: mod.BookAnalysisView };
-});
-
-const StorySimulationView = lazy(async () => {
-  const mod =
-    await import("@/components/novel/story-simulation/story-simulation-view");
-  return { default: mod.StorySimulationView };
-});
-
 /**
- * 「插件」独立页面（插件市场 + 已安装管理）。
+ * 「插件」独立页面（内置插件与已安装插件管理）。
  *
- * 为什么是懒加载：它把插件市场、已安装卡片、手动安装弹窗整套带进来，
+ * 为什么是懒加载：它把内置插件、已安装列表、手动安装弹窗整套带进来，
  * 而绝大多数会话根本不点这个图标 —— 让首屏为它付解析成本不划算。
  */
 const PluginCenterView = lazy(async () => {
@@ -109,26 +90,9 @@ export function ContentArea() {
   const novelMode = useWikiStore((s) => s.novelMode);
   const showWritingWorkspace = activeView === "wiki" || activeView === "trash";
 
-  /*
-   * 会员闸门。
-   *
-   * 这里只拦**会员功能**（灵魂库 / 拆书库 / 剧情推演室），章节与大纲不受影响。
-   * 与内置插件开关是「与」关系：插件被关掉时，会员也看不到（开关优先），
-   * 因为「关闭」是用户自己的选择，不该被会员状态覆盖。
-   *
-   * 为什么拦在路由层而不是各页面里：用户可能通过上一会话恢复的 activeView、
-   * 或别处的 setActiveView 直接落到这些视图。拦在路由层才没有漏网的入口。
-   * 拦住的形态是**引导页**而不是空白 —— 空白会被当成「软件坏了」。
-   */
-  const { isLockedView } = useMembership();
-  const memberFeature = MEMBER_FEATURE_VIEWS[activeView ?? ""];
-  const memberLocked = Boolean(memberFeature) && isLockedView(activeView);
-
   let content = null;
   if (showWritingWorkspace) {
     content = <WritingWorkspace />;
-  } else if (memberLocked && memberFeature) {
-    content = <MemberGateNotice feature={memberFeature} />;
   } else {
     switch (activeView) {
       case "settings":
@@ -159,13 +123,6 @@ export function ContentArea() {
           <BuiltinViewDisabledNotice view="search" />
         );
       break;
-      case "soul":
-        content = (
-          <Suspense fallback={<LoadingView />}>
-            <SoulView />
-          </Suspense>
-        );
-        break;
       case "skillLibrary":
       case "writingSkillLibrary":
       // 合并说明：两侧各自追加了技能库的内部视图，取并集 —— 都渲染同一个
@@ -214,27 +171,6 @@ export function ContentArea() {
           </Suspense>
         ) : (
           <BuiltinViewDisabledNotice view="reviewCenter" />
-        );
-      break;
-      case "bookAnalysis":
-        content = (
-          <Suspense fallback={<LoadingView />}>
-            <BookAnalysisView />
-          </Suspense>
-        );
-        break;
-      case "storySimulation":
-        /*
-         * 「剧情推演室」是一个内置插件（见 `lib/plugins/builtin.ts`）。被关闭时必须渲染
-         * 一个明确的"已关闭"页，而不是空壳或空白：用户可能通过上一会话恢复的
-         * activeView 直接落到这里，看到空白的直觉是"软件坏了"。
-         */
-        content = isBuiltinViewEnabled("storySimulation") ? (
-          <Suspense fallback={<LoadingView />}>
-            <StorySimulationView />
-          </Suspense>
-        ) : (
-          <BuiltinViewDisabledNotice view="storySimulation" />
         );
       break;
       case "plugins":

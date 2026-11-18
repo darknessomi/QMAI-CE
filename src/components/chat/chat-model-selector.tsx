@@ -7,7 +7,6 @@ import { useWikiStore, type SavedModel } from "@/stores/wiki-store"
 import { findLlmPresetById } from "@/components/settings/llm-presets"
 import { getEffectiveSavedModels, isProviderAvailable } from "@/lib/llm-model-keys"
 import { isObsoleteProviderId } from "@/lib/obsolete-providers"
-import { refreshBuiltinModels } from "@/lib/builtin-models/auto-sync"
 import {
   ModelSettingsPopover,
   getModelSettingsPanelStyle,
@@ -32,7 +31,7 @@ const DROPDOWN_GAP = 4
 const DROPDOWN_PREFER_BELOW_PX = 200
 /**
  * 下拉最小宽度。与「模型设置」悬停面板同宽（320），
- * 也是「名称 + 优惠标签 + 倍率列」三项并排不截断的实测下限。
+ * 也是「模型名称和选中标记」三项并排不截断的实测下限。
  */
 const DROPDOWN_MIN_WIDTH = 320
 
@@ -113,33 +112,6 @@ export function resolveModelItemLabel(
 ): { title: string; showModelId: boolean } {
   const title = model.name?.trim() || model.model
   return { title, showModelId: Boolean(model.model) && title !== model.model }
-}
-
-/**
- * 倍率怎么显示。
- *
- * 内置模型的倍率来自中转站（与控制台同步）；没有倍率时不显示占位符 ——
- * 需求明确要求「自定义模型后面不要出现横线」，所以两类模型都只画有值的倍率。
- */
-export function formatModelRatio(ratio: number | undefined | null): string | null {
-  if (typeof ratio !== "number" || !Number.isFinite(ratio)) return null
-  // 控制台允许任意数值（0–100），这里最多留两位小数并去掉末尾的 0：0.08 / 0.3 / 1 / 1.25
-  const fixed = ratio.toFixed(2).replace(/\.?0+$/, "")
-  return `${fixed === "" ? "0" : fixed}x`
-}
-
-/** 一行里除了名称之外，右侧还挂什么（倍率、时段标签）。 */
-export interface ModelRowDecoration {
-  ratio: string | null
-  /** 命中时段倍率时的角标，如「夜间折扣」 */
-  rule: string | null
-}
-
-export function resolveModelRowDecoration(model: SavedModel): ModelRowDecoration {
-  return {
-    ratio: formatModelRatio(model.rating?.ratio),
-    rule: model.rating?.rule?.trim() || null,
-  }
 }
 
 /** 内置模型行的小方块标记：取名称首字，和中转站品牌无关，离线也能显示。 */
@@ -388,16 +360,6 @@ export function ChatModelSelector({ value, onChange, disabled }: ChatModelSelect
     })
   }, [open, selectedCustomProviderId])
 
-  /**
-   * 打开下拉框时刷新倍率：控制台改完倍率要立刻能看到。
-   *
-   * 内部有 30 秒节流，所以可以放心地挂在「每次打开」上；失败也只是静默，
-   * 界面上继续显示上一次缓存的值，不打断用户挑模型。
-   */
-  useEffect(() => {
-    if (!open) return
-    void refreshBuiltinModels().catch(() => {})
-  }, [open])
 
   /**
    * 点面板外面关闭。
@@ -616,7 +578,7 @@ export function ChatModelSelector({ value, onChange, disabled }: ChatModelSelect
               zIndex: 9999,
             }}
           >
-            {/* ---------- 内置模型：永远完整可见，带倍率 ---------- */}
+            {/* ---------- 内置模型：完整显示 ---------- */}
             {builtinGroups.map((group) => (
               <div key={group.id} data-model-group={group.id}>
                 {/* 分组标题吸顶：滚动时压在最上面，下一组标题上来会把它顶走 */}
@@ -627,7 +589,6 @@ export function ChatModelSelector({ value, onChange, disabled }: ChatModelSelect
                   const modelKey = `${group.id}/${model.model}`
                   const { title } = resolveModelItemLabel(model)
                   const selected = value === modelKey
-                  const { ratio, rule } = resolveModelRowDecoration(model)
                   return (
                     <button
                       key={model.id}
@@ -649,16 +610,6 @@ export function ChatModelSelector({ value, onChange, disabled }: ChatModelSelect
                         {modelRowMark(title)}
                       </span>
                       <span className="min-w-0 flex-1 truncate text-sm leading-5">{title}</span>
-                      {rule && (
-                        <span className="shrink-0 rounded bg-secondary px-1.5 py-0.5 text-[11px] leading-4 text-muted-foreground">
-                          {rule}
-                        </span>
-                      )}
-                      {ratio && (
-                        <span className="w-11 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
-                          {ratio}
-                        </span>
-                      )}
                       <Check
                         className={`h-3.5 w-3.5 shrink-0 ${selected ? "opacity-100" : "opacity-0"}`}
                       />

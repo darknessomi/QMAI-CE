@@ -58,7 +58,6 @@ export function PersonaPersonalityCreateForm({
   const [roleType, setRoleType] = useState<string>("主角")
   const [fields, setFields] = useState<Record<string, string>>({})
   const [tags, setTags] = useState<string[]>([])
-  const [boundSoul, setBoundSoul] = useState("")
   const [localError, setLocalError] = useState("")
 
   const setField = (key: string, value: string) => setFields((prev) => ({ ...prev, [key]: value }))
@@ -82,7 +81,7 @@ export function PersonaPersonalityCreateForm({
     if (tags.length > 0) {
       next["性格"] = renderPersonalitySection({ tags, boundSoul: "" })
     }
-    onSubmit({ characterName: trimmed, roleType, fields: next, boundSoul: boundSoul.trim() })
+    onSubmit({ characterName: trimmed, roleType, fields: next, boundSoul: "" })
   }
 
   // 新建时没有既有内容，不需要保留 raw。
@@ -189,17 +188,14 @@ export function PersonaPersonalityCreateForm({
         <div className="ui-test-persona-grid">
           <div className="ui-test-persona-field is-wide">
             <span>
-              性格与灵魂
+              性格
               <em className="ui-test-persona-hint">性格决定「演成什么样」，会进入写作注入</em>
             </span>
             <PersonaPersonalityTab
               tags={tags}
-              boundSoul={boundSoul}
+              boundSoul=""
               raw={personalityView.raw}
-              onChange={(next) => {
-                setTags(next.tags)
-                setBoundSoul(next.boundSoul)
-              }}
+              onChange={(next) => setTags(next.tags)}
             />
           </div>
         </div>

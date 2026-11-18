@@ -38,13 +38,12 @@ const DOCUMENT_STYLE = `
     padding: 30px 44px 48px;
     background: #fcfdfb;
     color: #273c35;
-    font: 15px/1.95 -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    font: 15px/1.95 system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
   }
   .doc { max-width: 880px; margin: 0 auto; }
   h1 {
     margin: 0 0 4px;
-    font-family: "Songti SC", Georgia, "Times New Roman", serif;
     font-size: 1.375rem;
     font-weight: 600;
     letter-spacing: .04em;
@@ -58,7 +57,6 @@ const DOCUMENT_STYLE = `
   }
   h2 {
     margin: 26px 0 10px;
-    font-family: "Songti SC", Georgia, "Times New Roman", serif;
     font-size: 1rem;
     font-weight: 600;
     letter-spacing: .06em;

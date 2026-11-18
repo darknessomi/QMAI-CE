@@ -35,6 +35,7 @@ function stripComments(source: string): string {
 
 async function renderWithView(
   activeView:
+    | "soul" | "bookAnalysis" | "storySimulation"
     | "writingStyleLibrary"
     | "writingSkillLibrary"
     | "characterSoulLibrary"
@@ -160,43 +161,11 @@ describe("ContentArea 技能库视图路由", () => {
   })
 })
 
-/**
- * 会员闸门（2026-11-06）。
- *
- * 拦在**路由层**而不是各页面里：用户可以靠上一会话恢复的 activeView、
- * 或别处的 setActiveView 直接落到这些视图，页面内部的守卫拦不住这些路径。
- *
- * 这里用真实 store（账号 store 未登录 = 非会员），验证的是：
- *   · 三个会员视图渲染成引导页；
- *   · 章节（wiki）与大纲（sources）**不受影响** —— 它们必须永远可用。
- */
-describe("ContentArea 会员闸门", () => {
-  beforeEach(() => {
-    useWikiStore.getState().setActiveView("bookAnalysis")
-  })
-
-  it.each(["soul", "bookAnalysis", "storySimulation"] as const)(
-    "非会员进入 %s：渲染会员引导页，而不是空白或真页面",
-    async (view) => {
-      const { container, root } = await renderWithView(view as never)
-
-      const gate = container.querySelector('[data-ui-page="member-gate"]')
-      expect(gate).not.toBeNull()
-      expect(gate!.getAttribute("data-member-feature")).toBe(
-        view === "soul" ? "soul" : view === "bookAnalysis" ? "bookAnalysis" : "storySimulation",
-      )
-      // 引导页必须说清「哪些始终免费」，不能让人以为整软件都要钱。
-      expect(container.textContent).toContain("章节与大纲始终免费")
-
-      cleanup(root, container)
-    },
-  )
-
-  it("非会员进入大纲：正常渲染来源页，不被会员闸门拦", async () => {
-    const { container, root } = await renderWithView("sources" as never)
-
-    expect(container.querySelector('[data-ui-page="member-gate"]')).toBeNull()
-
+describe("社区版旧视图兼容", () => {
+  it.each(["soul", "bookAnalysis", "storySimulation"] as const)("恢复旧视图 %s 时进入章节", async (view) => {
+    const { container, root } = await renderWithView(view)
+    expect(useWikiStore.getState().activeView).toBe("wiki")
+    expect(container.querySelector('[data-testid="stub-writing-workspace"]')).not.toBeNull()
     cleanup(root, container)
   })
 })

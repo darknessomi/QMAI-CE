@@ -1,32 +1,11 @@
-/**
- * 侧栏底部操作栏：设置（左）+ 公告（设置右侧）+ 外观（右）。
- *
- * 位置说明：这几个入口原先分散在最左图标栏与顶栏；现在统一放到
- * 「章节列表 / 大纲列表」等**侧栏面板的底部**。为了让推演室、图谱、审阅中心、
- * 拆书、搜索历史、回收站等视图也都能进入，各侧栏面板统一渲染本组件。
- *
- * 三个入口都只留图标（去文字化），可访问名称交给 title / aria-label；
- * 「公告」是铃铛 + 未读角标，弹窗本体挂在 App 根部，不在这里渲染。
- *
- * 「外观」= 皮肤切换（静水 / 纸间 / 星夜），原先在顶栏那个月亮图标；
- * 皮肤状态由外壳通过 AppearanceSkinProvider 透传下来。
- */
-
 import { useEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import { useTranslation } from "react-i18next"
-import { Check, ChevronRight, LogOut, Palette, Settings, UserRound, Wrench } from "lucide-react"
+import { Check, ChevronRight, Palette, Settings, Wrench } from "lucide-react"
 
-import { useWikiStore, type SettingsCategoryId } from "@/stores/wiki-store"
+import { useWikiStore } from "@/stores/wiki-store"
 import { UI_TEST_SKINS } from "@/lib/ui-test"
 import { useAppearanceSkin } from "@/components/layout/appearance-context"
-import { useAccountStore } from "@/stores/account-store"
-import { useMembership } from "@/lib/membership/use-membership"
-import { AnnouncementBell } from "@/components/layout/announcement-bell"
-import { AccountAvatar } from "@/components/account/account-avatar"
-import { accountDisplayName } from "@/components/account/account-display"
-import { MembershipCard } from "@/components/membership/membership-card"
-import { useMembershipPurchaseStore } from "@/stores/membership-purchase-store"
 
 // 与 .ui-test-skin-menu 的设计宽度一致（窄了会让「名称 + 说明」换行、看着不像完整菜单）
 const MENU_WIDTH = 290
@@ -34,22 +13,10 @@ const MENU_WIDTH = 290
 export function SidebarBottomActions() {
   const { t } = useTranslation()
   const setActiveView = useWikiStore((s) => s.setActiveView)
-  const setActiveSettingsCategory = useWikiStore((s) => s.setActiveSettingsCategory)
   const setSearchPanelOpen = useWikiStore((s) => s.setSearchPanelOpen)
   const appearance = useAppearanceSkin()
   const currentSkin = appearance?.skin ?? "jing"
-  const accountUser = useAccountStore((state) => state.user)
-  const accountSession = useAccountStore((state) => state.session)
-  const accountDisplayNameText = accountUser
-    ? accountDisplayName(accountUser.displayName, accountUser.email)
-    : "未登录"
-  const accountTitle = accountUser ? `${accountDisplayNameText} · ${accountUser.email}` : "未登录 · 点击登录"
-
   const [menuOpen, setMenuOpen] = useState(false)
-  /** 会员弹窗开关（从头像菜单的会员卡片进入）。 */
-  const openMembership = useMembershipPurchaseStore(s => s.show)
-  /** 会员状态：头像角标只在真正有效时显示。 */
-  const { active: isMember } = useMembership()
   /** 鼠标是否停在外观子菜单区域上（悬停展开/收起）。 */
   const [appearanceHovered, setAppearanceHovered] = useState(false)
   /** 用户用点击打开/收起的外观子菜单（鼠标移开后再定位）。 */
@@ -119,55 +86,6 @@ export function SidebarBottomActions() {
     }
   }, [menuOpen])
 
-  /**
-   * 统一的「去设置」动作。
-   *
-   * 关键点：`activeSettingsCategory` 会被 SettingsView 的 effect **读走并清空**，
-   * 而那个 effect 依赖 `changeCategory`（它内部依赖 `active`）。如果目标分区恰好
-   * 就是当前分区（例如已经停在「界面」再点外观），`changeCategory` 会提前 return，
-   * 消费逻辑却照旧把请求清掉 —— 用户看到的就是「点了没反应」（用户 2026-10-28 报的）。
-   *
-   * 所以这里：同一 tick 里既下发分区、又强制刷新视图；**相同分区再点一次**时给
-   * 一个非空 → 空的二次写入，让 SettingsView 的 effect 重新跑一遍。
-   */
-  const goToSettings = (category: SettingsCategoryId) => {
-    setMenuOpen(false)
-    setSearchPanelOpen(false)
-    setActiveSettingsCategory(category)
-    setActiveView("settings")
-    // 已经在该视图时，靠一次微任务重放请求，确保分区生效
-    queueMicrotask(() => {
-      const state = useWikiStore.getState()
-      if (state.activeView === "settings" && state.activeSettingsCategory === null) {
-        state.setActiveSettingsCategory(category)
-      }
-    })
-  }
-
-  /*
-   * 账号条目：**未登录时直接弹出登录窗**，不再跳到设置页（用户 2026-11-01 要求）。
-   * 已登录时仍进设置的「账号」分区 —— 改密码、换头像、改昵称都在那里。
-   */
-  const openAccount = () => {
-    setMenuOpen(false)
-    setSearchPanelOpen(false)
-    if (accountUser) {
-      goToSettings("account")
-      return
-    }
-    useAccountStore.getState().openDialog("login")
-  }
-
-  /** 退出账号：清掉登录态与本地会话，底栏随即显示「未登录」。 */
-  const handleLogout = async () => {
-    setMenuOpen(false)
-    try {
-      await useAccountStore.getState().logout()
-    } catch (error) {
-      console.error("[account] 退出账号失败:", error)
-    }
-  }
-
   const openMaintenance = () => {
     setMenuOpen(false)
     setSearchPanelOpen(false)
@@ -187,112 +105,28 @@ export function SidebarBottomActions() {
     setMenuOpen(false)
   }
 
-  /**
-   * 底栏：头像 + 用户名在**左边**，齿轮在**最右**（参考用户给的参考图）。
-   *
-   * 与上一版的区别：整条底栏不再是「一个大按钮」——
-   * 左半是可点的账号块（头像+名字），右侧是独立的设置齿轮（直接打开设置页）。
-   * 中间留白把两者分开，头像因此稳定贴左，不会再被拉宽推到中间。
-   */
   return (
-    <>
-      {/*
-       * 云同步额度**不在这里**。
-       *
-       * 2026-11-08 用户反馈：「云同步空间已用放在这里是不合适的，应该放在
-       * 打开的这个页面（点头像弹出的菜单）的下面」。
-       *
-       * 原因是信息割裂：侧栏底部一条额度条，会员状态却在头像菜单里，
-       * 用户看得到空间却不知道自己是会员，反之亦然。
-       * 现在额度并入 `MembershipCard`（方案 A1），这里只保留账号块与菜单。
-       */}
-
       <div
         data-ui="sidebar-bottom-actions"
         className="flex shrink-0 items-center gap-1 border-t py-1 pr-1.5 pl-2.5"
       >
-      {/*
-       * 左侧账号块：**头像在最左，用户名在头像右侧**（用户 2026-10-28 最终确认的顺序）。
-       *
-       * 位置：底栏留 10px 左内边距（pl-2.5），再叠按钮自身的 2px 内衬，
-       * 头像左边缘落在 12px 处 —— 与面板标题「章节列表」的文字左边对齐。
-       * 之前是 pl-0（头像直接贴侧栏边界），用户 2026-10-28 反馈「太靠左」。
-       *
-       * 宽度：账号块 `flex-1 min-w-0`、用户名 `min-w-0 flex-1`，头像 `shrink-0`。
-       * 之前的 `w-fit` 在 WebView2 里按 max-content 铺完名字后就收回成固定宽度，
-       * 用户名 `truncate` 只剩零宽并被省略号吞掉 —— 用户截图上「头像右边什么都没有」就是这个
-       * （2026-10-28 用户复报）。改成拉伸 + 让名字自己收缩，名字才会真正排在头像右侧。
-       */}
       <button
         ref={triggerRef}
         type="button"
         onClick={() => setMenuOpen((open) => !open)}
-        title={accountTitle}
-        aria-label="账号与外观"
+        aria-label="设置与外观"
         aria-haspopup="menu"
         aria-expanded={menuOpen}
-        data-ui="sidebar-account-avatar"
+        data-ui="sidebar-options"
         className={`flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-0.5 py-1 text-left transition-colors ${
           menuOpen
             ? "bg-accent/60 text-accent-foreground"
             : "hover:bg-accent/50 hover:text-accent-foreground"
         }`}
       >
-        {accountUser ? (
-          /*
-           * 会员头像：外层 28px 金框 + 内层 24px 头像。
-           *
-           * 为什么外层仍锁 size-7：金框用 padding 画出来，如果外层跟着变大
-           * （28+2×2=32px），底栏里头像会比非会员时更靠下、名字跟着错位。
-           * 把内层收到 24px，总尺寸刚好还是 28px —— 会员和非会员占地一致。
-           *
-           * 金框取 2px：1.5px 在 28px 的头像上只剩一条发丝，几乎看不出金色；
-           * 同时**不再给内层加 ring** —— 两层描边会互相挤压，实际可见的金色
-           * 只剩 0.5px。现在金框直接贴着头像，颜色是满的。
-           */
-          isMember ? (
-            <span className="member-avatar-ring flex size-7 shrink-0 items-center justify-center rounded-full p-[2px]">
-              <span className="sidebar-account-avatar flex size-6 items-center justify-center overflow-hidden rounded-full">
-                <AccountAvatar user={accountUser} baseUrl={accountSession?.baseUrl ?? null} />
-              </span>
-            </span>
-          ) : (
-            <span className="sidebar-account-avatar flex size-7 shrink-0 items-center justify-center overflow-hidden rounded-full">
-              <AccountAvatar user={accountUser} baseUrl={accountSession?.baseUrl ?? null} />
-            </span>
-          )
-        ) : (
-          <span className="sidebar-account-avatar flex size-7 shrink-0 items-center justify-center overflow-hidden rounded-full bg-muted text-muted-foreground">
-            <UserRound className="h-4 w-4" />
-          </span>
-        )}
-        {/*
-         * VIP 标识放在**名字前面**（2026-11-08 用户指定）。
-         *
-         * 之前是压在头像右下角的绝对定位角标，字号只有 7px、还越出圆圈，
-         * 看起来像贴歪的标签。移到名字前面后有完整的横向空间，字号可以
-         * 做到 8px 且不压任何元素。
-         *
-         * 会员身份由 useMembership 判断（每分钟重算本地到期），
-         * 而不是读 user.membership 快照 —— 否则跨过到期时刻后标签不会消失。
-         */}
-        {accountUser && isMember ? (
-          <span
-            className="shrink-0 rounded-[3px] bg-gradient-to-b from-amber-200 to-amber-500 px-1 text-[0.5rem] font-black leading-[13px] tracking-[0.03em] text-amber-950 shadow-[0_1px_2px_rgba(176,125,24,0.28)]"
-            aria-label="VIP 会员"
-          >
-            VIP
-          </span>
-        ) : null}
-        <span className="ui-test-account-name min-w-0 flex-1 truncate text-xs font-medium text-foreground">
-          {accountDisplayNameText}
-        </span>
+        <Settings className="size-4" />
+        <span>设置与外观</span>
       </button>
-
-      {/* 右侧只剩公告铃铛：设置入口已在账号菜单里，不再重复放齿轮。 */}
-      <div className="ml-auto flex shrink-0 items-center">
-        <AnnouncementBell />
-      </div>
 
       {menuOpen &&
         menuStyle &&
@@ -311,58 +145,9 @@ export function SidebarBottomActions() {
               overflow: "visible",
             }}
             role="menu"
-            aria-label="账号与外观"
+            aria-label="设置与外观"
             data-tauri-drag-region="false"
           >
-            <button
-              type="button"
-              role="menuitem"
-              data-ui="sidebar-avatar-account-entry"
-              className="ui-test-menu-item flex w-full items-center gap-2.5 text-left"
-              onClick={openAccount}
-            >
-              {accountUser ? (
-                /*
-                 * 弹层里的头像也加金框，与底栏保持一致 ——
-                 * 同一张头像在两个地方长得不一样，用户会觉得是两套东西。
-                 * 外层锁 size-9（36px），内层 32px，总尺寸不变。
-                 */
-                isMember ? (
-                  <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-amber-200 via-amber-300 to-amber-500 p-[2px]">
-                    <span className="flex size-8 items-center justify-center overflow-hidden rounded-full">
-                      <AccountAvatar user={accountUser} baseUrl={accountSession?.baseUrl ?? null} size="lg" />
-                    </span>
-                  </span>
-                ) : (
-                  <AccountAvatar user={accountUser} baseUrl={accountSession?.baseUrl ?? null} size="lg" />
-                )
-              ) : (
-                <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-muted">
-                  <UserRound className="h-4 w-4 text-muted-foreground" />
-                </span>
-              )}
-              <span className="ui-test-skin-copy min-w-0">
-                <span className="truncate">{accountDisplayNameText}</span>
-                <small className="truncate">{accountUser ? accountUser.email : "点击登录账号"}</small>
-              </span>
-            </button>
-
-            {/*
-             * 会员卡片：放在账号块下方、其它菜单项上方。
-             *
-             * 位置是刻意的 —— 这是整个菜单里唯一一块「带背景的卡片」，
-             * 视觉上必须紧贴账号（同一个「我」的语境），而不是夹在
-             * 「外观 / 设置 / 维护工具」这些工具项中间，否则会显得突兀。
-             *
-             * 未登录时 MembershipCard 自己返回 null（没有账号就没有会员状态）。
-             */}
-            <MembershipCard
-              onOpen={() => {
-                setMenuOpen(false)
-                openMembership()
-              }}
-            />
-
             {/*
              * 外观：**鼠标移上去就在它右侧弹出**三个皮肤主题，点击也仍然可以展开/收起。
              *
@@ -448,29 +233,10 @@ export function SidebarBottomActions() {
               </span>
             </button>
 
-            {/*
-             * 退出账号：只在已登录时出现（未登录时没有可退的会话）。
-             * 放在最后一项，与「设置 / 维护工具」这类入口之间用分隔语义隔开。
-             */}
-            {accountUser ? (
-              <button
-                type="button"
-                role="menuitem"
-                data-ui="sidebar-logout-entry"
-                className="ui-test-menu-item"
-                onClick={() => void handleLogout()}
-              >
-                <LogOut />
-                <span className="ui-test-skin-copy">
-                  <span>{t("sidebarActions.logout", { defaultValue: "退出账号" })}</span>
-                </span>
-              </button>
-            ) : null}
           </div>,
           document.body,
         )}
 
       </div>
-    </>
   )
 }

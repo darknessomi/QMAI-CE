@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useState, useSyncExternalStore } from "react"
+import { useCallback, useEffect, useId, useMemo, useState } from "react"
 import {
   Bot,
   BookOpen,
@@ -6,19 +6,15 @@ import {
   Network,
   History,
   MessageCircle,
-  HeartHandshake,
   Archive,
   Brain,
   Search,
   Plug,
-  Cloud,
-  UserRound,
 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import i18n from "@/i18n"
 import { Button } from "@/components/ui/button"
 import { PanelHeaderWithHelp } from "@/components/layout/panel-header-with-help"
-import { hasPendingUpdate, subscribeAppUpdateNotice } from "@/lib/app-update-notice"
 import { useWikiStore, type ModelSettingsTabId } from "@/stores/wiki-store"
 import "@/components/uitest/ui-test-tools.css"
 import { isTauri } from "@/lib/platform"
@@ -26,7 +22,6 @@ import { useChatStore } from "@/stores/chat-store"
 import { saveLanguage, loadNovelConfig, loadRerankConfig } from "@/lib/project-store"
 import type { SettingsDraft, DraftSetter } from "./settings-types"
 import type { SidebarNavConfig } from "@/lib/sidebar-nav-preferences"
-import type { BodyFontFamily, UiFontFamily } from "@/lib/font-settings"
 import { LlmProviderSection } from "./sections/llm-provider-section"
 import { DefaultModelSettingsPanel } from "./sections/default-model-settings-panel"
 import { UiTestEmbeddingModels, UiTestRerankModels } from "@/components/uitest/models/retrieval-models"
@@ -40,19 +35,12 @@ import { AgentMcpSection } from "./sections/agent-mcp-section"
 import { ChangelogSection } from "./sections/changelog-section"
 import { FeedbackSection } from "./sections/feedback-section"
 import { UsageGuideSection } from "./sections/usage-guide-section"
-import { ContactSupportSection } from "./sections/contact-support-section"
 import { DataManagementSection } from "./sections/data-management-section"
 import { ExportCenterSection } from "./sections/export-center-section"
 import { UserMemorySection } from "./sections/user-memory-section"
-import { ModelTutorialLink } from "./model-tutorial-link"
-import { CloudSyncSection } from "./sections/cloud-sync-section"
-import { useBuiltinPluginEnabled } from "@/lib/plugins/use-builtin-plugins"
-import { AccountSection } from "./sections/account-section"
 
 type CategoryId =
-  | "account"
   | "model"
-  | "cloudSync"
   | "network"
   | "web-search"
   | "mcp"
@@ -63,7 +51,6 @@ type CategoryId =
   | "data-management"
   | "export-center"
   | "feedback"
-  | "contact-support"
   | "classification"
 | "changelog"
 
@@ -80,13 +67,7 @@ interface Category {
 }
 
 const CATEGORIES: Category[] = [
-  /* 账号放第一位：注册 / 登录 / 头像 / 改密码都在这里，
-   * 只是「可选」的云端身份，不影响本地写作。 */
-  { id: "account", labelKey: "settings.categories.account", icon: UserRound, defaultLabel: "账号" },
   { id: "model", labelKey: "settings.categories.model", icon: Brain },
-  /* 云同步：紧跟在「模型设置」下面，与需求位置一致。 */
-  { id: "cloudSync", labelKey: "settings.categories.cloudSync", icon: Cloud, defaultLabel: "云同步" },
-  /* 会员云空间：备份到我们自己的服务器（与「云同步」是两回事）。 */
   /*
    * 「新手引导」不再单独占一个分类：它现在只是写作设置里的一个开关
    * （打开后旁边出现「播放」）。按阶段重播的入口已按用户要求去掉 ——
@@ -100,28 +81,10 @@ const CATEGORIES: Category[] = [
   { id: "user-memory", labelKey: "settings.categories.userMemory", icon: Brain },
   { id: "data-management", labelKey: "settings.categories.dataManagement", icon: Archive },
   { id: "feedback", labelKey: "settings.categories.feedback", icon: MessageCircle },
-  { id: "contact-support", labelKey: "settings.categories.contactSupport", icon: HeartHandshake },
   { id: "changelog", labelKey: "settings.categories.changelog", icon: History },
 ]
 
 /** Settings tabs that edit the shared draft and need the global Save footer. */
-/**
- * 按插件开关过滤设置分类。
- *
- * 抽成纯函数是为了能直接测 —— 「关掉云同步插件后，设置里那一栏到底有没有
- * 消失」这条逻辑埋在组件里时只能靠手动点，而它恰好是上一轮改错的地方
- * （第一次误把 memberCloud 也过滤掉了）。
- *
- * ⚠️ 只过滤 `cloudSync`（同步到用户自己的网盘）。
- * `memberCloud`（会员云空间，备份到青幕服务器）**永远保留** ——
- * 两者没有任何关系，会员云空间不该被任何插件隐藏。
- */
-export function visibleSettingsCategories(
-  cloudSyncEnabled: boolean,
-): Category[] {
-  return cloudSyncEnabled ? CATEGORIES : CATEGORIES.filter((c) => c.id !== "cloudSync")
-}
-
 const CATEGORIES_WITH_SAVE_FOOTER: CategoryId[] = [
   "model",
   "network",
@@ -189,15 +152,7 @@ export function UiTestModelSettingsSection({ draft, setDraft }: { draft: Setting
             </button>
           ))}
         </div>
-        {/* 三个要自己填密钥/地址的页签才挂教程；「默认模型」不涉及，不摆链接。 */}
-        {active !== "default" && <ModelTutorialLink />}
       </div>
-      {/*
-       * 「模型同步」面板 2026-11-02 移到了「账号」页（account-section）：
-       * 同步的是账号的模型配置，入口放账号下更名副其实，模型页少一块干扰。
-       * 位置守卫在 settings-view.model-sync.spec.ts（盯 account-section 渲染、
-       * 并禁止本文件再引用 —— 两处都挂会出现两份面板、两份心跳订阅互相打架）。
-       */}
 
       {UI_TEST_MODEL_TABS.map((tab) => (
         <div key={tab.id} id={`${id}-${tab.id}-panel`} role="tabpanel" aria-labelledby={`${id}-${tab.id}`} hidden={active !== tab.id} data-ui="settings-model-panel" data-ui-model={tab.id}>
@@ -223,8 +178,6 @@ function initialDraft(
   maxHistoryMessages: number,
   uiLanguage: string,
   uiFontSizeScale: number,
-  uiFontFamily: UiFontFamily,
-  uiBodyFontFamily: BodyFontFamily,
   uiBodyFontPx: number,
   uiBodyLineHeight: number,
   uiBodyLetterSpacing: number,
@@ -273,8 +226,6 @@ function initialDraft(
     novelConfig,
     uiLanguage,
     uiFontSizeScale,
-    uiFontFamily,
-    uiBodyFontFamily,
     uiBodyFontPx,
     uiBodyLineHeight,
     uiBodyLetterSpacing,
@@ -288,12 +239,6 @@ function initialDraft(
 export function SettingsView() {
   const { t } = useTranslation()
 
-  // 关掉「有更新时自动提醒」的用户，只能从这里知道有新版本。
-  const updateDotVisible = useSyncExternalStore(
-    subscribeAppUpdateNotice,
-    hasPendingUpdate,
-    hasPendingUpdate,
-  )
   const project = useWikiStore((s) => s.project)
   const activeSettingsCategory = useWikiStore((s) => s.activeSettingsCategory)
   const setActiveSettingsCategory = useWikiStore((s) => s.setActiveSettingsCategory)
@@ -317,10 +262,6 @@ export function SettingsView() {
   const setMaxHistoryMessages = useChatStore((s) => s.setMaxHistoryMessages)
   const uiFontSizeScale = useWikiStore((s) => s.uiFontSizeScale)
   const setUiFontSizeScale = useWikiStore((s) => s.setUiFontSizeScale)
-  const uiFontFamily = useWikiStore((s) => s.uiFontFamily)
-  const setUiFontFamily = useWikiStore((s) => s.setUiFontFamily)
-  const uiBodyFontFamily = useWikiStore((s) => s.uiBodyFontFamily)
-  const setUiBodyFontFamily = useWikiStore((s) => s.setUiBodyFontFamily)
   const uiBodyFontPx = useWikiStore((s) => s.uiBodyFontPx)
   const setUiBodyFontPx = useWikiStore((s) => s.setUiBodyFontPx)
   const uiBodyLineHeight = useWikiStore((s) => s.uiBodyLineHeight)
@@ -338,34 +279,6 @@ export function SettingsView() {
 
   const [active, setActive] = useState<CategoryId>("model")
 
-  /*
-   * 「云同步」做成插件（2026-11-08 用户要求）。
-   *
-   * ⚠️ 这里藏的是 **cloudSync**（同步到用户自己的网盘：GitHub / WebDAV…），
-   * **不是 memberCloud**（会员云空间，备份到青幕服务器）。
-   *
-   * 两者是互不相干的功能，插件只管前者。会员云空间永远可见 ——
-   * 第一版我错把 memberCloud 也藏了，用户明确纠正过。
-   *
-   * 注意不能直接改 CATEGORIES 常量：它同时被 <select> 下拉、
-   * 保存页脚判断、以及 `activeSettingsCategory` 的恢复逻辑用到，
-   * 到处加条件迟早漏一个。统一走 visibleCategories。
-   */
-  const [cloudSyncEnabled] = useBuiltinPluginEnabled("cloud-sync")
-  const visibleCategories = useMemo(
-    () => visibleSettingsCategories(cloudSyncEnabled),
-    [cloudSyncEnabled],
-  )
-
-  /*
-   * 用户正停在「云同步」时把插件关掉，这一栏就消失了 ——
-   * 不处理的话右侧会停在 `case "cloudSync"` 上继续渲染，
-   * 而左侧导航里已经没有对应项，看起来像「页面卡住了」。
-   * 退回「模型设置」（设置页的默认分类）。
-   */
-  useEffect(() => {
-    if (!cloudSyncEnabled && active === "cloudSync") setActive("model")
-  }, [cloudSyncEnabled, active])
   const [saved, setSaved] = useState(false)
   const [draft, setDraftState] = useState<SettingsDraft>(() =>
     initialDraft(
@@ -380,8 +293,6 @@ export function SettingsView() {
       maxHistoryMessages,
       i18n.language,
       uiFontSizeScale,
-      uiFontFamily,
-      uiBodyFontFamily,
       uiBodyFontPx,
       uiBodyLineHeight,
       uiBodyLetterSpacing,
@@ -452,8 +363,6 @@ export function SettingsView() {
         maxHistoryMessages,
         prev.uiLanguage,
         uiFontSizeScale,
-        uiFontFamily,
-        uiBodyFontFamily,
         uiBodyFontPx,
         uiBodyLineHeight,
         uiBodyLetterSpacing,
@@ -474,8 +383,6 @@ export function SettingsView() {
     novelConfig,
     maxHistoryMessages,
     uiFontSizeScale,
-    uiFontFamily,
-    uiBodyFontFamily,
     uiBodyFontPx,
     uiBodyLineHeight,
     uiBodyLetterSpacing,
@@ -502,8 +409,6 @@ export function SettingsView() {
       saveOutputLanguage,
       saveMaxHistoryMessages,
       saveUiFontSizeScale,
-      saveUiFontFamily,
-      saveUiBodyFontFamily,
       saveUiBodyFontPx,
       saveUiBodyLineHeight,
       saveUiBodyLetterSpacing,
@@ -601,13 +506,6 @@ export function SettingsView() {
     await saveMaxHistoryMessages(draft.maxHistoryMessages, project?.id, project?.path)
     setUiFontSizeScale(draft.uiFontSizeScale)
     await saveUiFontSizeScale(draft.uiFontSizeScale, project?.id, project?.path)
-    setUiFontFamily(draft.uiFontFamily)
-    await saveUiFontFamily(draft.uiFontFamily)
-    // 正文字体与界面字体各自存各自的键：只做其中一个会导致
-    // "这次生效、下次启动丢失"。应用（写 CSS 变量）交给 App 的 effect，
-    // 与既有做法一致，不在这里重复写。
-    setUiBodyFontFamily(draft.uiBodyFontFamily)
-    await saveUiBodyFontFamily(draft.uiBodyFontFamily)
     /*
      * 5 个排版参数各自一个 localStorage 键 + 一个 app-state 键：
      * 只写 store 会「这次生效、下次启动丢失」，只落盘会「保存了但界面不变」。
@@ -649,8 +547,6 @@ export function SettingsView() {
     setMaxHistoryMessages,
     outputLanguage,
     setUiFontSizeScale,
-    setUiFontFamily,
-    setUiBodyFontFamily,
     setUiBodyFontPx,
     setUiBodyLineHeight,
     setUiBodyLetterSpacing,
@@ -662,12 +558,8 @@ export function SettingsView() {
 
   const body = useMemo(() => {
     switch (active) {
-      case "account":
-        return <AccountSection />
       case "model":
         return <UiTestModelSettingsSection draft={draft} setDraft={setDraft} />
-      case "cloudSync":
-        return <CloudSyncSection />
       case "network":
         return <NetworkSection draft={draft} setDraft={setDraft} />
       case "web-search":
@@ -690,8 +582,6 @@ export function SettingsView() {
         return <ExportCenterSection currentProject={project} />
       case "feedback":
         return <FeedbackSection />
-      case "contact-support":
-        return <ContactSupportSection />
       case "changelog":
         return <ChangelogSection />
     }
@@ -712,7 +602,7 @@ export function SettingsView() {
           />
         </div>
         <nav aria-label="设置分类" data-ui="settings-navigation" className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
-          {visibleCategories.map((c) => {
+          {CATEGORIES.map((c) => {
             const Icon = c.icon
             const isActive = c.id === active
             
@@ -737,13 +627,6 @@ export function SettingsView() {
                 <span className="flex min-w-0 flex-1 flex-col items-start">
                   <span className="flex min-w-0 items-center gap-1.5">
                     <span className="truncate">{t(c.labelKey, { defaultValue: c.defaultLabel })}</span>
-                    {c.id === "changelog" && updateDotVisible ? (
-                      <span
-                        data-ui="settings-changelog-update-dot"
-                        aria-label="有新版本可更新"
-                        className="h-1.5 w-1.5 shrink-0 rounded-full bg-red-500"
-                      />
-                    ) : null}
                   </span>
                   {c.hintKey ? (
                     <span className={`truncate text-[0.625rem] leading-tight ${
@@ -764,7 +647,7 @@ export function SettingsView() {
         <div data-ui="settings-mobile-navigation">
             <label htmlFor="ui-test-settings-category">设置分类</label>
             <select id="ui-test-settings-category" aria-label="设置分类" value={active} onChange={(event) => changeCategory(event.target.value as CategoryId)}>
-              {visibleCategories.map((category) => <option key={category.id} value={category.id}>{t(category.labelKey, { defaultValue: category.defaultLabel })}</option>)}
+              {CATEGORIES.map((category) => <option key={category.id} value={category.id}>{t(category.labelKey, { defaultValue: category.defaultLabel })}</option>)}
             </select>
           </div>
         {/* overflow-x-hidden：任何子元素横向溢出都别变成整页的横向滚动条。 */}
