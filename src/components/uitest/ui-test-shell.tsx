@@ -24,7 +24,7 @@ import { availablePrimaryNav, movePrimaryNav, normalizePrimaryNav, PRIMARY_NAV_L
 import { isBuiltinViewEnabled } from "@/lib/plugins/builtin-state"
 import { useBuiltinPluginsState } from "@/lib/plugins/use-builtin-plugins"
 import { normalizePath } from "@/lib/path-utils"
-import { getUiTestDocumentPath, UI_TEST_AI_DEFAULT_WIDTH } from "@/lib/ui-test-layout"
+import { getUiTestDocumentPath, UI_TEST_AI_DEFAULT_WIDTH, UI_TEST_PANEL_GAP } from "@/lib/ui-test-layout"
 import { isFullWindowView } from "@/lib/full-window-views"
 import type { WikiProject } from "@/types/wiki"
 import { UiTestShelf } from "./ui-test-shelf"
@@ -47,6 +47,9 @@ import "./ui-test.css"
 import "./ui-test-skins.css"
 
 const UiTestWorkspace = lazy(async () => ({ default: (await import("./ui-test-workspace")).UiTestWorkspace }))
+const CHAPTER_LIST_DEFAULT_WIDTH = 220
+const CHAPTER_LIST_MIN_WIDTH = 180
+const CHAPTER_LIST_MAX_WIDTH = 400
 type NavView = WikiState["activeView"]
 interface UiTestShellProps {
   project: WikiProject | null
@@ -180,6 +183,7 @@ export function UiTestShell({ project, onOpenProject, onSelectProject, onSwitchP
   const toolsRef = useRef<HTMLDivElement>(null)
   const toolRef = useRef<HTMLButtonElement>(null)
   const directoryRef = useRef<HTMLButtonElement>(null)
+  const chapterListDrag = useRef<{ x: number; width: number } | null>(null)
   const cancelImportRef = useRef<(() => void) | null>(null)
   const writing = Boolean(project && (activeView === "wiki" || activeView === "sources"))
   const assistantOpen = activeView === "sources" ? outlineExpanded : chatExpanded
@@ -200,6 +204,13 @@ export function UiTestShell({ project, onOpenProject, onSelectProject, onSwitchP
   const hasDirectory = Boolean(project && activeView !== "settings" && !fullWindowViews && !memoryCenterFullWindow)
   const sidebarPreference = preference.directory?.[activeView] ?? activeView !== "graph"
   const sidebarVisible = hasDirectory && sidebarPreference
+  const chapterListMaxWidth = Math.max(CHAPTER_LIST_MIN_WIDTH, Math.min(CHAPTER_LIST_MAX_WIDTH, Math.floor(viewportWidth / 2) - UI_TEST_PANEL_GAP))
+  const clampChapterListWidth = (width: number) => Math.max(CHAPTER_LIST_MIN_WIDTH, Math.min(chapterListMaxWidth, Math.round(width)))
+  const chapterListWidth = clampChapterListWidth(Number.isFinite(preference.chapterListWidth) ? preference.chapterListWidth! : CHAPTER_LIST_DEFAULT_WIDTH)
+  const resizeChapterList = (width: number) => {
+    const next = clampChapterListWidth(width)
+    setPreference(previous => previous.chapterListWidth === next ? previous : { ...previous, chapterListWidth: next })
+  }
   const showShelf = !project && !showGlobalSettings
 
 
@@ -614,9 +625,43 @@ export function UiTestShell({ project, onOpenProject, onSelectProject, onSwitchP
         {libraryError && <p className="ui-test-local-warning" role="alert">{libraryError}</p>}
         <div className="ui-test-workspace">
           {showShelf ? <UiTestShelf onCreateProject={() => setShowCreateDialog(true)} onOpenProject={onOpenProject} onSelectProject={onSelectProject} /> : <>
-            {hasDirectory && <aside hidden={!sidebarVisible} id="ui-test-directory" className="ui-test-sidebar" aria-label="工作区目录">
+            {hasDirectory && <aside hidden={!sidebarVisible} id="ui-test-directory" className="ui-test-sidebar" aria-label="工作区目录" style={activeView === "wiki" ? { width: chapterListWidth } : undefined}>
               <div className="ui-test-directory-content"><SidebarPanel onUiTestCloseDirectory={toggleDirectory} onUiTestRegisterCancel={(cancel) => { cancelImportRef.current = cancel }} /></div>
             </aside>}
+            {sidebarVisible && activeView === "wiki" && <div
+              className="ui-test-resize-handle"
+              role="separator"
+              aria-label="调整章节列表宽度"
+              aria-controls="ui-test-directory"
+              aria-orientation="vertical"
+              aria-valuemin={CHAPTER_LIST_MIN_WIDTH}
+              aria-valuemax={chapterListMaxWidth}
+              aria-valuenow={chapterListWidth}
+              tabIndex={0}
+              onKeyDown={(event) => {
+                let width: number
+                switch (event.key) {
+                  case "ArrowLeft": width = chapterListWidth - 16; break
+                  case "ArrowRight": width = chapterListWidth + 16; break
+                  case "Home": width = CHAPTER_LIST_MIN_WIDTH; break
+                  case "End": width = chapterListMaxWidth; break
+                  default: return
+                }
+                event.preventDefault()
+                resizeChapterList(width)
+              }}
+              onPointerDown={(event) => {
+                if (!event.isPrimary || event.button !== 0) return
+                event.preventDefault()
+                event.currentTarget.setPointerCapture(event.pointerId)
+                chapterListDrag.current = { x: event.clientX, width: chapterListWidth }
+              }}
+              onPointerMove={(event) => {
+                const drag = chapterListDrag.current
+                if (!drag || !event.currentTarget.hasPointerCapture(event.pointerId)) return
+                resizeChapterList(drag.width + event.clientX - drag.x)
+              }}
+            ><span /></div>}
             <main className="ui-test-main"><ErrorBoundary>
               {writing ? <Suspense fallback={<div className="ui-test-loading">正在打开工作区…</div>}><UiTestWorkspace mode={activeView === "sources" ? "outline" : "chapter"} requestedWidth={requestedWidth} viewportWidth={viewportWidth} onWidthChange={(aiWidth) => setPreference(previous => ({ ...previous, aiWidth }))} /></Suspense> : <ContentArea />}
             </ErrorBoundary></main>

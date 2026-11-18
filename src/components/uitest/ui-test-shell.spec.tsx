@@ -304,6 +304,52 @@ describe("独立UI测试版外壳", () => {
     expect(expanded.getAttribute("aria-label")).toBe("收起目录")
     expect(expanded.classList.contains("is-directory-collapsed")).toBe(false)
   })
+  it("章节列表可双向拖拽，限制宽度并按小说恢复", async () => {
+    useWikiStore.setState({ activeView: "wiki" })
+    await render()
+    const directory = host.querySelector<HTMLElement>("#ui-test-directory")!
+    const handle = host.querySelector<HTMLElement>('[aria-label="调整章节列表宽度"]')!
+    expect(handle.previousElementSibling).toBe(directory)
+    expect(directory.style.width).toBe("220px")
+
+    // jsdom 不实现指针捕获，由测试模拟开始和松开后的捕获状态。
+    const hasCapture = vi.fn(() => false)
+    Object.assign(handle, {
+      setPointerCapture: () => hasCapture.mockReturnValue(true),
+      hasPointerCapture: hasCapture,
+    })
+    const pointer = async (type: string, clientX: number) => {
+      await act(async () => {
+        handle.dispatchEvent(new PointerEvent(type, { bubbles: true, button: 0, isPrimary: true, pointerId: 1, clientX }))
+      })
+    }
+    await pointer("pointerdown", 225)
+    await pointer("pointermove", 315)
+    expect(directory.style.width).toBe("310px")
+    await pointer("pointermove", 1000)
+    expect(directory.style.width).toBe("400px")
+    await pointer("pointermove", 0)
+    expect(directory.style.width).toBe("180px")
+    await pointer("pointermove", 275)
+    hasCapture.mockReturnValue(false)
+    await pointer("pointermove", 500)
+    expect(directory.style.width).toBe("270px")
+
+    await click("收起目录")
+    expect(host.contains(handle)).toBe(false)
+    await click("展开目录")
+    expect(directory.style.width).toBe("270px")
+    await click("大纲")
+    expect(host.querySelector('[aria-label="调整章节列表宽度"]')).toBeNull()
+    expect(directory.style.width).toBe("")
+    await click("章节")
+    expect(directory.style.width).toBe("270px")
+
+    await act(async () => root.unmount())
+    root = createRoot(host)
+    await render()
+    expect(host.querySelector<HTMLElement>("#ui-test-directory")?.style.width).toBe("270px")
+  })
   it("无书时主工作区入口禁用，不留下看似有效却无效的按钮", async () => {
     await render(false)
     for (const name of ["大纲", "章节", "记忆中心"]) {

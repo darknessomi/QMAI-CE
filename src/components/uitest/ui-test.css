@@ -237,7 +237,7 @@ html[data-ui-test-skin], html[data-ui-test-skin] body, html[data-ui-test-skin] #
 .ui-test-skin-copy small { color: var(--ui-muted); font-size: 0.75rem; }
 .ui-test-workspace { min-height: 0; flex: 1; display: flex; overflow: hidden; position: relative; }
 .ui-test-main { min-width: 0; min-height: 0; flex: 1; height: 100%; overflow: hidden; background: var(--ui-paper); }
-.ui-test-sidebar { width: 220px; min-width: 220px; height: 100%; flex-shrink: 0; background: var(--ui-panel); overflow: hidden; display: flex; flex-direction: column; }
+.ui-test-sidebar { width: 220px; height: 100%; flex-shrink: 0; background: var(--ui-panel); overflow: hidden; display: flex; flex-direction: column; }
 .ui-test-directory-content { flex: 1; min-height: 0; overflow: hidden; }
 .ui-test-directory-content > div { min-height: 0; }
 .ui-test-directory-content .border-b, .ui-test-directory-content .border-t { border-width: 0; }
