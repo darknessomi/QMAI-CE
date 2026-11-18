@@ -79,6 +79,25 @@ const FOUR_POINT_FIVE_ZERO_ZH: string[] = [
   "为会员用户提供更好的使用体验和额度管理能力。",
 ];
 
+const FOUR_POINT_SEVEN_ZERO_ZH: string[] = [
+  "社区版单独保存全局配置，可与原版分别设置模型和界面偏好。",
+  "社区版移除了原版账号、会员和会员云空间等在线服务。",
+  "写作时可以拖动章节列表的边缘调整宽度，方便查看长章名或为正文腾出空间。",
+  "移除章节正文底部的字数栏，为编辑区留出更多空间。手写和 AI 字数仍会分别统计。",
+  "批量提取章节记忆时，默认只处理尚未提取的章节。",
+  "选择「全部提取」时会再次确认，避免误操作导致已有章节记忆被重新提取。",
+  "修复 macOS 新建小说时的默认存放位置，现在使用当前用户主目录下的 QM-BOOK 文件夹。",
+];
+
+const FOUR_POINT_SEVEN_ZERO_CHANGELOG: ChangelogEntry = {
+  version: "4.7.0",
+  date: "2026-11-18",
+  highlights: {
+    en: FOUR_POINT_SEVEN_ZERO_ZH,
+    zh: FOUR_POINT_SEVEN_ZERO_ZH,
+  },
+};
+
 const FOUR_POINT_SIX_ZERO_CHANGELOG: ChangelogEntry = {
   version: "4.6.0",
   date: "2026-11-08",
@@ -2202,6 +2221,8 @@ export function currentVersionChangelog(version: string): ChangelogEntry[] {
    * 才是「当前版本发布说明」的取数口 —— 漏了这里，发布说明会退化成
    * 一行「QMAI x.y.z 发布版本」，scripts/release-notes.spec.mjs 会拦下来。
    */
+  if (version === FOUR_POINT_SEVEN_ZERO_CHANGELOG.version)
+    return [FOUR_POINT_SEVEN_ZERO_CHANGELOG];
   if (version === FOUR_POINT_SIX_ZERO_CHANGELOG.version)
     return [FOUR_POINT_SIX_ZERO_CHANGELOG];
   if (version === FOUR_POINT_FIVE_ZERO_CHANGELOG.version)
@@ -2397,7 +2418,8 @@ export function currentVersionChangelog(version: string): ChangelogEntry[] {
 
 export function allChangelog(): ChangelogEntry[] {
   return [
-     FOUR_POINT_SIX_ZERO_CHANGELOG,
+    FOUR_POINT_SEVEN_ZERO_CHANGELOG,
+    FOUR_POINT_SIX_ZERO_CHANGELOG,
     FOUR_POINT_FIVE_ZERO_CHANGELOG,
     FOUR_POINT_FOUR_TWO_CHANGELOG,
     FOUR_POINT_FOUR_ONE_CHANGELOG,

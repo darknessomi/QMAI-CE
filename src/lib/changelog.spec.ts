@@ -6,7 +6,13 @@ describe("changelog", () => {
     const entries = allChangelog()
     const versions = entries.map((entry) => entry.version)
 
-    expect(versions.slice(0, 11)).toEqual(["4.6.0", "4.5.0", "4.4.2", "4.4.1", "4.4.0", "4.3.10", "4.3.9", "4.3.8", "4.3.7", "4.3.6", "4.3.5"])
+    expect(versions.slice(0, 12)).toEqual(["4.7.0", "4.6.0", "4.5.0", "4.4.2", "4.4.1", "4.4.0", "4.3.10", "4.3.9", "4.3.8", "4.3.7", "4.3.6", "4.3.5"])
+    const [release470] = currentVersionChangelog("4.7.0")
+    expect(release470).toBe(entries[0])
+    expect(release470.date).toBe("2026-11-18")
+    expect(release470.highlights.zh).toHaveLength(7)
+    expect(release470.highlights.zh.join("\n")).toContain("章节正文底部的字数栏")
+    expect(release470.highlights.en).toEqual(release470.highlights.zh)
     /*
      * 4.4.2：章节右键刷新目录一项新功能，其余为章节保存/提取、MCP、Cursor CLI、反重力 CLI、写作对话状态等修复。
      */

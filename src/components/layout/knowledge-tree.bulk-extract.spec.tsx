@@ -46,6 +46,7 @@ async function openExtractionDialog() {
   clickButton("一键提取所有章节")
   await flush()
   expect(document.querySelector('[role="dialog"]')?.textContent).toContain("选择章节提取范围")
+  await vi.waitFor(() => expect(document.activeElement?.textContent).toBe("仅提取未提取章节"))
   expect(runBulkChapterIngest).not.toHaveBeenCalled()
 }
 
@@ -81,7 +82,6 @@ describe("章节右键批量提取范围", () => {
 
   it("默认聚焦仅提取未提取章节，点击后直接补提取", async () => {
     await openExtractionDialog()
-    expect(document.activeElement?.textContent).toBe("仅提取未提取章节")
     clickButton("仅提取未提取章节")
     await flush()
     expect(runBulkChapterIngest).toHaveBeenCalledExactlyOnceWith(projectPath, {
@@ -111,7 +111,6 @@ describe("章节右键批量提取范围", () => {
     await flush()
     expect(document.querySelector('[role="dialog"]')).toBeNull()
     await openExtractionDialog()
-    expect(document.activeElement?.textContent).toBe("仅提取未提取章节")
   })
 
   it("取消后不启动提取", async () => {

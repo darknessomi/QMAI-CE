@@ -11,9 +11,10 @@ describe("新建小说项目弹窗", () => {
     expect(source).toContain("event.preventDefault()")
   })
 
-  it("创建前会自动补齐默认目录并创建父目录", () => {
-    expect(source).toContain("resolveDefaultParentDir")
+  it("打开时读取默认目录，创建时使用选定的父目录", () => {
+    expect(source).toContain("getDefaultNovelDir()")
+    expect(source).toContain("const parentDir = normalizePath(path)")
     expect(source).toContain("await createDirectory(parentDir)")
-    expect(source).toContain("path.trim() || await resolveDefaultParentDir()")
+    expect(source).toContain("await createProject(name.trim(), parentDir)")
   })
 })
