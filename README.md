@@ -16,7 +16,7 @@
   <img src="https://img.shields.io/badge/license-GPL--3.0-blue?style=flat-square" alt="License" />
 </p>
 
-上游 QMAI 已转为闭源。QMAI-CE 由社区独立维护，基于上游转为闭源前的提交 `43fe9b9a`，沿用该版本的 [GPL-3.0 许可证](LICENSE)。
+上游 QMAI 已转为闭源。QMAI-CE 由社区独立维护，基于上游转为闭源前的提交 `43fe9b9a`，沿用该版本的 [GPL-3.0 许可证](LICENSE)。移除了商业版本的账户体系与收费功能，只保留最纯净的写作体验。
 
 ---
 ![书架](docs/screenshots/书架.jpg)
