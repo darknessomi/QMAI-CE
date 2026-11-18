@@ -1,9 +1,6 @@
 # QMAI 插件作者指南
 
 > 第一次开发插件，可以先跟着[插件开发入门](getting-started.md)创建并安装一个字符计数工具。本文详述工具协议、Provider 接口和发布前的验收步骤。
->
-> 协议细节的权威来源是 `docs/superpowers/specs/2026-10-27-开放插件系统-design.md`（v1）
-> 与 `2026-10-28-插件provider扩展点-design.md`（v2）；本文是它们的实践版。
 
 ---
 
@@ -157,7 +154,7 @@ process.stdin.on("end", () => process.exit(0))
 
 **⑥ 权限最小化，能不要就不要。**
 `permissions: []` 的插件用户装起来毫无心理负担。如果你确实要读项目文件，只要 `fs:project-read`，**不要顺手把 `fs:project-write` 也写上**——用户会看到这一行，然后犹豫。
-（含义详见设计文档 6.2；`data:write` 是自动授予的，不用声明。）
+宿主自动授予 `data:write`。
 
 **⑦ 错误信息写给"人"看，而且要带原因。**
 - ❌ `"error"`
@@ -176,7 +173,7 @@ process.stdin.on("end", () => process.exit(0))
 参照实现之所以零依赖手写协议，就是为了证明"这不需要依赖"。
 
 **⑪ 安装期间**绝不**假设会有构建步骤。**
-宿主**不跑** `npm install`、不跑 `postinstall`、不跑任何构建脚本（这是安全红线，见设计文档 13.1）。你推上去的必须是**能直接跑的东西**。
+宿主**不跑** `npm install`、不跑 `postinstall`、不跑任何构建脚本。你推上去的必须是**能直接跑的东西**。
 
 **⑫ 你是常驻进程，别假设"一辈子只活一次"。**
 - 拿到的环境变量只在启动时有效（端口、令牌会变），**不要缓存到磁盘**
@@ -299,7 +296,7 @@ Content-Type: application/json
 
 ---
 
-## 4. 怎么测：四层，从便宜到贵
+## 4. 插件测试
 
 ### 第 1 层：协议自测（不需要 QMAI，10 秒）
 
@@ -362,11 +359,7 @@ curl.exe -s -N -H "Authorization: Bearer test-token" -H "Content-Type: applicati
 
 > **provider 插件的「刷新模型」按钮**比重启快：改完 `/v1/models` 的逻辑重启插件后点一下就行。
 
-### 第 4 层：跟着验收清单走一遍
-
-`docs/superpowers/plans/2026-10-27-开放插件系统-验收清单.md`
-- 第一部分（v1）：工具插件的完整验收
-- 第二部分（v2.0）：provider 插件的完整验收，用仓库里的假 provider 当素材
+发布前按第 6 节的作者自测清单逐项检查。
 
 ---
 

@@ -6,7 +6,7 @@
  * 每个事件给一句 20 字左右的标题加若干可直接落笔的细节抓手。
  *
  * 刻意不参与 chapterOutlineData 的解析、分批续跑与校验链路，也不注册为上下文索引
- * 的 chapter kind —— 详见 docs/scratch-20261010-分支说明.md 第 2.3 节。
+ * 的 chapter kind。
  */
 
 import { DE_AI_GENERATION_RULES } from "./de-ai-generation-rules"

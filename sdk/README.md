@@ -5,8 +5,7 @@
 但任一处写错插件就不可用。
 
 这个 SDK 把那两类收走：**你只写业务，协议和清单校验交给它。**
-配套的实践文档是 [`docs/plugins/authoring-guide.md`](../docs/plugins/authoring-guide.md)，
-设计依据是 [`docs/superpowers/specs/2026-10-28-插件平台v3-设计.md`](../docs/superpowers/specs/2026-10-28-插件平台v3-设计.md) 第 9 章。
+工具协议、Provider 接口和发布前的自测步骤见[插件作者指南](../docs/plugins/authoring-guide.md)。
 
 ---
 

@@ -109,8 +109,7 @@ export function isEventOutlineSaveBlocked(fileType: OutlineSaveRequestFileType):
  * 会被连坐吞掉**，用户仍然「点了没反应」。这不是本函数的疏漏：`650400f`
  * 原文就是一字不差的 `if (droppedEventOutlineCount > 0 && saveRequests.length === 0) return`。
  * 改它等于改变「什么时候弹确认框 / 错误」的语义，是独立的行为变更（需要单独的
- * 设计决定与 UI 验收），故本批只把它记清楚。最小处方见
- * docs/scratch-20261010-事件细纲流程-设计.md §4.2.1。
+ * 设计决定与 UI 验收）。
  */
 export type OutlineAutoSaveGateAction =
   | "drop-event-outline"
