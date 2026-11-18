@@ -1,15 +1,5 @@
 // @vitest-environment jsdom
 
-/**
- * 写作工作区的挂载位置。
- *
- * 用户要求「写作字数」状态栏只显示在**章节正文栏**底部：目录栏与 AI 对话栏
- * 下面不出现，大纲视图也不出现。此前它挂在 `.ui-test-app` 下，会横跨整窗
- * 并铺到目录栏与对话栏底下，所以这里把位置钉在真实渲染结果上。
- *
- * PreviewPanel 用轻量替身：本文件要验的是**挂载结构**，不是编辑器内部。
- */
-
 import { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { readFileSync } from "node:fs"
@@ -17,7 +7,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { useWikiStore } from "@/stores/wiki-store"
 import { useOutlineGenerationStore } from "@/stores/outline-generation-store"
 import { UiTestWorkspace } from "./ui-test-workspace"
-import { useWritingStatsStore } from "@/stores/writing-stats-store"
 
 vi.mock("@/components/layout/preview-panel", () => ({
   PreviewPanel: () => <div data-testid="preview">正文</div>,
@@ -47,7 +36,6 @@ function editorPane(): HTMLElement {
 }
 
 beforeEach(() => {
-  useWritingStatsStore.getState().reset()
   useWikiStore.setState({ chatExpanded: false })
   useOutlineGenerationStore.setState({ panelOpen: false })
   window.innerWidth = 1440
@@ -59,45 +47,28 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => { root.unmount() })
   container.remove()
-  useWritingStatsStore.getState().reset()
   vi.clearAllMocks()
 })
 
-describe("写作字数状态栏的挂载位置", () => {
-  it("章节视图：状态栏在正文栏底部，且是正文容器之后的兄弟", async () => {
+describe("写作工作区布局", () => {
+  it("章节视图只渲染正文容器，移除底部写作字数栏", async () => {
     await mount("chapter")
     const pane = editorPane()
-    const body = pane.querySelector(":scope > .ui-test-editor-slot")
-    const bar = pane.querySelector(":scope > footer.ui-test-statusbar")
-    expect(body, "正文栏应有正文容器").not.toBeNull()
-    expect(bar, "章节视图应显示写作字数状态栏").not.toBeNull()
-    expect(body!.nextElementSibling, "状态栏应紧跟正文容器").toBe(bar)
-    expect(pane.lastElementChild, "状态栏应是正文栏的最后一个子节点（贴底）").toBe(bar)
+    expect(pane.querySelector(".ui-test-editor-slot > [data-testid='preview']")).not.toBeNull()
+    expect(pane.children).toHaveLength(1)
+    expect(container.querySelector(".ui-test-statusbar")).toBeNull()
   })
 
-  it("章节视图：状态栏只占正文栏宽度，不横跨 AI 对话栏", async () => {
-    useWikiStore.setState({ chatExpanded: true })
-    await mount("chapter")
-    const panes = container.querySelector(".ui-test-writing-panes")!
-    expect(panes.children.length, "对话栏应已展开").toBeGreaterThan(1)
-    // 状态栏在正文栏里面，而不是写作区的兄弟节点 —— 这是「不横跨整窗」的结构保证。
-    expect(panes.querySelector(":scope > footer.ui-test-statusbar")).toBeNull()
-    expect(editorPane().querySelector(":scope > footer.ui-test-statusbar")).not.toBeNull()
-  })
-
-  it("大纲视图：不显示状态栏（它统计的是章节正文字数）", async () => {
+  it("大纲视图打开助手时挂载大纲对话", async () => {
     useOutlineGenerationStore.setState({ panelOpen: true })
     await mount("outline")
-    expect(container.querySelector(".ui-test-statusbar")).toBeNull()
     expect(container.querySelector('[data-testid="outline-chat"]')).not.toBeNull()
   })
 
-  it("切到 AI 对话标签页时，正文栏与状态栏一起隐藏", async () => {
+  it("正文栏的 hidden 属性能隐藏 flex 容器", () => {
     // tabs 模式（窄窗 + 对话展开）靠 hidden 属性切换；正文栏加了 display:flex
-    // 会盖掉 UA 的 [hidden]{display:none}，所以这里顺带钉住那条 CSS 补偿规则。
-    await mount("chapter")
-    expect(editorPane().querySelector(":scope > footer.ui-test-statusbar")).not.toBeNull()
-    const css = await import("node:fs").then((fs) => fs.readFileSync("src/components/uitest/ui-test.css", "utf8"))
+    // 会盖掉浏览器默认的 [hidden]{display:none}。
+    const css = readFileSync("src/components/uitest/ui-test.css", "utf8")
     expect(css.replace(/\r\n/g, "\n")).toContain(".ui-test-editor-pane[hidden] { display: none; }")
   })
 })

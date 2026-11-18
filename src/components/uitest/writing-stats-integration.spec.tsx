@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 /**
- * 「写作字数」状态栏的端到端通路。
+ * 正文编辑器的写作统计与落盘通路。
  *
  * 单测已覆盖差分引擎本身（`src/lib/writing-stats.spec.ts`）；这里要钉的是
  * **编辑器真的把每一次击键交到了记账口**——这是最容易悄悄断掉的一段：
@@ -265,16 +265,6 @@ describe("手动写作逐字统计", () => {
   })
 })
 
-describe("状态栏与记账同源", () => {
-  it("状态栏里的手写数字与引擎当场一致", async () => {
-    await mount()
-    await type("他推开门。")
-    // 这是 UI 组件读的同一份 state
-    expect(stats().humanChars).toBe(5)
-    expect(stats().humanChars + stats().aiChars).toBe(5)
-  })
-})
-
 describe("带外改动", () => {
   it("真机通路：磁盘被外部改过 → 同步进编辑器后敲一个字，手写只加 1（不是整段）", async () => {
     await mount()
@@ -419,27 +409,5 @@ describe("接线守卫", () => {
     // 一直连着写的人永远等不到落盘。这里钉住「已有定时器就直接返回」这个形状。
     expect(source, "应在已有定时器时直接返回，不重排").toContain("if (saveTimerRef.current) return")
     expect(source).toContain("CHAPTER_AUTOSAVE_INTERVAL_MS")
-  })
-
-  it("状态栏挂在**章节正文栏**里，不再由 shell 横跨整窗渲染", () => {
-    const workspace = readSource("src/components/uitest/ui-test-workspace.tsx")
-    const shell = readSource("src/components/uitest/ui-test-shell.tsx")
-    const bodyAt = workspace.indexOf('className="ui-test-editor-slot"')
-    const barAt = workspace.indexOf("<WritingStatusBar")
-    expect(bodyAt, "正文栏应有自己的容器").toBeGreaterThan(-1)
-    expect(barAt, "正文栏应渲染 WritingStatusBar").toBeGreaterThan(-1)
-    expect(barAt, "状态栏必须排在正文之后（贴正文栏底部）").toBeGreaterThan(bodyAt)
-    // 只统计章节视图：大纲栏下面不该出现（它统计的是章节正文字数）。
-    expect(workspace, "状态栏应只在章节模式渲染").toContain('{mode === "chapter" && <WritingStatusBar />}')
-    // shell 自己不能再挂一份，否则又会横跨整窗（此前正是这样）。
-    expect(shell, "shell 不应再直接渲染状态栏").not.toContain("<WritingStatusBar")
-  })
-
-  it("朗读名称用中文，且四项数据的标签不带任何英文", () => {
-    const source = readSource("src/components/uitest/ui-test-statusbar.tsx")
-    expect(source).toContain('aria-label="写作字数"')
-    for (const label of ["总字数", "今日目标", "AI 生成字数", "手写"]) {
-      expect(source, `状态栏应包含中文标签「${label}」`).toContain(`>${label}<`)
-    }
   })
 })

@@ -68,7 +68,6 @@ function App() {
   const personaSkillLearningError = useWikiStore((s) => s.personaSkillLearningError)
   const setPersonaSkillLearningError = useWikiStore((s) => s.setPersonaSkillLearningError)
   const dataVersion = useWikiStore((s) => s.dataVersion)
-  /** 全书正文字数由 writingStatsStore 统一维护（窗口标题与底部状态栏共用）。 */
   const appTitleTotalWordCount = useWritingStatsStore((s) => s.totalChars)
   const [, setShowCreateDialog] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -616,9 +615,6 @@ function App() {
 
     let cancelled = false
 
-    // 全书字数与今日写作统计都收在 writingStatsStore 里：窗口标题、目录里的
-    // 字数、底部状态栏读的是同一个数字，不再各算一遍（此前是三份独立实现，
-    // 口径一旦漂移，三处会显示三个不同的总字数）。
     const loadWritingStats = async () => {
       const stats = useWritingStatsStore.getState()
       await stats.initializeProject(project.path)
