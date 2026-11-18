@@ -61,21 +61,6 @@ pub fn read_proxy_config_from_store(store_path: &Path) -> Option<ProxyConfig> {
     serde_json::from_value(proxy.clone()).ok()
 }
 
-/// Locate the same `app-state.json` the frontend's plugin-store writes.
-///
-/// Why not take an `AppHandle`: the callers that need the proxy *per request*
-/// (updater channel probing / download) all run inside `spawn_blocking`, where
-/// no handle is available. Resolving the path from the environment instead
-/// means they can stay plain synchronous functions with no Tauri plumbing.
-///
-/// Use the same per-platform CE directory as the local MCP endpoint.
-pub fn app_state_path() -> Option<std::path::PathBuf> {
-    let dir = std::env::var_os("QMAI_TEST_APP_DATA_DIR")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(crate::mcp::paths::app_data_dir);
-    Some(dir.join("app-state.json"))
-}
-
 /// Read and apply the stored proxy config. Missing or unreadable
 /// config is treated exactly like a disabled proxy, so inherited
 /// HTTP_PROXY / HTTPS_PROXY / NO_PROXY values from the parent process
@@ -110,12 +95,9 @@ pub fn apply_proxy_env(config: &ProxyConfig) -> String {
     // leaves the previous values in place and reqwest keeps routing
     // through the now-removed proxy. The same applies to invalid
     // URLs and unsupported schemes (treat as disabled).
-    let url = config.url.trim();
-    let invalid_scheme =
-        !url.starts_with("http://") && !url.starts_with("https://");
-
-    if !config.enabled || url.is_empty() || invalid_scheme {
+    let Some(url) = current_proxy_url(config) else {
         clear_proxy_env();
+        let url = config.url.trim();
         return if !config.enabled {
             "disabled".to_string()
         } else if url.is_empty() {
@@ -125,7 +107,7 @@ pub fn apply_proxy_env(config: &ProxyConfig) -> String {
             // contain a password the user mis-typed.
             format!("disabled (unsupported scheme: {})", redact_url(url))
         };
-    }
+    };
 
     set_proxy_var("HTTP_PROXY", url);
     set_proxy_var("HTTPS_PROXY", url);
@@ -173,21 +155,12 @@ fn redact_url(url: &str) -> String {
 }
 
 /// 当前生效的代理 URL；没启用、地址为空或协议不支持时返回 `None`。
-///
-/// 为什么需要它：`tauri-plugin-updater` 走自己的 http 客户端，**不读**我们写进
-/// 环境变量的 `HTTP_PROXY`。所以更新通道必须显式把代理交给它，否则用户开了代理
-/// 也对「检查更新」无效（这是实测发现的一个漏洞，不是猜测）。
-pub fn current_proxy_url(config: &ProxyConfig) -> Option<String> {
+fn current_proxy_url(config: &ProxyConfig) -> Option<&str> {
     let url = config.url.trim();
-    if !config.enabled || url.is_empty() {
+    if !config.enabled || !(url.starts_with("http://") || url.starts_with("https://")) {
         return None;
     }
-    if !url.starts_with("http://") && !url.starts_with("https://") {
-        // reqwest 的代理只认 http/https；socks 需要额外 feature，这里明确不支持，
-        // 以免把一个用不了的地址丢给下层后得到莫名其妙的连接错误。
-        return None;
-    }
-    Some(url.to_string())
+    Some(url)
 }
 
 /// Remove all three proxy env vars. Called whenever the user
@@ -486,7 +459,7 @@ mod tests {
     }
 
     #[test]
-    fn parses_camelcase_bypassLocal_field() {
+    fn parses_camel_case_bypass_local_field() {
         // Frontend writes `bypassLocal` (camelCase). We must accept
         // that exact spelling — verify the serde rename works.
         let json = r#"{"enabled": true, "url": "http://x:1", "bypassLocal": false}"#;
@@ -497,7 +470,7 @@ mod tests {
     }
 
     #[test]
-    fn missing_proxyConfig_returns_none() {
+    fn missing_proxy_config_returns_none() {
         let dir = tempdir_for_test();
         let path = dir.join("missing.json");
         assert!(read_proxy_config_from_store(&path).is_none());
@@ -580,10 +553,7 @@ mod tests {
             url: "http://127.0.0.1:7890".to_string(),
             bypass_local: true,
         };
-        assert_eq!(
-            current_proxy_url(&config).as_deref(),
-            Some("http://127.0.0.1:7890")
-        );
+        assert_eq!(current_proxy_url(&config), Some("http://127.0.0.1:7890"));
     }
 
     #[test]
