@@ -17,6 +17,7 @@ const SENTRY_DSN =
  * 这里只保留结构，敏感查询参数一律替换成 REDACTED。
  */
 const SENSITIVE_QUERY_NAME = /^(key|api[-_]?key|apikey|token|access[-_]?token|refresh[-_]?token|secret|client[-_]?secret|password|passwd|sig|signature|auth)$/i
+const SENTRY_PII_FILTER = { deny: ["forwarded", "-ip", "remote-", "via", "-user"] }
 
 function scrubUrl(raw: string): string {
   try {
@@ -46,11 +47,9 @@ if (import.meta.env.MODE !== "test") {
     dsn: SENTRY_DSN,
     environment: import.meta.env.PROD ? "production" : "development",
     release: `qmai@${__APP_VERSION__}`,
-    // Developer includes errors + tracing. Logs/metrics APIs default on in SDK 10
-    // but we do not use them; profiling is PAYG-only; replay is unused.
-    enableLogs: false,
-    enableMetrics: false,
-    profilesSampleRate: 0,
+    // 保留事务式追踪。应用不接入 Sentry 日志或指标 API。
+    traceLifecycle: "static",
+    profileSessionSampleRate: 0,
     replaysSessionSampleRate: 0,
     replaysOnErrorSampleRate: 0,
     integrations: [
@@ -68,7 +67,15 @@ if (import.meta.env.MODE !== "test") {
     tracePropagationTargets: [],
     dataCollection: {
       userInfo: false,
+      cookies: SENTRY_PII_FILTER,
+      httpHeaders: SENTRY_PII_FILTER,
       httpBodies: [],
+      urlQueryParams: SENTRY_PII_FILTER,
+      genAI: { inputs: false, outputs: false },
+      mcp: { inputs: false, outputs: false },
+      databaseQueryData: false,
+      queues: false,
+      frameContextLines: 7,
     },
     // QMAI-2: plugin-http abort races reject a bare string after the
     // native resource is already dropped. Not an app bug.
