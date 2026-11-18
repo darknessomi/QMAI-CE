@@ -78,9 +78,8 @@ jobs:
 
       - name: Install protoc (Windows)
         if: runner.os == 'Windows'
-        uses: arduino/setup-protoc@v3
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
+        shell: pwsh
+        run: ./.github/scripts/install-protoc-windows.ps1
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
