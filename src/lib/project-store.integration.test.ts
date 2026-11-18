@@ -294,6 +294,13 @@ function makeRerankConfig(overrides: Partial<RerankConfig> = {}): RerankConfig {
   }
 }
 describe("novelConfig — project-directory persistence", () => {
+  it("保存共享项目配置时保留原版专用字段", async () => {
+    const path = `${tmp.path}/.qmai/novel-config.json`
+    await writeFileRaw(path, JSON.stringify({ ...makeNovelConfig(), originalOnly: { version: 2 } }))
+    await saveNovelConfig(makeNovelConfig({ searchTopK: 12 }), "shared", tmp.path)
+    expect(JSON.parse(await readFileRaw(path))).toMatchObject({ originalOnly: { version: 2 }, searchTopK: 12 })
+  })
+
   it("round-trip save then load returns identical config", async () => {
     const config = makeNovelConfig({ contextTokenBudget: 100000, searchTopK: 15 })
     await saveNovelConfig(config, "proj-1", tmp.path)

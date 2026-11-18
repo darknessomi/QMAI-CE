@@ -2,7 +2,9 @@
   <img src="src/assets/QM-LOGO.png" width="120" alt="青幕AI写作 Logo" />
 </p>
 
-<h1 align="center">青幕AI写作社区版（QMAI-CE）</h1>
+<h1 align="center">青幕AI写作 CE</h1>
+
+社区版可与原版并排安装、轮流使用。社区版首次启动时会复制原版的全局设置和模型配置，之后两版各自保存。书架沿用原来的项目路径，两版共用正文、大纲和项目设置。
 
 <p align="center">
   面向长篇小说的记忆型 AI 写作桌面系统

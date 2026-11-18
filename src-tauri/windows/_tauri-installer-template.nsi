@@ -52,7 +52,8 @@ ${StrLoc}
 !define UNINSTALLERHEADERIMAGE "{{uninstaller_header_image}}"
 !define MAINBINARYNAME "{{main_binary_name}}"
 !define MAINBINARYSRCPATH "{{main_binary_path}}"
-!define BUNDLEID "{{bundle_id}}"
+; CE shortcuts have their own Windows shell identity.
+!define BUNDLEID "com.qingmuai.writer.ce"
 !define COPYRIGHT "{{copyright}}"
 !define OUTFILE "{{out_file}}"
 !define ARCH "{{arch}}"
@@ -71,7 +72,7 @@ ${StrLoc}
 !define UNINSTALLERSIGNCOMMAND "{{uninstaller_sign_cmd}}"
 !define ESTIMATEDSIZE "{{estimated_size}}"
 !define STARTMENUFOLDER "{{start_menu_folder}}"
-!define INSTALLDIRNAME "QMaiWrite"
+!define INSTALLDIRNAME "QMaiWrite CE"
 
 Var PassiveMode
 Var UpdateMode
@@ -425,43 +426,6 @@ FunctionEnd
 
 ; Uninstaller Pages
 ; 1. Confirm uninstall page
-Var DeleteAppDataCheckbox
-Var DeleteAppDataCheckboxState
-!define /ifndef WS_EX_LAYOUTRTL         0x00400000
-!define MUI_PAGE_CUSTOMFUNCTION_SHOW un.ConfirmShow
-Function un.ConfirmShow ; Add add a `Delete app data` check box
-  ; $1 inner dialog HWND
-  ; $2 window DPI
-  ; $3 style
-  ; $4 x
-  ; $5 y
-  ; $6 width
-  ; $7 height
-  FindWindow $1 "#32770" "" $HWNDPARENT ; Find inner dialog
-  System::Call "user32::GetDpiForWindow(p r1) i .r2"
-  ${If} $(^RTL) = 1
-    StrCpy $3 "${__NSD_CheckBox_EXSTYLE} | ${WS_EX_LAYOUTRTL}"
-    IntOp $4 50 * $2
-  ${Else}
-    StrCpy $3 "${__NSD_CheckBox_EXSTYLE}"
-    IntOp $4 0 * $2
-  ${EndIf}
-  IntOp $5 100 * $2
-  IntOp $6 400 * $2
-  IntOp $7 25 * $2
-  IntOp $4 $4 / 96
-  IntOp $5 $5 / 96
-  IntOp $6 $6 / 96
-  IntOp $7 $7 / 96
-  System::Call 'user32::CreateWindowEx(i r3, w "${__NSD_CheckBox_CLASS}", w "$(deleteAppData)", i ${__NSD_CheckBox_STYLE}, i r4, i r5, i r6, i r7, p r1, i0, i0, i0) i .s'
-  Pop $DeleteAppDataCheckbox
-  SendMessage $HWNDPARENT ${WM_GETFONT} 0 0 $1
-  SendMessage $DeleteAppDataCheckbox ${WM_SETFONT} $1 1
-FunctionEnd
-!define MUI_PAGE_CUSTOMFUNCTION_LEAVE un.ConfirmLeave
-Function un.ConfirmLeave
-  SendMessage $DeleteAppDataCheckbox ${BM_GETCHECK} 0 0 $DeleteAppDataCheckboxState
-FunctionEnd
 !define MUI_PAGE_CUSTOMFUNCTION_PRE un.SkipIfPassive
 !insertmacro MUI_UNPAGE_CONFIRM
 
@@ -487,12 +451,12 @@ Function .onInit
   ${IfNot} ${AtLeastBuild} 22000
   ${OrIf} ${IsServerOS}
   ${OrIfNot} ${RunningX64}
-    StrCpy $0 "青幕AI写作需要 Windows 11 x64 桌面版（内部版本 22000 或更高）。"
+    StrCpy $0 "${PRODUCTNAME}需要 Windows 11 x64 桌面版（内部版本 22000 或更高）。"
   ${Else}
     ; PF_AVX2_INSTRUCTIONS_AVAILABLE，在运行 x86-64-v3 主程序之前检查。
     System::Call 'kernel32::IsProcessorFeaturePresent(i 40) i.r1'
     ${If} $1 = 0
-      StrCpy $0 "此处理器缺少 AVX2。青幕AI写作需要支持 x86-64-v3 的处理器。"
+      StrCpy $0 "此处理器缺少 AVX2。${PRODUCTNAME}需要支持 x86-64-v3 的处理器。"
     ${EndIf}
   ${EndIf}
   ${If} $0 != ""
@@ -744,7 +708,7 @@ Function EnsureWebView2
     Return
   ${EndIf}
 
-  MessageBox MB_YESNO|MB_ICONQUESTION "青幕AI写作需要「Microsoft Edge WebView2 运行时」才能显示界面，但本机还没有安装。$\r$\n$\r$\n是否现在自动安装？$\r$\n（约 2 MB，需要联网，通常 1 分钟内完成；不安装将无法打开软件。）" /SD IDYES IDNO qmai_wv2_declined
+  MessageBox MB_YESNO|MB_ICONQUESTION "${PRODUCTNAME}需要「Microsoft Edge WebView2 运行时」才能显示界面，但本机还没有安装。$\r$\n$\r$\n是否现在自动安装？$\r$\n（约 2 MB，需要联网，通常 1 分钟内完成；不安装将无法打开软件。）" /SD IDYES IDNO qmai_wv2_declined
 
   ; ① 安装包同目录
   ${GetParent} "$EXEPATH" $0
@@ -776,14 +740,14 @@ Function EnsureWebView2
     Return
   ${EndIf}
 
-  MessageBox MB_YESNO|MB_ICONEXCLAMATION "WebView2 运行时仍未安装成功。$\r$\n$\r$\n可以继续安装青幕AI写作，但软件将无法打开。是否继续？" /SD IDNO IDYES qmai_wv2_continue
+  MessageBox MB_YESNO|MB_ICONEXCLAMATION "WebView2 运行时仍未安装成功。$\r$\n$\r$\n可以继续安装${PRODUCTNAME}，但软件将无法打开。是否继续？" /SD IDNO IDYES qmai_wv2_continue
   Abort "用户中止安装：缺少 WebView2 运行时。"
 
   qmai_wv2_continue:
     Return
 
   qmai_wv2_declined:
-    MessageBox MB_YESNO|MB_ICONEXCLAMATION "跳过 WebView2 运行时安装后，青幕AI写作将无法打开。$\r$\n$\r$\n确定继续安装吗？" /SD IDNO IDYES qmai_wv2_continue
+    MessageBox MB_YESNO|MB_ICONEXCLAMATION "跳过 WebView2 运行时安装后，${PRODUCTNAME}将无法打开。$\r$\n$\r$\n确定继续安装吗？" /SD IDNO IDYES qmai_wv2_continue
     Abort "用户中止安装：缺少 WebView2 运行时。"
 FunctionEnd
 
@@ -992,7 +956,6 @@ Section Uninstall
   ; Remove shortcuts if not updating
   ${If} $UpdateMode <> 1
 
-
     !insertmacro DeleteAppUserModelId
 
     ; Remove start menu shortcut
@@ -1037,10 +1000,7 @@ Section Uninstall
     DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "${PRODUCTNAME}"
   ${EndIf}
 
-  ; Delete app data if the checkbox is selected
-  ; and if not updating
-  ${If} $DeleteAppDataCheckboxState = 1
-  ${AndIf} $UpdateMode <> 1
+  ${If} $UpdateMode <> 1
     ; Clear the install location $INSTDIR from registry
     DeleteRegKey SHCTX "${MANUPRODUCTKEY}"
     DeleteRegKey /ifempty SHCTX "${MANUKEY}"
@@ -1050,9 +1010,6 @@ Section Uninstall
     DeleteRegKey /ifempty HKCU "${MANUPRODUCTKEY}"
     DeleteRegKey /ifempty HKCU "${MANUKEY}"
 
-    SetShellVarContext current
-    RmDir /r "$APPDATA\${BUNDLEID}"
-    RmDir /r "$LOCALAPPDATA\${BUNDLEID}"
   ${EndIf}
 
   !ifmacrodef NSIS_HOOK_POSTUNINSTALL

@@ -24,7 +24,7 @@ import type { ChatMessage } from "@/lib/llm-providers"
  *   node_modules/vitest/vitest.mjs run src/lib/cache-hit.real-llm.test.ts --no-file-parallelism
  */
 
-const APP_STATE = "C:\\Users\\Administrator\\AppData\\Roaming\\com.qingmuai.writer\\app-state.json"
+const APP_STATE = "C:\\Users\\Administrator\\AppData\\Roaming\\com.qingmuai.writer.ce\\app-state.json"
 const PROJECT = "C:\\QM-BOOK\\黑雨之下"
 const PROVIDER_LABEL = process.env.CACHE_PROBE_PROVIDER ?? "硅基流动"
 

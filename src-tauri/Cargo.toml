@@ -96,6 +96,7 @@ indexmap = { version = "1", features = ["std"] }
 # 版本要求是 `>=4.5.0` 这类语义化范围，用字符串比较会得出 `4.10 < 4.9` 这种荒谬结论。
 # 版本已在 `Cargo.lock` 里（tauri 生态的传递依赖），显式声明不引入新的下载。
 semver = "1"
+tempfile = "3"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6.5"
@@ -151,3 +152,7 @@ opt-level = 3
 # larger binary, but prevents single-file corruption from killing the app.
 panic = "unwind"
 strip = true
+
+# macOS 动态加载的过程宏必须保留完整的 Mach-O 链接信息。最终发布程序仍按上方配置剥离。
+[profile.release.build-override]
+strip = "none"

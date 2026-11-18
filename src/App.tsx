@@ -6,7 +6,7 @@ import { isTauri, pickDirectory } from "@/lib/platform"
 import { useChatStore } from "@/stores/chat-store"
 import { useOutlineChatStore } from "@/stores/outline-chat-store"
 import { openProject, fileExists } from "@/commands/fs"
-import { getLastProject, saveLastProject, loadLlmConfig, loadAiChatModel, loadAiWorkflowMode, loadAiWorkflowModeBeforeDiscuss, loadDefaultLlmModel, loadEmbeddingConfig, loadProviderConfigs, loadActivePresetId, loadProxyConfig, loadNovelMode, loadNovelConfig, loadRevisionFeedbackWindowConfig, loadTheme, loadMaxHistoryMessages, loadUiBodyFontPx, loadUiBodyLineHeight, loadUiBodyLetterSpacing, loadUiBodyMarginX, loadUiBodySafeBottom, loadVisualStyle, saveLlmConfig, loadLastReadChapter, loadSearchApiConfig, loadOutlineWorkflowMode } from "@/lib/project-store"
+import { getLastProject, saveLastProject, loadLlmConfig, loadAiChatModel, loadAiWorkflowMode, loadAiWorkflowModeBeforeDiscuss, loadDefaultLlmModel, loadEmbeddingConfig, loadProviderConfigs, loadActivePresetId, loadProxyConfig, loadNovelMode, loadNovelConfig, loadRevisionFeedbackWindowConfig, loadTheme, loadMaxHistoryMessages, loadUiFontSizeScale, loadUiBodyFontPx, loadUiBodyLineHeight, loadUiBodyLetterSpacing, loadUiBodyMarginX, loadUiBodySafeBottom, loadVisualStyle, saveLlmConfig, loadLastReadChapter, loadSearchApiConfig, loadOutlineWorkflowMode } from "@/lib/project-store"
 import { openProjectWithPluginSync, syncPluginsProject } from "@/lib/plugins/project-sync"
 import { loadReviewItems, loadChatHistory, saveChatHistory, saveReviewItems } from "@/lib/persist"
 import { initializeAiOutlineModelFromStorage } from "@/lib/ai-outline-model-initialization"
@@ -418,15 +418,10 @@ function App() {
          *
          * 正文字号要把**界面字号**传进去：老设置是"界面字号 × 正文倍数"
          * 相乘得到的，迁移时不乘界面字号会让界面 150% 的用户发现正文变小。
-         * uiFontSizeScale 就是本组件第 41 行的 selector，可直接用。
-         *
-         * ⚠ 不要把它加进本 effect 的依赖数组。这个初始化 effect 的依赖是
-         * 空的（`}, []`，见文件里 init 那个 effect 的结尾），只跑一次；
-         * 加上去会让用户每改一次界面字号就重跑整个初始化（包含
-         * openProject 打开上次的项目）。这里的取值是安全的：
-         * wiki-store 的 uiFontSizeScale 初值由模块加载期的
-         * readStoredUiFontSizeScale() 同步算出，首帧就已经是正确值。
          */
+        const savedScale = await loadUiFontSizeScale()
+        if (savedScale !== null) useWikiStore.getState().setUiFontSizeScale(savedScale)
+        const { uiFontSizeScale } = useWikiStore.getState()
         const savedBodyFontPx = await loadUiBodyFontPx(uiFontSizeScale)
         if (savedBodyFontPx !== null) useWikiStore.getState().setUiBodyFontPx(savedBodyFontPx)
         const savedBodyLineHeight = await loadUiBodyLineHeight()

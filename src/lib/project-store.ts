@@ -21,7 +21,7 @@ import {
 } from "@/lib/visual-style-settings"
 import { isAbsolutePath, normalizePath } from "@/lib/path-utils"
 import { forgetProject, loadRegistry } from "@/lib/project-identity"
-import { readFile, writeFile, fileExists } from "@/commands/fs"
+import { readFile, writeFileAtomic, fileExists } from "@/commands/fs"
 import {
   normalizeProviderConfigs,
   normalizeUserLlmConfig,
@@ -557,6 +557,15 @@ async function loadProjectFileSyncEnabled(projectId?: string): Promise<boolean> 
   return true
 }
 
+// 项目文件由两版共用。只替换 CE 管理的字段，让原版能继续读自己的设置。
+async function writeProjectConfig(path: string, fields: object): Promise<void> {
+  const existing = await fileExists(path) ? JSON.parse(await readFile(path)) : {}
+  if (!existing || typeof existing !== "object" || Array.isArray(existing)) {
+    throw new Error("项目配置格式无效，已保留原文件。")
+  }
+  await writeFileAtomic(path, JSON.stringify({ ...existing, ...fields }, null, 2))
+}
+
 const SOURCE_WATCH_CONFIG_FILE = ".qmai/source-watch-config.json"
 
 function sourceWatchConfigFilePath(projectPath: string): string {
@@ -574,7 +583,7 @@ export async function saveSourceWatchConfig(config: SourceWatchConfig, projectId
   await store.save()
   if (projectPath) {
     try {
-      await writeFile(sourceWatchConfigFilePath(projectPath), JSON.stringify(normalized, null, 2))
+      await writeProjectConfig(sourceWatchConfigFilePath(projectPath), normalized)
     } catch {
       // non-critical
     }
@@ -609,7 +618,7 @@ export async function loadSourceWatchConfig(projectId?: string, projectPath?: st
   }
   if (config && projectPath) {
     try {
-      await writeFile(sourceWatchConfigFilePath(projectPath), JSON.stringify(config, null, 2))
+      await writeProjectConfig(sourceWatchConfigFilePath(projectPath), config)
     } catch {
       // non-critical migration
     }
@@ -678,7 +687,7 @@ export async function saveRevisionFeedbackWindowConfig(
   await store.set(REVISION_FEEDBACK_WINDOW_CONFIG_KEY, config)
   if (projectPath) {
     try {
-      await writeFile(revisionFeedbackConfigFilePath(projectPath), JSON.stringify(config, null, 2))
+      await writeProjectConfig(revisionFeedbackConfigFilePath(projectPath), config)
     } catch {
       // non-critical
     }
@@ -715,7 +724,7 @@ export async function loadRevisionFeedbackWindowConfig(
   }
   if (config && projectPath) {
     try {
-      await writeFile(revisionFeedbackConfigFilePath(projectPath), JSON.stringify(config, null, 2))
+      await writeProjectConfig(revisionFeedbackConfigFilePath(projectPath), config)
     } catch {
       // non-critical migration
     }
@@ -754,7 +763,7 @@ export async function saveNovelConfig(config: NovelConfig, projectId?: string, p
   await store.set(NOVEL_CONFIG_KEY, normalized)
   if (projectPath) {
     try {
-      await writeFile(novelConfigFilePath(projectPath), JSON.stringify(normalized, null, 2))
+      await writeProjectConfig(novelConfigFilePath(projectPath), normalized)
     } catch {
       // non-critical
     }
@@ -817,7 +826,7 @@ export async function loadNovelConfig(projectId?: string, projectPath?: string):
   }
   if (config && projectPath) {
     try {
-      await writeFile(novelConfigFilePath(projectPath), JSON.stringify(config, null, 2))
+      await writeProjectConfig(novelConfigFilePath(projectPath), config)
     } catch {
       // non-critical migration
     }
@@ -849,7 +858,7 @@ export async function saveRerankConfig(config: RerankConfig, projectId?: string,
   await store.set(RERANK_CONFIG_KEY, config)
   if (projectPath) {
     try {
-      await writeFile(rerankConfigFilePath(projectPath), JSON.stringify(config, null, 2))
+      await writeProjectConfig(rerankConfigFilePath(projectPath), config)
     } catch {
       // non-critical
     }
@@ -883,7 +892,7 @@ export async function loadRerankConfig(projectId?: string, projectPath?: string)
   }
   if (config && projectPath) {
     try {
-      await writeFile(rerankConfigFilePath(projectPath), JSON.stringify(config, null, 2))
+      await writeProjectConfig(rerankConfigFilePath(projectPath), config)
     } catch {
       // non-critical migration
     }
@@ -941,6 +950,12 @@ const BODY_MARGIN_X_KEY = "uiBodyMarginX"
 const BODY_SAFE_BOTTOM_KEY = "uiBodySafeBottom"
 const MAX_HISTORY_MESSAGES_KEY = "maxHistoryMessages"
 
+export async function loadUiFontSizeScale(): Promise<number | null> {
+  const store = await getStore()
+  const value = await store.get<number>(UI_FONT_SIZE_SCALE_KEY)
+  return typeof value === "number" && Number.isFinite(value) ? value : null
+}
+
 export async function saveUiFontSizeScale(scale: number, _projectId?: string, _projectPath?: string): Promise<void> {
   const store = await getStore()
   await store.set(UI_FONT_SIZE_SCALE_KEY, scale)
@@ -982,14 +997,6 @@ export async function saveUiBodyFontPx(value: number): Promise<void> {
  * 读回正文字号（px）。新键优先；读不到时交给 resolveMigratedBodyFontPx，
  * 它会乘入界面字号并处理「没存过 + 界面字号非默认」的补种。
  * 返回 null = 不要覆盖 store 默认值。旧键不删除。
- *
- * 为什么要界面倍数当**参数**而不是在这里自己读：
- * 本模块（app-state）里根本没有 loadUiFontSizeScale ——
- * app-state.json 里那个 uiFontSizeScale 键是只写不读的既有缺口，
- * 启动时的界面字号实际来自 wiki-store 的 localStorage 读取。
- * 与其在这里补一个半吊子读取，不如让已经拿到值的调用方传进来：
- * App 的启动块本来就有 uiFontSizeScale，传参是零成本的，
- * 而且两个来源不可能分叉。
  */
 export async function loadUiBodyFontPx(uiFontScale: number): Promise<number | null> {
   const direct = await loadBodyNumber(BODY_FONT_PX_KEY, clampBodyFontPx)

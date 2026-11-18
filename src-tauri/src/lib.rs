@@ -1,5 +1,6 @@
 mod app_state;
 mod atomic_file;
+mod ce_import;
 mod commands;
 mod mcp;
 mod plugins;
@@ -79,6 +80,20 @@ pub fn run() {
                 let _ = window.set_focus();
             }
         }))
+        // 单实例检查之后、任何窗口或配置存储打开之前完成首次导入。
+        .plugin(tauri::plugin::Builder::<_, ()>::new("ce-import")
+            .setup(|app, _| {
+                use tauri::Manager;
+                let paths = app.path();
+                let original_id = &app.config().identifier;
+                ce_import::import_once(
+                    &paths.data_dir()?.join(original_id),
+                    &paths.local_data_dir()?.join(original_id),
+                    &paths.app_data_dir()?,
+                    &paths.app_local_data_dir()?,
+                ).map_err(|e| format!("首次导入全局配置失败：{e}"))?;
+                Ok(())
+            }).build())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_store::Builder::default().build())

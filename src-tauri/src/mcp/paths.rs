@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{json, Value};
 
-pub const IDENTIFIER: &str = "com.qingmuai.writer";
+pub const IDENTIFIER: &str = "com.qingmuai.writer.ce";
 
 pub fn app_data_dir() -> PathBuf {
     #[cfg(target_os = "macos")]

@@ -38,7 +38,7 @@ enum Classified {
     Object { value: Value, has_substance: bool },
 }
 
-fn value_has_substance(value: &Value) -> bool {
+pub(crate) fn value_has_substance(value: &Value) -> bool {
     let Some(object) = value.as_object() else {
         return false;
     };

@@ -23,3 +23,31 @@ describe("Windows NSIS updater template", () => {
     expect(waitForReleaseIndex).toBeLessThan(copyExecutableIndex)
   })
 })
+
+describe("CE 并排安装", () => {
+  const config = JSON.parse(readFileSync("src-tauri/tauri.conf.json", "utf8"))
+
+  it("两版共用单实例标识，CE 全局配置与模型凭据各用独立目录", () => {
+    expect(config.identifier).toBe("com.qingmuai.writer")
+    expect(config.app.appDirectoriesOverride.data).toBe("$DATA/com.qingmuai.writer.ce")
+    expect(config.app.appDirectoriesOverride.localData).toBe("$LOCALDATA/com.qingmuai.writer.ce")
+    expect(config.productName).toBe("青幕AI写作 CE")
+    expect(config.mainBinaryName).toBe("qmai-ce")
+    expect(config.app.windows[0].title).toBe(config.productName)
+  })
+
+  it("Windows 的快捷方式和卸载项使用 CE 名称，卸载不删除应用数据", () => {
+    expect(template).toContain('!define INSTALLDIRNAME "QMaiWrite CE"')
+    expect(template).toContain('Uninstall\\${PRODUCTNAME}"')
+    expect(template).toContain('$DESKTOP\\${PRODUCTNAME}.lnk')
+    expect(template).not.toMatch(/deleteAppData|RmDir[^\n]*(?:LOCALAPPDATA|APPDATA)/i)
+  })
+
+  it("Linux 软件包与桌面入口指向 CE 可执行文件", () => {
+    const linux = JSON.parse(readFileSync("src-tauri/tauri.linux.conf.json", "utf8"))
+    const desktop = readFileSync(resolve("src-tauri", linux.bundle.linux.deb.desktopTemplate), "utf8")
+    expect(linux.productName).toBe("qmai-ce")
+    expect(desktop).toContain(`Name=${config.productName}\n`)
+    expect(desktop).toContain("Exec={{exec}}")
+  })
+})

@@ -511,7 +511,7 @@ describe("settings sidebar nav preferences", () => {
      * 所以这里要求 thenStatement 是**单条表达式**、且整条文本就是
      * `useWikiStore.getState().setXxx(yyy)` 这一种形状。
      */
-    const WRITE_BACK = /^useWikiStore\.getState\(\)\.set[A-Za-z]+\([A-Za-z]+\)$/
+    const WRITE_BACK = /^useWikiStore\.getState\(\)\.setUiBody[A-Za-z]+\([A-Za-z]+\)$/
     const writeBacks: ts.IfStatement[] = []
     const collectWriteBacks = (node: ts.Node): void => {
       if (

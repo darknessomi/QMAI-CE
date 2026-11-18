@@ -34,7 +34,7 @@ pub fn ensure_webview2_or_guide() -> bool {
 
     // 按钮语义：是 = 现在自动安装；否 = 我自己装（打开官方页面）；取消 = 退出程序。
     let choice = show_message_box(
-        "青幕AI写作需要「Microsoft Edge WebView2 运行时」才能显示界面，但本机还没有安装。\n\
+        "青幕AI写作 CE 需要「Microsoft Edge WebView2 运行时」才能显示界面，但本机还没有安装。\n\
          \n\
          现在自动安装？（约 2 MB，需要联网，通常 1 分钟内完成）\n\
          \n\
@@ -54,7 +54,7 @@ pub fn ensure_webview2_or_guide() -> bool {
                             "自动安装 WebView2 失败：{reason}\n\
                              \n\
                              将为你打开微软官方下载页面，请手动下载并安装「Evergreen Standalone Installer」，\
-                             安装完成后重新打开青幕AI写作。"
+                             安装完成后重新打开青幕AI写作 CE。"
                         ),
                         MB_OK | MB_ICONERROR,
                     );
@@ -72,7 +72,7 @@ pub fn ensure_webview2_or_guide() -> bool {
             show_message_box(
                 "WebView2 运行时似乎仍未安装成功。\n\
                  \n\
-                 将为你打开微软官方下载页面，请手动安装后重新打开青幕AI写作。",
+                 将为你打开微软官方下载页面，请手动安装后重新打开青幕AI写作 CE。",
                 MB_OK | MB_ICONERROR,
             );
             open_official_page();
@@ -226,7 +226,7 @@ fn relaunch_self() {
     }
     // 拉不起来就退化成提示，让用户手动重开，而不是静默退出。
     show_message_box(
-        "WebView2 运行时已安装完成，请重新打开青幕AI写作。",
+        "WebView2 运行时已安装完成，请重新打开青幕AI写作 CE。",
         MB_OK | MB_ICONINFORMATION,
     );
 }
@@ -234,7 +234,7 @@ fn relaunch_self() {
 #[cfg(windows)]
 fn show_message_box(message: &str, flags: u32) -> i32 {
     let text: Vec<u16> = message.encode_utf16().chain(std::iter::once(0)).collect();
-    let title: Vec<u16> = "青幕AI写作"
+    let title: Vec<u16> = "青幕AI写作 CE"
         .encode_utf16()
         .chain(std::iter::once(0))
         .collect();

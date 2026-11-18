@@ -77,10 +77,8 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
-const SECRET_DIR: &str = "secrets";
-
 /// 模型配置的本地密文文件名。
-const MODEL_CONFIGS_FILE: &str = "model-configs.bin";
+pub(crate) const MODEL_CONFIGS_FILE: &str = "secrets/model-configs.bin";
 /// 单份模型配置上限：10 个 provider 约 10KB，256KB 足够并且能兜住异常膨胀。
 const MAX_MODEL_CONFIGS_BYTES: usize = 256 * 1024;
 
@@ -89,7 +87,7 @@ fn model_configs_path<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String>
         .path()
         .app_local_data_dir()
         .map_err(|error| format!("无法定位应用数据目录：{error}"))?;
-    Ok(base.join(SECRET_DIR).join(MODEL_CONFIGS_FILE))
+    Ok(base.join(MODEL_CONFIGS_FILE))
 }
 
 /// 保存模型配置的密文（Windows 走 DPAPI；其它平台是 0600 文件）。

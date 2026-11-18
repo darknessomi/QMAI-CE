@@ -1,4 +1,4 @@
-const APP_NAME = "青幕AI写作"
+const APP_NAME = "青幕AI写作 CE"
 
 export function formatAppTitle(projectName: string | null | undefined, totalWordCount?: number | null): string {
   const name = projectName?.trim()

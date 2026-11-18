@@ -22,7 +22,7 @@ pub fn assert_supported_platform() {
 fn assert_x86_64_v2() {
     if !is_x86_feature_detected!("sse4.2") {
         abort_unsupported(
-            "青幕AI写作需要支持 SSE4.2 指令集的 64 位 CPU（Intel Nehalem 2008 年 / AMD Bulldozer 2011 年 或更新）。",
+            "青幕AI写作 CE 需要支持 SSE4.2 指令集的 64 位 CPU（Intel Nehalem 2008 年 / AMD Bulldozer 2011 年 或更新）。",
         );
     }
 }
@@ -61,7 +61,7 @@ fn assert_windows_version() {
     // SAFETY: 结构布局和大小对应 RTL_OSVERSIONINFOEXW，缓冲区在调用期间有效。
     let status = unsafe { RtlGetVersion(&mut info) };
     if status < 0 || !is_windows_11_client(info.dw_build_number, info.product_type) {
-        abort_unsupported("青幕AI写作需要 Windows 11 桌面版（内部版本 22000 或更高）。");
+        abort_unsupported("青幕AI写作 CE 需要 Windows 11 桌面版（内部版本 22000 或更高）。");
     }
 }
 
@@ -81,7 +81,7 @@ fn show_windows_error(message: &str) {
         .encode_wide()
         .chain(std::iter::once(0))
         .collect();
-    let title: Vec<u16> = std::ffi::OsStr::new("青幕AI写作")
+    let title: Vec<u16> = std::ffi::OsStr::new("青幕AI写作 CE")
         .encode_wide()
         .chain(std::iter::once(0))
         .collect();

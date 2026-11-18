@@ -69,7 +69,7 @@ export const GUIDE_STEPS: GuideStep[] = [
   {
     id: "start-settings",
     chapter: "start",
-    title: "欢迎使用青幕 AI 写作",
+    title: "欢迎使用青幕AI写作 CE",
     body: [
       "这是你第一次打开，跟着走一遍，大约十分钟就能把「配模型 → 建书 → 出大纲 → 写第一章」全跑通。",
       "先找到顶栏右上角的 **设置**（齿轮图标）。模型、字号、备份这些长期设置，都在里面。",

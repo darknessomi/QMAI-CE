@@ -1,6 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "青幕AI写作",
+  "productName": "青幕AI写作 CE",
+  "mainBinaryName": "qmai-ce",
   "version": "4.6.0",
   "identifier": "com.qingmuai.writer",
   "build": {
@@ -10,10 +11,15 @@
     "frontendDist": "../dist"
   },
   "app": {
+    "appDirectoriesOverride": {
+      "data": "$DATA/com.qingmuai.writer.ce",
+      "localData": "$LOCALDATA/com.qingmuai.writer.ce",
+      "config": "$CONFIG/com.qingmuai.writer.ce"
+    },
     "macOSPrivateApi": true,
     "windows": [
       {
-        "title": "青幕AI写作",
+        "title": "青幕AI写作 CE",
         "width": 1200,
         "height": 800,
         "minWidth": 1100,

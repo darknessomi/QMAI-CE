@@ -58,8 +58,8 @@
 如果当前版本还没有这个入口，可以手工装（等价于安装器做的事）：
 
 1. 把整个 `chapter-metrics/` 目录复制到插件根目录：
-   - Windows：`%APPDATA%\com.qingmuai.writer\plugins\chapter-metrics\`
-   - macOS：`~/Library/Application Support/com.qingmuai.writer/plugins/chapter-metrics/`
+   - Windows：`%APPDATA%\com.qingmuai.writer.ce\plugins\chapter-metrics\`
+   - macOS：`~/Library/Application Support/com.qingmuai.writer.ce/plugins/chapter-metrics/`
 2. 在插件根的 `.registry.json` 里加一条（没有这个文件就新建）：
 
 ```json

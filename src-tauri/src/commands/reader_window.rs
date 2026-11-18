@@ -58,9 +58,9 @@ fn retried_labels() -> &'static Mutex<std::collections::HashSet<String>> {
     RETRIED.get_or_init(|| Mutex::new(std::collections::HashSet::new()))
 }
 
-/// 与 tauri.conf.json 的 `identifier` 保持一致：日志目录要在拿到 AppHandle 之前
+/// 与 tauri.conf.json 的 CE 本地数据目录保持一致：日志目录要在拿到 AppHandle 之前
 /// 就能算出来（`log` 接收器是全局的，拿不到 app），所以按平台惯例手工拼。
-const APP_IDENTIFIER: &str = "com.qingmuai.writer";
+const APP_IDENTIFIER: &str = crate::mcp::paths::IDENTIFIER;
 
 /// 独立窗口的 WebView2 数据目录名（`app_local_data_dir` 下）。
 const READER_DATA_DIR: &str = "reader-webview";

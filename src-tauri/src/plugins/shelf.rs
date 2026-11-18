@@ -396,7 +396,7 @@ mod tests {
     #[test]
     fn real_user_shelf_is_readable() {
         let Ok(appdata) = std::env::var("APPDATA") else { return };
-        let data_dir = std::path::PathBuf::from(appdata).join("com.qingmuai.writer");
+        let data_dir = std::path::PathBuf::from(appdata).join("com.qingmuai.writer.ce");
         if !data_dir.join("app-state.json").is_file() { return }
 
         let books = read_registry(&data_dir);

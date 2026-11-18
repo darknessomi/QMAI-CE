@@ -1,0 +1,11 @@
+{
+  "productName": "qmai-ce",
+  "bundle": {
+    "targets": ["deb", "appimage"],
+    "linux": {
+      "deb": {
+        "desktopTemplate": "linux/qmai-ce.desktop"
+      }
+    }
+  }
+}
