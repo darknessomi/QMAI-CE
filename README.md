@@ -415,6 +415,14 @@ A：当前版本**仅中文界面**（英文界面已移除）。
 - Rust (stable)
 - [Tauri 2 开发环境](https://v2.tauri.app/start/prerequisites/)
 
+### 安装与运行
+
+```bash
+corepack enable pnpm
+pnpm install --frozen-lockfile
+pnpm run tauri dev
+```
+
 ### 代码规范
 
 - 前端代码使用 TypeScript 严格模式

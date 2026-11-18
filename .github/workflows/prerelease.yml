@@ -46,14 +46,17 @@ jobs:
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
           node-version: '>=24.22.1 <25'
-          cache: npm
+          cache: pnpm
 
       - name: Install frontend dependencies
-        run: npm ci --no-audit
+        run: pnpm install --frozen-lockfile
 
       - name: Prepare release notes
         shell: bash
@@ -96,7 +99,7 @@ jobs:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
           SENTRY_ORG: qmai-c5
           SENTRY_PROJECT: qmai
-        run: npx tauri build --bundles nsis
+        run: pnpm exec tauri build --bundles nsis
 
       - name: Package Windows 内测 assets
         shell: pwsh

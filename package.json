@@ -11,14 +11,14 @@
     "dev": "vite",
     "typecheck": "tsc --build --pretty",
     "typecheck:tests": "tsc -p tsconfig.test.json --noEmit",
-    "build": "npm run typecheck && vite build",
+    "build": "pnpm run typecheck && vite build",
     "preview": "vite preview",
-    "test": "npm run test:mocks && npm run test:llm",
+    "test": "pnpm run test:mocks && pnpm run test:llm",
     "test:mocks": "node scripts/lint-character-aura.mjs && vitest run --exclude='**/*.real-llm.test.ts' --exclude='**/.worktrees/**' --exclude='**/.claude/**' --exclude='**/.codex-temp/**' --exclude='**/superpowers-main/**' --exclude='**/SKILL/**' --exclude='**/superpowers/**' --exclude='**/nul'",
     "lint:character-aura": "node scripts/lint-character-aura.mjs",
     "test:llm": "vitest run real-llm --no-file-parallelism --reporter=verbose --exclude='**/.claude/**' --exclude='**/.worktrees/**' --exclude='**/.codex-temp/**'",
     "tauri": "tauri",
-    "build:github-release": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"if (-not $env:TAURI_SIGNING_PRIVATE_KEY_PATH) { $env:TAURI_SIGNING_PRIVATE_KEY_PATH = Join-Path $env:USERPROFILE '.tauri\\qmai-updater.key' }; if (-not (Test-Path $env:TAURI_SIGNING_PRIVATE_KEY_PATH)) { throw '缺少 TAURI_SIGNING_PRIVATE_KEY_PATH 对应的签名私钥文件' }; if ($null -eq $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD) { $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = '' }; npx tauri build --bundles nsis; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; node scripts/prepare-github-release.mjs\""
+    "build:github-release": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"if (-not $env:TAURI_SIGNING_PRIVATE_KEY_PATH) { $env:TAURI_SIGNING_PRIVATE_KEY_PATH = Join-Path $env:USERPROFILE '.tauri\\qmai-updater.key' }; if (-not (Test-Path $env:TAURI_SIGNING_PRIVATE_KEY_PATH)) { throw '缺少 TAURI_SIGNING_PRIVATE_KEY_PATH 对应的签名私钥文件' }; if ($null -eq $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD) { $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = '' }; pnpm exec tauri build --bundles nsis; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; node scripts/prepare-github-release.mjs\""
   },
   "dependencies": {
     "@base-ui/react": "^1.9.0",
@@ -81,13 +81,11 @@
     "fast-check": "^4.10.2",
     "iconv-lite": "^0.7.3",
     "jsdom": "^29.1.1",
+    "postcss": "8.5.32",
     "shadcn": "^4.23.0",
     "typescript": "^6.0.3",
     "vite": "^8.3.5",
     "vitest": "^5.1.0"
   },
-  "overrides": {
-    "dompurify": "^3.4.17",
-    "source-map-js": "^1.2.2"
-  }
+  "packageManager": "pnpm@12.21.0+sha512.66fd8278ee28935ce951792d34367ff3af5c432a2756445823029533835b8da529bbe0be5130afd56ed0713fb8789e47bad82d93bd5ae2fe54b15562d6276ef0"
 }

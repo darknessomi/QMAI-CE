@@ -28,7 +28,6 @@ Use this workflow only in the `darknessomi/QMAI-CE` repository. Preserve the use
 2. Update the complete QMAI release surface.
    
    - `package.json`
-   - root package version and root package entry in `package-lock.json`
    - `src-tauri/Cargo.toml`
    - the `qmai` package entry in `src-tauri/Cargo.lock`
    - `src-tauri/tauri.conf.json`
@@ -40,8 +39,8 @@ Use this workflow only in the `darknessomi/QMAI-CE` repository. Preserve the use
    
    - Confirm every version source has the exact requested version.
    - Run `node scripts/release-notes.mjs <version>` and inspect that it returns the intended Chinese notes rather than the generic fallback.
-   - Run `npx vitest run src/lib/changelog.spec.ts scripts/release-notes.spec.mjs`.
-   - Run `npm run test:mocks`, `npm run build`, and `git diff --check` unless the user explicitly narrows validation.
+   - Run `pnpm exec vitest run src/lib/changelog.spec.ts scripts/release-notes.spec.mjs`.
+   - Run `pnpm run test:mocks`, `pnpm run build`, and `git diff --check` unless the user explicitly narrows validation.
    - If a required check fails, do not tag. Separate a verified pre-existing baseline failure from a release regression and obtain explicit authorization before proceeding despite it.
 
 4. Commit and push only `main`.
@@ -92,7 +91,9 @@ GitHub上传前文件筛选要求
 
 * `package.json`
 
-* `package-lock.json`
+* `pnpm-lock.yaml`
+
+* `pnpm-workspace.yaml`
 
 * `Cargo.toml`
 

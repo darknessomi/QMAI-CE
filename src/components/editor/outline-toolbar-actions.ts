@@ -1,7 +1,7 @@
 import { commandsCtx, editorViewCtx, serializerCtx } from "@milkdown/kit/core"
 import { toggleMark } from "@milkdown/kit/prose/commands"
 import { AllSelection, TextSelection } from "@milkdown/kit/prose/state"
-import { $command, $markSchema } from "@milkdown/utils"
+import { $command, $markSchema } from "@milkdown/kit/utils"
 
 const underlineSchema = $markSchema("outline_underline", () => ({
   parseDOM: [{ tag: "u" }],
@@ -27,9 +27,8 @@ import {
 } from "@milkdown/kit/preset/commonmark"
 import { insertTableCommand, toggleStrikethroughCommand } from "@milkdown/kit/preset/gfm"
 import { redoCommand, undoCommand } from "@milkdown/kit/plugin/history"
-import type { Ctx } from "@milkdown/ctx"
-import type { Editor } from "@milkdown/kit/core"
-import type { CmdKey } from "@milkdown/core"
+import type { Ctx } from "@milkdown/kit/ctx"
+import type { CmdKey, Editor } from "@milkdown/kit/core"
 import { applyOutlineSourceFormat, type OutlineSourceFormat, type OutlineSourcePayload } from "@/lib/outline-source-format"
 
 export type OutlineToolbarAction =

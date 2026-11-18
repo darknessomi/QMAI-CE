@@ -1,6 +1,6 @@
 import { Plugin, PluginKey, TextSelection, type EditorState, type Transaction } from "@milkdown/kit/prose/state"
 import type { EditorView } from "@milkdown/kit/prose/view"
-import { $prose } from "@milkdown/utils"
+import { $prose } from "@milkdown/kit/utils"
 
 /*
  * 大纲文件的第一行 `# 标题` 在测试版编辑器里被 CSS 隐藏了

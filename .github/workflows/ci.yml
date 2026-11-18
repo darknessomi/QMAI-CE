@@ -54,17 +54,20 @@ jobs:
           workspaces: src-tauri
           cache-on-failure: true
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
           node-version: '>=24.22.1 <25'
-          cache: npm
+          cache: pnpm
 
       - name: Install frontend dependencies
-        run: npm ci --no-audit
+        run: pnpm install --frozen-lockfile
 
       - name: Check frontend build
-        run: npx vite build
+        run: pnpm exec vite build
 
       - name: Check Rust build
         working-directory: src-tauri

@@ -23,7 +23,7 @@ const updaterAssetName = bundleFiles
   .sort((left, right) => statSync(resolve(bundleDir, right)).mtimeMs - statSync(resolve(bundleDir, left)).mtimeMs)[0]
 
 if (!updaterAssetName) {
-  throw new Error("未找到 updater 安装包，请先执行 npm run build:github-release")
+  throw new Error("未找到 updater 安装包，请先执行 pnpm run build:github-release")
 }
 
 const updaterAssetPath = resolve(bundleDir, updaterAssetName)

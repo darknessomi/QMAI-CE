@@ -82,7 +82,8 @@
    
    * `pom.xml`
    * `package.json`
-   * `package-lock.json`
+   * `pnpm-lock.yaml`
+   * `pnpm-workspace.yaml`
    * `Cargo.toml`
    * `Cargo.lock`
    * `tsconfig.json`
