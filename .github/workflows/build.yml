@@ -95,7 +95,7 @@ jobs:
           cache: npm
 
       - name: Install frontend dependencies
-        run: npm ci
+        run: npm ci --no-audit
 
       - name: Prepare release notes
         shell: bash
@@ -104,6 +104,16 @@ jobs:
           version="$(node -p "require('./package.json').version")"
           mkdir -p release-assets
           node scripts/release-notes.mjs "$version" --out release-assets/release-notes.txt
+
+      - name: 检查 Sentry 源码映射上传凭据
+        shell: bash
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+        run: |
+          if [ -z "$SENTRY_AUTH_TOKEN" ]; then
+            echo "::error::请在仓库 ${GITHUB_REPOSITORY} 的 Actions Secrets 中配置 SENTRY_AUTH_TOKEN。"
+            exit 1
+          fi
 
       - name: Ensure GitHub Release exists
         env:
@@ -117,18 +127,6 @@ jobs:
             gh release create "$tag" --title "QMAI $tag" --notes-file "$notes_path" --verify-tag || true
           fi
           gh release edit "$tag" --notes-file "$notes_path" --draft=false
-
-      - name: Require Sentry sourcemap token
-        env:
-          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-        shell: bash
-        run: |
-          if [ -z "${SENTRY_AUTH_TOKEN}" ]; then
-            echo "SENTRY_AUTH_TOKEN is required to upload production sourcemaps." >&2
-            echo "Create an org token (project:releases, org:read) at https://qmai-c5.sentry.io/settings/auth-tokens/" >&2
-            echo "Then: gh secret set SENTRY_AUTH_TOKEN -R Mochocyang/QMAI" >&2
-            exit 1
-          fi
 
       - name: Build Tauri app
         env:
@@ -181,17 +179,6 @@ jobs:
           Copy-Item $signaturePath $assetSignaturePath -Force
           $notesPath = Join-Path $releaseDir "release-notes.txt"
           $notes = Get-Content -Path $notesPath -Raw -Encoding utf8
-          # 安装包的下载地址也指到加速镜像。
-          #
-          # 为什么：latest.json 里的 url 原先是 github.com 直连，国内实测
-          #   HEAD 直连 exe    → 12 秒超时
-          #   HEAD 镜像 exe    → 1.6 秒 200，143MB
-          # 也就是说清单能加速、安装包照样卡死 —— 用户体感仍是"更新超慢"。
-          # 镜像只转发公开的 release 资产，且**签名校验仍在**（pubkey 不变，
-          # 镜像改过的包会被直接拒绝安装），所以这条加速是安全的。
-          $assetMirrorBase = "https://gh-proxy.com/"
-          $assetUrlDirect = "https://github.com/Mochocyang/QMAI/releases/latest/download/$assetName"
-
           $latest = [ordered]@{
             version = $version
             notes = "QMAI $version 发布版本"
@@ -199,7 +186,7 @@ jobs:
             platforms = [ordered]@{
               "windows-x86_64" = [ordered]@{
                 signature = $signature
-                url = "$assetMirrorBase$assetUrlDirect"
+                url = "https://github.com/$env:GITHUB_REPOSITORY/releases/latest/download/$assetName"
               }
             }
           }
@@ -237,29 +224,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: gh release upload "${{ github.ref_name }}" release-assets/QMaiWrite_*_macOS_* --clobber
-
-      - name: Build Windows portable
-        if: matrix.label == 'windows-x64'
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          $version = node -p "require('./package.json').version"
-          node scripts/build-portable.mjs
-          $portableExe = "release-portable/QMaiWrite.exe"
-          if (-not (Test-Path $portableExe)) {
-            throw "便携版 EXE 未生成：$portableExe"
-          }
-          $assetName = "QMaiWrite_${version}_windows_X64_portable.exe"
-          $assetPath = "release-assets/$assetName"
-          New-Item -ItemType Directory -Force -Path "release-assets" | Out-Null
-          Copy-Item $portableExe $assetPath -Force
-
-      - name: Attach Windows portable to release
-        if: matrix.label == 'windows-x64'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        shell: bash
-        run: gh release upload "${{ github.ref_name }}" release-assets/QMaiWrite_*_portable.exe --clobber
 
       - name: Package Linux release assets
         if: matrix.label == 'linux-x64'

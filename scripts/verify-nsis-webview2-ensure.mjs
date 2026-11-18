@@ -58,7 +58,7 @@ function stripHandlebars(text) {
 const onInit = source.match(/Function \.onInit([\s\S]*?)FunctionEnd/)
 if (!onInit) fail("生产模板里找不到 Function .onInit")
 const onInitBody = onInit[1]
-const buildCheckIndex = onInitBody.indexOf("AtLeastBuild} 19041")
+const buildCheckIndex = onInitBody.indexOf("AtLeastBuild} 22000")
 const ensureCallIndex = onInitBody.indexOf("Call EnsureWebView2")
 if (ensureCallIndex < 0) fail("`.onInit` 里没有调用 Call EnsureWebView2 —— 检测不会执行")
 if (buildCheckIndex < 0) fail("`.onInit` 里的系统版本检查不见了")

@@ -9,7 +9,6 @@ const pkg = JSON.parse(readFileSync(resolve(root, "package.json"), "utf8"))
 const releaseNotes = await buildCurrentReleaseNotes(root)
 const bundleDir = resolve(root, "src-tauri/target/release/bundle/nsis")
 const outDir = resolve(root, "release-github")
-const portableExe = resolve(root, "release-portable/QMaiWrite.exe")
 
 if (!existsSync(bundleDir)) {
   throw new Error(`未找到安装包目录：${bundleDir}`)
@@ -54,18 +53,6 @@ if (result.status !== 0) {
   throw new Error("生成 updater 签名文件失败")
 }
 
-if (existsSync(portableExe)) {
-  // 便携版的 WebView2 在线引导安装器：缺少运行时且联网的电脑靠它静默安装。
-  // 引导器只下载不安装，必须在 exe 旁边，不能并进单文件。
-  const portableWebview2Setup = resolve(root, "release-portable/MicrosoftEdgeWebview2Setup.exe")
-  cpSync(portableExe, resolve(outDir, "QMaiWrite-portable.exe"))
-  if (existsSync(portableWebview2Setup)) {
-    cpSync(portableWebview2Setup, resolve(outDir, "MicrosoftEdgeWebview2Setup.exe"))
-  } else {
-    console.warn("警告：便携版缺少 MicrosoftEdgeWebview2Setup.exe，未随发布包一同上传")
-  }
-}
-
 const signature = readFileSync(releaseSignaturePath, "utf8").trim()
 const latest = {
   version: pkg.version,
@@ -74,10 +61,7 @@ const latest = {
   platforms: {
     "windows-x86_64": {
       signature,
-      // 安装包地址也走加速镜像（与 build.yml 保持一致）：
-      // 国内实测 HEAD 直连 12 秒超时、镜像 1.6 秒 200。
-      // 镜像只转发公开资产，签名校验不变，改过的包会被拒绝安装。
-      url: `https://gh-proxy.com/https://github.com/Mochocyang/QMAI/releases/latest/download/${releaseAssetName}`,
+      url: `https://github.com/darknessomi/QMAI-CE/releases/latest/download/${releaseAssetName}`,
     },
   },
 }

@@ -25,32 +25,19 @@ describe("Windows prerelease workflow", () => {
     expect(workflow).toContain("--prerelease")
     expect(workflow).toContain("--latest=false")
     expect(workflow).toContain('tag="prerelease"')
-    expect(workflow).toContain("QMaiWrite_*_prerelease.exe")
+    expect(workflow).toContain("QMaiWrite_*_windows_X64_prerelease.exe")
     expect(workflow).not.toMatch(/gh release (create|upload)[\s\S]*latest\.json/)
     expect(official).toMatch(/gh release upload[\s\S]*latestPath/)
   })
 })
 
-
-/*
- * 安装包下载地址必须走加速镜像。
- *
- * 实测（国内同一网络，同一台机器）：
- *   HEAD 直连 exe → 12 秒超时
- *   HEAD 镜像 exe → 1.6 秒 200，143MB
- * 清单（latest.json）能加速、但安装包地址仍直连的话，用户体感还是"更新超慢"。
- * 所以发版脚本与 CI workflow 都必须给 platforms.*.url 加镜像前缀。
- * 镜像只转发公开的 release 资产，签名校验（pubkey）不变 —— 改过的包装不上。
- */
-describe("latest.json 的安装包地址走加速镜像", () => {
-  it("prepare-github-release.mjs 给 url 加镜像前缀", () => {
+describe("Windows 更新清单使用 GitHub Releases 直链", () => {
+  it("本地发布指向社区版仓库的安装包", () => {
     const text = readFileSync(resolve(root, "scripts/prepare-github-release.mjs"), "utf8")
-    expect(text).toContain("https://gh-proxy.com/https://github.com/")
+    expect(text).toContain('url: `https://github.com/darknessomi/QMAI-CE/releases/latest/download/${releaseAssetName}`')
   })
 
-  it("CI 的 build.yml 也给 url 加镜像前缀", () => {
-    const text = readFileSync(resolve(root, ".github/workflows/build.yml"), "utf8")
-    expect(text).toContain('$assetMirrorBase = "https://gh-proxy.com/"')
-    expect(text).toContain('url = "$assetMirrorBase$assetUrlDirect"')
+  it("CI 发布指向当前仓库的安装包", () => {
+    expect(official).toContain('url = "https://github.com/$env:GITHUB_REPOSITORY/releases/latest/download/$assetName"')
   })
 })

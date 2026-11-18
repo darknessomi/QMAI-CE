@@ -605,13 +605,28 @@ FunctionEnd
 {{/each}}
 
 Function .onInit
-  ${IfNot} ${RunningX64}
-    MessageBox MB_OK|MB_ICONSTOP "青幕AI写作仅支持 64 位 Windows，不支持 32 位系统。"
-    Abort
+  ${GetOptions} $CMDLINE "/P" $PassiveMode
+  ${IfNot} ${Errors}
+    StrCpy $PassiveMode 1
   ${EndIf}
 
-  ${IfNot} ${AtLeastBuild} 19041
-    MessageBox MB_OK|MB_ICONSTOP "青幕AI写作需要 Windows 10 2004 (20H1) 或更高版本。"
+  StrCpy $0 ""
+  ${IfNot} ${AtLeastBuild} 22000
+  ${OrIf} ${IsServerOS}
+  ${OrIfNot} ${RunningX64}
+    StrCpy $0 "青幕AI写作需要 Windows 11 x64 桌面版（内部版本 22000 或更高）。"
+  ${Else}
+    ; PF_AVX2_INSTRUCTIONS_AVAILABLE，在运行 x86-64-v3 主程序之前检查。
+    System::Call 'kernel32::IsProcessorFeaturePresent(i 40) i.r1'
+    ${If} $1 = 0
+      StrCpy $0 "此处理器缺少 AVX2。青幕AI写作需要支持 x86-64-v3 的处理器。"
+    ${EndIf}
+  ${EndIf}
+  ${If} $0 != ""
+    ${If} $PassiveMode != 1
+      MessageBox MB_OK|MB_ICONSTOP "$0" /SD IDOK
+    ${EndIf}
+    SetErrorLevel 1
     Abort
   ${EndIf}
 
@@ -637,12 +652,6 @@ Function .onInit
    * （自动更新必须在无人值守下完成，卡在一个 MessageBox 上等于更新失败）。
    */
   Call EnsureWebView2
-
-  ${GetOptions} $CMDLINE "/P" $PassiveMode
-  ${GetOptions} $CMDLINE "/P" $PassiveMode
-  ${IfNot} ${Errors}
-    StrCpy $PassiveMode 1
-  ${EndIf}
 
   ${GetOptions} $CMDLINE "/NS" $NoShortcutMode
   ${IfNot} ${Errors}
@@ -819,7 +828,7 @@ SectionEnd
 ; MicrosoftEdgeWebview2Setup.exe（Evergreen Bootstrapper）的官方无交互参数。
 ;
 ; ── 安装器从哪来 ──
-; ① 同目录（便携版解压/安装包旁）——由 `scripts/build-portable.mjs` 放置；
+; ① 安装包同目录中已有的引导安装器；
 ; ② `$PLUGINSDIR`（在线下载到临时目录后由本脚本放进去的）。
 ; 两者都没有时，才启动浏览器打开下载页 —— 这是最后的兜底，不是主路径。
 ;
@@ -864,7 +873,7 @@ Function EnsureWebView2
 
   MessageBox MB_YESNO|MB_ICONQUESTION "青幕AI写作需要「Microsoft Edge WebView2 运行时」才能显示界面，但本机还没有安装。$\r$\n$\r$\n是否现在自动安装？$\r$\n（约 2 MB，需要联网，通常 1 分钟内完成；不安装将无法打开软件。）" /SD IDYES IDNO qmai_wv2_declined
 
-  ; ① 同目录（便携版 / 用户手动放置）
+  ; ① 安装包同目录
   ${GetParent} "$EXEPATH" $0
   StrCpy $2 "$0\MicrosoftEdgeWebview2Setup.exe"
   ${IfNot} ${FileExists} "$2"
