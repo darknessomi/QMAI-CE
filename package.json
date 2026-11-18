@@ -17,8 +17,7 @@
     "test:mocks": "node scripts/lint-character-aura.mjs && vitest run --exclude='**/*.real-llm.test.ts' --exclude='**/.worktrees/**' --exclude='**/.claude/**' --exclude='**/.codex-temp/**' --exclude='**/superpowers-main/**' --exclude='**/SKILL/**' --exclude='**/superpowers/**' --exclude='**/nul' && node --test \"sdk/test/**/*.test.mjs\" \"samples/plugins/**/*.test.mjs\"",
     "lint:character-aura": "node scripts/lint-character-aura.mjs",
     "test:llm": "vitest run real-llm --no-file-parallelism --reporter=verbose --exclude='**/.claude/**' --exclude='**/.worktrees/**' --exclude='**/.codex-temp/**'",
-    "tauri": "tauri",
-    "build:github-release": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"if (-not $env:TAURI_SIGNING_PRIVATE_KEY_PATH) { $env:TAURI_SIGNING_PRIVATE_KEY_PATH = Join-Path $env:USERPROFILE '.tauri\\qmai-updater.key' }; if (-not (Test-Path $env:TAURI_SIGNING_PRIVATE_KEY_PATH)) { throw '缺少 TAURI_SIGNING_PRIVATE_KEY_PATH 对应的签名私钥文件' }; if ($null -eq $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD) { $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = '' }; pnpm exec tauri build --bundles nsis; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; node scripts/prepare-github-release.mjs\""
+    "tauri": "tauri"
   },
   "dependencies": {
     "@base-ui/react": "^1.9.0",
