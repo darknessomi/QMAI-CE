@@ -79,6 +79,17 @@ const FOUR_POINT_FIVE_ZERO_ZH: string[] = [
   "为会员用户提供更好的使用体验和额度管理能力。",
 ];
 
+const FOUR_POINT_SEVEN_ONE_ZH: string[] = [
+  "修复 Windows x64 安装包生成失败的问题。安装和卸载时按完整路径检查正在运行的程序。",
+  "数学公式渲染库 KaTeX 升至 0.19.1，Mermaid 图表渲染库升至 12.3.0。",
+];
+
+const FOUR_POINT_SEVEN_ONE_CHANGELOG: ChangelogEntry = {
+  version: "4.7.1",
+  date: "2026-11-18",
+  highlights: { en: FOUR_POINT_SEVEN_ONE_ZH, zh: FOUR_POINT_SEVEN_ONE_ZH },
+};
+
 const FOUR_POINT_SEVEN_ZERO_ZH: string[] = [
   "社区版单独保存全局配置，可与原版分别设置模型和界面偏好。",
   "社区版移除了原版账号、会员和会员云空间等在线服务。",
@@ -2221,6 +2232,8 @@ export function currentVersionChangelog(version: string): ChangelogEntry[] {
    * 才是「当前版本发布说明」的取数口 —— 漏了这里，发布说明会退化成
    * 一行「QMAI x.y.z 发布版本」，scripts/release-notes.spec.mjs 会拦下来。
    */
+  if (version === FOUR_POINT_SEVEN_ONE_CHANGELOG.version)
+    return [FOUR_POINT_SEVEN_ONE_CHANGELOG];
   if (version === FOUR_POINT_SEVEN_ZERO_CHANGELOG.version)
     return [FOUR_POINT_SEVEN_ZERO_CHANGELOG];
   if (version === FOUR_POINT_SIX_ZERO_CHANGELOG.version)
@@ -2418,6 +2431,7 @@ export function currentVersionChangelog(version: string): ChangelogEntry[] {
 
 export function allChangelog(): ChangelogEntry[] {
   return [
+    FOUR_POINT_SEVEN_ONE_CHANGELOG,
     FOUR_POINT_SEVEN_ZERO_CHANGELOG,
     FOUR_POINT_SIX_ZERO_CHANGELOG,
     FOUR_POINT_FIVE_ZERO_CHANGELOG,

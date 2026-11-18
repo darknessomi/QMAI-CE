@@ -7,10 +7,12 @@ const template = readFileSync(templatePath, "utf8")
 
 describe("Windows NSIS updater template", () => {
   it("waits for the current app executable to be released before copying the update", () => {
-    const appRunningCheck = '!insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe" "${PRODUCTNAME}"'
+    const appRunningCheck = '!insertmacro CheckIfAppIsRunning "$INSTDIR\\${MAINBINARYNAME}.exe" "${PRODUCTNAME}"'
     const waitForRelease = "Call WaitForMainBinaryRelease"
     const copyExecutable = 'File "${MAINBINARYSRCPATH}"'
 
+    expect(template).toContain('!include "Win\\RestartManager.nsh"')
+    expect(template.split(appRunningCheck)).toHaveLength(3)
     expect(template).toContain("Function WaitForMainBinaryRelease")
     expect(template).toContain(waitForRelease)
     expect(template).toContain('Delete "$INSTDIR\\${MAINBINARYNAME}.exe"')
