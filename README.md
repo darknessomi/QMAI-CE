@@ -2,7 +2,7 @@
   <img src="src/assets/QM-LOGO.png" width="120" alt="青幕AI写作 Logo" />
 </p>
 
-<h1 align="center">青幕AI写作（QMAI）</h1>
+<h1 align="center">青幕AI写作社区版（QMAI-CE）</h1>
 
 <p align="center">
   面向长篇小说的记忆型 AI 写作桌面系统
@@ -16,6 +16,8 @@
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-blue?style=flat-square" alt="Platform" />
   <img src="https://img.shields.io/badge/license-GPL--3.0-blue?style=flat-square" alt="License" />
 </p>
+
+上游 [QMAI](https://github.com/Mochocyang/QMAI) 已转为闭源。QMAI-CE 由社区独立维护，基于上游转为闭源前的提交 `43fe9b9a`，沿用该版本的 [GPL-3.0 许可证](LICENSE)。
 
 ---
 ![书架](docs/screenshots/书架.jpg)
