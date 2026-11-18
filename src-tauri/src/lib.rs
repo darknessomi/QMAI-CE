@@ -67,6 +67,9 @@ fn macos_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::
     let menu = Menu::default(app)?;
     // Tauri 默认菜单的第一项是应用菜单，首项为原生「关于」。
     if let Some(MenuItemKind::Submenu(app_menu)) = menu.items()?.first() {
+        // Tauri 生成运行时配置时会省略 bundle.copyright。
+        let macos_config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.macos.conf.json"))?;
         let icon = image::load_from_memory(include_bytes!("../icons/128x128@2x.png"))
             .map_err(std::io::Error::other)?
             .into_rgba8();
@@ -78,7 +81,7 @@ fn macos_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::
             Some(AboutMetadata {
                 name: Some(package.name.clone()),
                 version: Some(package.version.to_string()),
-                copyright: app.config().bundle.copyright.clone(),
+                copyright: macos_config["bundle"]["copyright"].as_str().map(str::to_owned),
                 icon: Some(tauri::image::Image::new_owned(icon.into_raw(), width, height)),
                 ..Default::default()
             }),
