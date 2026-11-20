@@ -18,7 +18,7 @@
 import type { WebSearchResult } from "@/lib/web-search"
 import { getHttpFetch, isFetchNetworkError } from "@/lib/tauri-fetch"
 
-export const DEFAULT_GEMINI_SEARCH_MODEL = "gemini-3.8-flash"
+export const DEFAULT_GEMINI_SEARCH_MODEL = "gemini-4-hydrogen"
 export const DEFAULT_GEMINI_BASE_URL = "https://generativelanguage.googleapis.com"
 
 export interface GeminiSearchOptions {

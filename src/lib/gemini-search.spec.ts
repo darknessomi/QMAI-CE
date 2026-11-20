@@ -94,7 +94,7 @@ describe("Gemini 搜索请求", () => {
     expect(url).toBe("https://generativelanguage.googleapis.com/v1beta/interactions")
     expect(init.headers["x-goog-api-key"]).toBe("k")
     const body = JSON.parse(init.body)
-    expect(body.model).toBe("gemini-3.8-flash")
+    expect(body.model).toBe("gemini-4-hydrogen")
     expect(body.tools).toEqual([{ type: "google_search" }])
   })
 
