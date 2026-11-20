@@ -236,7 +236,7 @@ export interface SearchProviderOverride {
   serpApiEngine?: SerpApiEngine
   searXngUrl?: string
   searXngCategories?: SearXngCategory[]
-  /** Gemini 搜索（Grounding with Google Search）用的模型，默认 gemini-3.8-flash。 */
+  /** Gemini 搜索（Grounding with Google Search）用的模型，默认 gemini-4-hydrogen。 */
   geminiModel?: string
   /** 反重力 CLI 搜索用的 agy 模型；留空用 agy 默认模型。 */
   antigravityModel?: string

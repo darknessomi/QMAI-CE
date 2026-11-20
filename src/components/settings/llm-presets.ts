@@ -84,17 +84,16 @@ const RAW_LLM_PRESETS: LlmPreset[] = [
     label: "Anthropic (Claude)",
     hint: "Official Claude API",
     provider: "anthropic",
-    defaultModel: "claude-sonnet-5",
-    // 2026-08 lineup from platform.claude.com model overview. Retired
-    // 3.5 / Sonnet-4 dated IDs dropped; type them manually if still needed.
+    defaultModel: "claude-sonnet-5-5",
+    // 2026-11 lineup from platform.claude.com model overview. Previous
+    // generation Opus/Sonnet 5 stay selectable; older dated IDs can be typed.
     suggestedModels: [
+      "claude-fable-5-2",
+      "claude-opus-5-5",
+      "claude-sonnet-5-5",
+      "claude-haiku-5-5",
       "claude-opus-5",
       "claude-sonnet-5",
-      "claude-opus-4-8",
-      "claude-opus-4-7",
-      "claude-opus-4-6",
-      "claude-sonnet-4-6",
-      "claude-haiku-4-5",
     ],
     suggestedContextSize: MIN_USER_LLM_CONTEXT_SIZE,
   },
@@ -103,18 +102,17 @@ const RAW_LLM_PRESETS: LlmPreset[] = [
     label: "Claude Code CLI (local)",
     hint: "Uses the local `claude` binary — no API key needed",
     provider: "claude-code",
-    defaultModel: "claude-sonnet-5",
+    defaultModel: "claude-sonnet-5-5",
     // Mirrors anthropic preset; the CLI forwards to the same Anthropic
     // backend, so model ids are identical. Users with a subscription
     // can pick Opus/Sonnet/Haiku here without paying an API key bill.
     suggestedModels: [
+      "claude-fable-5-2",
+      "claude-opus-5-5",
+      "claude-sonnet-5-5",
+      "claude-haiku-5-5",
       "claude-opus-5",
       "claude-sonnet-5",
-      "claude-opus-4-8",
-      "claude-opus-4-7",
-      "claude-opus-4-6",
-      "claude-sonnet-4-6",
-      "claude-haiku-4-5",
     ],
     suggestedContextSize: MIN_USER_LLM_CONTEXT_SIZE,
   },
@@ -147,10 +145,15 @@ const RAW_LLM_PRESETS: LlmPreset[] = [
     label: "Antigravity CLI (local)",
     hint: "使用 local agy 命令及其登录状态，无需 API Key",
     provider: "antigravity-cli",
+    // Hydrogen effort slugs are paid-plan only on agy. Flash stays first so
+    // free and Google AI Plus accounts still have a selectable default.
     suggestedModels: [
       "gemini-3.8-flash-high",
       "gemini-3.8-flash-medium",
       "gemini-3.8-flash-low",
+      "gemini-4-hydrogen-high",
+      "gemini-4-hydrogen-medium",
+      "gemini-4-hydrogen-low",
       "claude-opus-5-5-high",
       "claude-opus-5-5-medium",
       "claude-opus-5-5-low",
@@ -166,17 +169,16 @@ const RAW_LLM_PRESETS: LlmPreset[] = [
     label: "OpenAI (GPT)",
     hint: "Official OpenAI API",
     provider: "openai",
-    defaultModel: "gpt-5.5",
-    // 2026-08 api.openai.com lineup (GPT-5.5 / 5.4 family). Context preset
-    // stops at the 272K long-context pricing inflection; users can raise it.
+    defaultModel: "gpt-6.2-sol",
+    // 2026-11 api.openai.com lineup. Context preset stops at the 272K
+    // long-context pricing inflection; users can raise it. gpt-5.5 remains
+    // supported and can still be selected.
     suggestedModels: [
+      "gpt-6.2-sol",
+      "gpt-6.2-astra",
+      "gpt-6.1-terra",
+      "gpt-6-luna",
       "gpt-5.5",
-      "gpt-5.5-pro",
-      "gpt-5.4",
-      "gpt-5.4-pro",
-      "gpt-5.4-mini",
-      "gpt-5.4-nano",
-      "gpt-5.2",
     ],
     suggestedContextSize: 272_000,
   },
@@ -185,15 +187,17 @@ const RAW_LLM_PRESETS: LlmPreset[] = [
     label: "Google (Gemini)",
     hint: "Generative Language API",
     provider: "google",
-    defaultModel: "gemini-3.6-flash",
-    // 2026-08 Gemini API: Flash line is at 3.6; Pro flagship is still the
-    // 3.1 preview — gemini-3.5-pro / 3.6-pro are not published yet.
+    defaultModel: "gemini-4-hydrogen",
+    // 2026-11 Gemini API. Hydrogen is the everyday default (free tier);
+    // Carbon / Neon / Argon are the stronger Gemini 4 tiers. 3.5 Flash is
+    // routed away in AI Studio and is no longer listed.
     suggestedModels: [
-      "gemini-3.6-flash",
-      "gemini-3.5-flash",
+      "gemini-4-hydrogen",
+      "gemini-4-carbon",
+      "gemini-4-neon",
+      "gemini-4-argon",
+      "gemini-3.8-flash",
       "gemini-3.5-flash-lite",
-      "gemini-3.1-pro-preview",
-      "gemini-3.1-flash-lite",
     ],
     suggestedContextSize: 1000000,
   },
