@@ -1,7 +1,7 @@
 {
   "name": "qmai",
   "private": true,
-  "version": "4.7.2",
+  "version": "4.8.0",
   "license": "GPL-3.0-or-later",
   "engines": {
     "node": ">=24.22.1 <25"

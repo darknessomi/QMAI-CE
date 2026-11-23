@@ -79,6 +79,20 @@ const FOUR_POINT_FIVE_ZERO_ZH: string[] = [
   "为会员用户提供更好的使用体验和额度管理能力。",
 ];
 
+const FOUR_POINT_EIGHT_ZERO_ZH: string[] = [
+  "打开旧版小说项目时支持迁移到新版格式，整合旧目录和记忆数据，并记录项目格式版本。",
+  "项目迁移时会先备份和校验，显示迁移进度，并暂时锁定操作和退出。意外中断后，下次打开项目时会检查并恢复。",
+  "统一小说记忆刷新流程。提取、编辑、恢复或删除章节记忆后，会同步重建相关记忆和检索数据。",
+  "写作进度统一记录在 writing-progress.md，旧项目的写作进度会随项目迁移。",
+  "更新 Google、OpenAI 和 Anthropic 的官方预设模型列表和默认模型，同时更新 Gemini 搜索的默认模型。",
+];
+
+const FOUR_POINT_EIGHT_ZERO_CHANGELOG: ChangelogEntry = {
+  version: "4.8.0",
+  date: "2026-11-23",
+  highlights: { en: FOUR_POINT_EIGHT_ZERO_ZH, zh: FOUR_POINT_EIGHT_ZERO_ZH },
+};
+
 const FOUR_POINT_SEVEN_TWO_ZH: string[] = [
   "Windows 构建现在用 PowerShell 下载官方 protoc 23.4，校验 SHA-256 后再安装。",
   "移除 KaTeX 公式渲染、Mermaid 图表渲染和小说图谱视图。已有 Mermaid 内容按 Markdown 代码块显示，写作时仍可检索人物和事件之间的关系。",
@@ -2245,6 +2259,8 @@ export function currentVersionChangelog(version: string): ChangelogEntry[] {
    * 才是「当前版本发布说明」的取数口 —— 漏了这里，发布说明会退化成
    * 一行「QMAI x.y.z 发布版本」，scripts/release-notes.spec.mjs 会拦下来。
    */
+  if (version === FOUR_POINT_EIGHT_ZERO_CHANGELOG.version)
+    return [FOUR_POINT_EIGHT_ZERO_CHANGELOG];
   if (version === FOUR_POINT_SEVEN_TWO_CHANGELOG.version)
     return [FOUR_POINT_SEVEN_TWO_CHANGELOG];
   if (version === FOUR_POINT_SEVEN_ONE_CHANGELOG.version)
@@ -2446,6 +2462,7 @@ export function currentVersionChangelog(version: string): ChangelogEntry[] {
 
 export function allChangelog(): ChangelogEntry[] {
   return [
+    FOUR_POINT_EIGHT_ZERO_CHANGELOG,
     FOUR_POINT_SEVEN_TWO_CHANGELOG,
     FOUR_POINT_SEVEN_ONE_CHANGELOG,
     FOUR_POINT_SEVEN_ZERO_CHANGELOG,
