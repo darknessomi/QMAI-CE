@@ -55,7 +55,7 @@ function makeCard(chapterNumber: number, chapterTitle?: string): MemoryCenterSna
     summary: `摘要 ${chapterNumber}`,
     endingHook: "",
     memorySynced: false,
-    snapshotPath: `.novel/snapshots/${chapterNumber}.snapshot.md`,
+    snapshotPath: `.qmai/novel/snapshots/${chapterNumber}.snapshot.md`,
     characterStateChanges: [],
     knowledgeChanges: [],
     foreshadowingChanges: [],

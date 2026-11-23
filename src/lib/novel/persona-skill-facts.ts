@@ -5,7 +5,7 @@
  * 为什么不用模型：这四类信息在快照里已经是结构化的
  * （`characterStateChanges` / `organizations` / `knowledgeChanges` / `relationshipChanges`），
  * 再让模型写一遍既要多付 token，又会跟记忆中心的权威数据打架 ——
- * 同一个「右肩受伤」在 `.novel/character-states.json` 和 SKILL.md 里写成两句话，
+ * 同一个「右肩受伤」在 `.qmai/novel/character-states.json` 和 SKILL.md 里写成两句话，
  * 用户不知道该信哪个。这里做的是**投影**，不是二次创作。
  *
  * 另一个好处是可靠性：这条链路完全不依赖模型可用性。没配模型、模型超时、

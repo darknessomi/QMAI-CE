@@ -5,17 +5,16 @@ import {
   AlertTriangle,
   ArrowLeft,
   FileText,
-  Pencil,
   RefreshCw,
-  Save,
   Trash2,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { deleteFile, readFile, writeFile } from "@/commands/fs"
+import { readFile } from "@/commands/fs"
 import { WikiReader } from "@/components/editor/wiki-reader"
 import { parseFrontmatter } from "@/lib/frontmatter"
 import { useWikiStore } from "@/stores/wiki-store"
 import { loadMemoryCenterData, type MemoryCenterData } from "@/lib/novel/memory-center"
+import { hasPendingMemoryRefresh } from "@/lib/novel/memory-refresh-status"
 import {
   MEMORY_TAB_ICONS,
   MEMORY_TAB_KEYS,
@@ -24,7 +23,6 @@ import {
   resolveMemoryTabCount,
   selectChapterSnapshotCards,
   selectOutlineSnapshotCards,
-  type MemoryFileKey,
   type MemoryTabKey,
 } from "./memory-center-tabs"
 import { SnapshotCollection } from "./memory-center-snapshots"
@@ -49,34 +47,20 @@ const SnapshotViewer = lazy(async () => {
  * 改成这里的 `activeTab`。所以这次是拆结构 + 拆耦合，不只是搬 UI。
  */
 
-type MemoryFileContent = {
-  key: MemoryFileKey
-  path: string
-  content: string
-  rawBlock: string
-}
-
 type SnapshotMarkdownDetail = {
   title: string
-  path: string
   content: string
-  rawBlock: string
   chapterNumber: number | null
 }
 
 type PendingDelete = {
-  kind: "snapshot" | "file"
   title: string
-  path?: string
-  chapterNumber?: number
+  chapterNumber: number
 }
 
-function splitRenderableMarkdown(markdown: string): { rawBlock: string; body: string } {
+function markdownBody(markdown: string): string {
   const parsed = parseFrontmatter(markdown)
-  return {
-    rawBlock: parsed.rawBlock,
-    body: parsed.rawBlock ? parsed.body : markdown,
-  }
+  return parsed.rawBlock ? parsed.body : markdown
 }
 
 /**
@@ -116,7 +100,7 @@ export function MemoryCenterView() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [statusMessage, setStatusMessage] = useState("")
-  const [fileContent, setFileContent] = useState<MemoryFileContent | null>(null)
+  const [fileContent, setFileContent] = useState<string | null>(null)
   const [fileLoading, setFileLoading] = useState(false)
   const [detailView, setDetailView] = useState<SnapshotMarkdownDetail | null>(null)
   const [snapshotEditorNumber, setSnapshotEditorNumber] = useState<number | null>(null)
@@ -130,8 +114,10 @@ export function MemoryCenterView() {
   const shouldRestorePosition = useRef(false)
 
   const projectPath = project?.path
+  const latestLoad = useRef(0)
 
   const loadData = useCallback(async () => {
+    const request = ++latestLoad.current
     if (!projectPath) {
       setData(null)
       setError(null)
@@ -141,18 +127,36 @@ export function MemoryCenterView() {
     setLoading(true)
     setError(null)
     try {
-      setData(await loadMemoryCenterData(projectPath))
+      const next = await loadMemoryCenterData(projectPath)
+      if (request === latestLoad.current) setData(next)
     } catch (err) {
+      if (request !== latestLoad.current) return
       setError(err instanceof Error ? err.message : String(err))
       setData(null)
     } finally {
-      setLoading(false)
+      if (request === latestLoad.current) setLoading(false)
     }
   }, [projectPath])
 
   useEffect(() => {
     void loadData()
   }, [loadData])
+
+  const refresh = async () => {
+    if (!projectPath || loading) return
+    setStatusMessage("")
+    setLoading(true)
+    try {
+      if (await hasPendingMemoryRefresh(projectPath)) {
+        const { finalizeProjectMemoryRebuild } = await import("@/lib/novel/chapter-ingest")
+        await finalizeProjectMemoryRebuild(projectPath)
+      }
+      await loadData()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+      setLoading(false)
+    }
+  }
 
   // markdown 记忆文件按需读取：只有切到对应标签时才读盘。
   useEffect(() => {
@@ -172,13 +176,7 @@ export function MemoryCenterView() {
     void readFile(file.path)
       .then((markdown) => {
         if (cancelled) return
-        const rendered = splitRenderableMarkdown(markdown)
-        setFileContent({
-          key: activeTab,
-          path: file.path,
-          content: rendered.body,
-          rawBlock: rendered.rawBlock,
-        })
+        setFileContent(markdownBody(markdown))
       })
       .catch((err: unknown) => {
         if (cancelled) return
@@ -226,12 +224,9 @@ export function MemoryCenterView() {
     setError(null)
     try {
       const markdown = await readFile(path)
-      const rendered = splitRenderableMarkdown(markdown)
       setDetailView({
         title,
-        path,
-        content: rendered.body,
-        rawBlock: rendered.rawBlock,
+        content: markdownBody(markdown),
         chapterNumber: snapshotNumberFromMarkdownPath(path),
       })
       requestAnimationFrame(() => scrollContainerRef.current?.scrollTo({ top: 0 }))
@@ -245,30 +240,13 @@ export function MemoryCenterView() {
     setDetailView(null)
   }, [])
 
-  const handleSaveFile = useCallback(async (nextContent: string) => {
-    if (!fileContent) return
-    try {
-      await writeFile(fileContent.path, `${fileContent.rawBlock}${nextContent}`)
-      setFileContent({ ...fileContent, content: nextContent })
-      setStatusMessage(t("novel.memoryCenter.saveSuccess"))
-      bumpDataVersion()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    }
-  }, [bumpDataVersion, fileContent, t])
-
-  const requestDeleteFile = useCallback(() => {
-    if (!fileContent) return
-    setPendingDelete({ kind: "file", title: t(MEMORY_TAB_LABEL_KEYS[fileContent.key]), path: fileContent.path })
-  }, [fileContent, t])
-
   const requestDeleteSnapshot = useCallback((chapterNumber: number, title: string) => {
-    setPendingDelete({ kind: "snapshot", title, chapterNumber })
+    setPendingDelete({ title, chapterNumber })
   }, [])
 
   const requestDeleteDetail = useCallback(() => {
     if (!detailView || detailView.chapterNumber === null) return
-    setPendingDelete({ kind: "snapshot", title: detailView.title, chapterNumber: detailView.chapterNumber })
+    setPendingDelete({ title: detailView.title, chapterNumber: detailView.chapterNumber })
   }, [detailView])
 
   const confirmDelete = useCallback(async () => {
@@ -276,17 +254,12 @@ export function MemoryCenterView() {
     setDeleting(true)
     setError(null)
     try {
-      if (pendingDelete.kind === "snapshot" && pendingDelete.chapterNumber !== undefined) {
-        const { deleteChapterSnapshots } = await import("@/lib/novel/chapter-ingest")
-        await deleteChapterSnapshots(projectPath, pendingDelete.chapterNumber)
-      } else if (pendingDelete.kind === "file" && pendingDelete.path) {
-        await deleteFile(pendingDelete.path)
-        setFileContent(null)
-        setDetailView(null)
-      }
+      const { deleteChapterSnapshots } = await import("@/lib/novel/chapter-ingest")
+      await deleteChapterSnapshots(projectPath, pendingDelete.chapterNumber)
       bumpDataVersion()
       await loadData()
       setPendingDelete(null)
+      setDetailView(null)
       setStatusMessage(t("novel.memoryCenter.deleteSuccess"))
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -348,14 +321,18 @@ export function MemoryCenterView() {
             size="sm"
             variant="outline"
             className="shrink-0"
-            onClick={() => { setStatusMessage(""); void loadData() }}
+            onClick={() => void refresh()}
             disabled={loading}
           >
             <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
-            {t("novel.memoryCenter.refresh")}
+            {data?.refreshPending ? "重试记忆刷新" : t("novel.memoryCenter.refresh")}
           </Button>
         )}
       </div>
+
+      {data?.refreshPending && (
+        <p role="status" className="border-b px-4 py-2 text-sm">记忆或检索索引尚未刷新。重试会使用已保存的章节快照，无需重新提取。</p>
+      )}
 
       {!detailView ? (
         <>
@@ -452,22 +429,17 @@ export function MemoryCenterView() {
             dataUi="memory-detail"
             description={t("novel.memoryCenter.snapshots.detailDescription")}
             content={detailView.content}
-            editable={false}
-            onSave={handleSaveFile}
             onDelete={detailView.chapterNumber === null ? undefined : requestDeleteDetail}
             t={t}
           />
         ) : isMemoryFileTab(activeTab) ? (
           fileLoading ? (
             <LoadingRow label={t("novel.memoryCenter.loading")} />
-          ) : fileContent ? (
+          ) : fileContent !== null ? (
             <MarkdownPanel
               dataUi="memory-detail"
-              description={t("novel.memoryCenter.fileDetailDescription")}
-              content={fileContent.content}
-              editable
-              onSave={handleSaveFile}
-              onDelete={requestDeleteFile}
+              description="本页根据章节快照生成。要修改或删除一条记忆，请在「章节快照」中编辑对应章节。"
+              content={fileContent}
               t={t}
             />
           ) : (
@@ -533,96 +505,25 @@ function EmptyHint({ title, hint }: { title: string; hint: string }) {
   )
 }
 
-/**
- * markdown 记忆面板：可编辑（记忆文件）或只读（快照正文）。
- * 快照正文不可编辑 —— 它由提取流程生成，改它没有意义。
- */
-function MarkdownPanel({
-  dataUi,
-  description,
-  content,
-  editable,
-  onSave,
-  onDelete,
-  t,
-}: {
+function MarkdownPanel({ dataUi, description, content, onDelete, t }: {
   dataUi: string
   description: string
   content: string
-  editable: boolean
-  onSave: (content: string) => Promise<void>
   onDelete?: () => void
-  t: (key: string, opts?: Record<string, unknown>) => string
+  t: (key: string) => string
 }) {
-  const [editing, setEditing] = useState(false)
-  const [draft, setDraft] = useState(content)
-  const [saving, setSaving] = useState(false)
-
-  useEffect(() => {
-    setDraft(content)
-    setEditing(false)
-    setSaving(false)
-  }, [content])
-
-  async function handleSave() {
-    if (saving) return
-    setSaving(true)
-    try {
-      await onSave(draft)
-      setEditing(false)
-    } finally {
-      setSaving(false)
-    }
-  }
-
   return (
     <div data-ui={dataUi} className="rounded-lg border bg-background p-4">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <p className="text-xs text-muted-foreground">
-          {editable ? t("novel.memoryCenter.editHint") : description}
-        </p>
-        <div className="flex items-center gap-1">
-          {editable && editing ? (
-            <>
-              <Button size="sm" variant="outline" disabled={saving} onClick={() => void handleSave()}>
-                <Save className="mr-1.5 h-3.5 w-3.5" />
-                {saving ? t("novel.memoryCenter.saving") : t("novel.memoryCenter.save")}
-              </Button>
-              <Button size="sm" variant="ghost" disabled={saving} onClick={() => {
-                setDraft(content)
-                setEditing(false)
-              }}>
-                {t("novel.memoryCenter.cancel")}
-              </Button>
-            </>
-          ) : editable ? (
-            <Button size="sm" variant="outline" onClick={() => setEditing(true)}>
-              <Pencil className="mr-1.5 h-3.5 w-3.5" />
-              {t("novel.memoryCenter.edit")}
-            </Button>
-          ) : null}
-          {onDelete ? (
-            <Button
-              size="sm"
-              variant="outline"
-              className="border-destructive/50 text-destructive hover:bg-destructive/10"
-              onClick={onDelete}
-            >
-              <Trash2 className="mr-1.5 h-3.5 w-3.5" />
-              {t("novel.memoryCenter.delete")}
-            </Button>
-          ) : null}
-        </div>
+        <p className="text-xs text-muted-foreground">{description}</p>
+        {onDelete && (
+          <Button size="sm" variant="outline" className="border-destructive/50 text-destructive hover:bg-destructive/10" onClick={onDelete}>
+            <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+            {t("novel.memoryCenter.delete")}
+          </Button>
+        )}
       </div>
-      {editing ? (
-        <textarea
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          className="min-h-[420px] w-full rounded-md border border-border bg-background px-3 py-2 text-sm leading-6 text-foreground outline-none focus:border-ring"
-        />
-      ) : (
-        <WikiReader body={content} />
-      )}
+      <WikiReader body={content} />
     </div>
   )
 }

@@ -71,11 +71,15 @@ vi.mock("@/commands/fs", () => ({
 }))
 
 const ingestMock = vi.hoisted(() => vi.fn())
+const pendingRefresh = vi.hoisted(() => vi.fn(async () => false))
+const rebuild = vi.hoisted(() => vi.fn(async () => {}))
+vi.mock("./memory-refresh-status", () => ({ hasPendingMemoryRefresh: pendingRefresh }))
 
 vi.mock("./chapter-ingest", () => ({
   chapterSnapshotJsonPath: (projectPath: string, chapterNumber: number) =>
-    `${projectPath}/.novel/snapshots/${String(chapterNumber).padStart(3, "0")}.snapshot.json`,
+    `${projectPath}/.qmai/novel/snapshots/${String(chapterNumber).padStart(3, "0")}.snapshot.json`,
   ingestChapter: ingestMock,
+  finalizeProjectMemoryRebuild: rebuild,
 }))
 
 import { registerOpenDocument } from "@/lib/mcp/open-document"
@@ -100,7 +104,7 @@ function chapterFile(folder: string, name: string, chapterNumber: number) {
 
 function snapshot(chapterNumber: number) {
   io.files.set(
-    `${project}/.novel/snapshots/${String(chapterNumber).padStart(3, "0")}.snapshot.json`,
+    `${project}/.qmai/novel/snapshots/${String(chapterNumber).padStart(3, "0")}.snapshot.json`,
     "{}",
   )
 }
@@ -131,6 +135,16 @@ describe("runBulkChapterIngest", () => {
     expect(result.succeeded).toBe(1)
     expect(ingestMock).toHaveBeenCalledTimes(1)
     expect(ingestMock.mock.calls[0][1]).toContain("第3章")
+  })
+
+  it("上次已保存快照但派生刷新失败时，默认重试直接重建而不再提取", async () => {
+    chapterFile("", "第1章", 1)
+    snapshot(1)
+    pendingRefresh.mockResolvedValueOnce(true)
+    const result = await runBulkChapterIngest(project)
+    expect(rebuild).toHaveBeenCalledWith(project)
+    expect(ingestMock).not.toHaveBeenCalled()
+    expect(result.failed).toBe(0)
   })
 
   it("mode=all 连已有快照的章节一起重提取", async () => {

@@ -19,7 +19,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const PROJECT = "/proj"
-const SNAPSHOT_DIR = `${PROJECT}/.novel/snapshots`
+const SNAPSHOT_DIR = `${PROJECT}/.qmai/novel/snapshots`
 
 /** 与生产一致的快照文件名规则：三位补零 + .snapshot.json */
 function snapshotFile(chapterNumber: number): string {

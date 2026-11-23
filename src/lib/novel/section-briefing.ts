@@ -3,15 +3,9 @@
  * 根据本章细纲，从追踪数据中筛选出本节所需的角色状态、伏笔信息和世界观约束
  */
 
-import {
-  readCharacterStateMd,
-  readForeshadowingMd,
-  readContextMd,
-} from "./tracking-files"
-import {
-  loadForeshadowingTracker,
-  createEmptyForeshadowingStore,
-} from "./foreshadowing-tracker"
+import { readContextMd } from "./tracking-files"
+import { loadCharacterStates } from "./character-state"
+import { loadForeshadowingTracker } from "./foreshadowing-tracker"
 import {
   buildRelevantCharacterBriefs,
   buildRelevantForeshadowing,
@@ -137,7 +131,7 @@ export async function buildSectionBriefing(
   const characterNames = extractCharacterNames(matchingText)
 
   if (characterNames.length > 0) {
-    const charStore = await readCharacterStateMd(projectPath)
+    const charStore = await loadCharacterStates(projectPath)
     const briefs: string[] = []
 
     if (charStore) {
@@ -190,13 +184,7 @@ export async function buildSectionBriefing(
   } catch {}
 
   // ── 2. 筛选相关伏笔 ────────────────────────────────
-  // 先尝试读取新版 tracking 数据
-  let fStore = await loadForeshadowingTracker(projectPath).catch(() => null)
-  if (!fStore || fStore.items.length === 0) {
-    // 回退到 wiki/tracking Markdown 文件
-    const mdResult = await readForeshadowingMd(projectPath, createEmptyForeshadowingStore(), [])
-    fStore = mdResult.store
-  }
+  const fStore = await loadForeshadowingTracker(projectPath)
 
   const foreshadowingHints = extractForeshadowingHints(matchingText)
 
@@ -258,7 +246,7 @@ export async function buildSectionBriefing(
   // 挂在「本节速记」而不是新增数据源：`sectionBriefing` 的 FIELD_PRIORITY = 0，
   // 是最后才被裁剪的字段，等于保底通道；而新增数据源还要改
   // `context-hub/source-paths.ts` 的依赖前缀，否则缓存会永久陈旧。
-  // 巧合的是 `sectionBriefing` 的依赖前缀**本来就含 `.novel/snapshots/`**，
+  // 巧合的是 `sectionBriefing` 的依赖前缀**本来就含 `.qmai/novel/snapshots/`**，
   // 且它已在 TASK_SCOPED_SOURCES 里，故新读快照不需要动缓存接线。
   const itemBriefings = selectBriefingItems(
     collectItemRecords(await loadRecentChapterSnapshots(projectPath, chapterNumber)),

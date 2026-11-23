@@ -3,8 +3,8 @@ import { countChapterBodyWords } from "@/lib/chapter-word-count"
 import { flattenMdFiles } from "@/lib/novel/chapter-utils"
 import { getRelativePath, joinPath, normalizeComparablePath, normalizePath } from "@/lib/path-utils"
 
-/** 写作统计落盘到 `<project>/.novel/writing-stats.json`（派生数据，与正典同目录）。 */
-export const WRITING_STATS_DIR = ".novel"
+/** 写作统计落盘到 `<project>/.qmai/novel/writing-stats.json`（派生数据，与正典同目录）。 */
+export const WRITING_STATS_DIR = ".qmai/novel"
 export const WRITING_STATS_FILE = "writing-stats.json"
 export const WRITING_STATS_VERSION = 1
 

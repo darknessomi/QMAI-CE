@@ -402,7 +402,7 @@
       "note": "基于外部原作的同人创作。必须先有原作正典，再生成大纲；本类型强制追加 fanfic-derivative。",
       "requiredSkill": "TicaiSkill/fanfic-derivative",
       "requiresSourceCanon": true,
-      "canonPath": ".novel/fanfic-canon.md",
+      "canonPath": ".qmai/novel/fanfic-canon.md",
       "supportedModes": ["canon", "au", "ooc", "cp", "custom"]
     }
   },

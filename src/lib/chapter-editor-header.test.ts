@@ -101,7 +101,7 @@ describe("buildChapterEditorHeader", () => {
  * ── 记忆口径：用户要求「正式 = 已提取记忆」──
  *
  * 缺陷现场：第 6、15 章的文件里写着 `chapter_status: final`（09-30 批量导入时
- * 落下的），但 `.novel/snapshots/` 里没有它们的快照 —— 批量提取只跑到第 5 章。
+ * 落下的），但 `.qmai/novel/snapshots/` 里没有它们的快照 —— 批量提取只跑到第 5 章。
  * 侧栏那一行因此没有绿点，而标题行徽章却显示绿色「正式」。
  *
  * 修法：由调用方声明口径。传了 `memoryExtracted` 就**完全**由它决定，

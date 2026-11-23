@@ -1,3 +1,4 @@
+import { isActiveForeshadowingStatus } from "./foreshadowing-normalize"
 import { createDirectory, fileExists, readFile, writeFileAtomic } from "@/commands/fs"
 import { normalizePath } from "@/lib/path-utils"
 import { loadCognitionState, cognitionToContextText } from "./character-cognition"
@@ -77,7 +78,7 @@ export async function loadMemoryMaintenanceOverview(path: string): Promise<Memor
     counts: {
       cognition: (cognition?.readerKnows.length ?? 0) + (cognition?.characters.reduce((n, c) => n + c.knows.length + c.doesNotKnow.length, 0) ?? 0),
       characters: characters.characters.length,
-      foreshadowing: foreshadowing.items.filter((f) => f.status !== "resolved" && f.status !== "abandoned").length,
+      foreshadowing: foreshadowing.items.filter((f) => isActiveForeshadowingStatus(f.status)).length,
       timeline: timeline.entries.length,
     },
     cognitionChars: cognition ? cognitionToContextText(cognition).length : 0,

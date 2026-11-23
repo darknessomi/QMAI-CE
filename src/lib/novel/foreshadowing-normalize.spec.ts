@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
-  findForeshadowingByNormalizedName,
+  matchForeshadowingNames,
   isActiveForeshadowingStatus,
   normalizeForeshadowingName,
   parseForeshadowingChange,
@@ -69,7 +69,7 @@ describe("normalizeForeshadowingName", () => {
   })
 })
 
-describe("findForeshadowingByNormalizedName", () => {
+describe("matchForeshadowingNames", () => {
   const items = [
     { id: "1", name: "世界敌意值上升" },
     { id: "2", name: "灰门" },
@@ -77,15 +77,15 @@ describe("findForeshadowingByNormalizedName", () => {
   ]
 
   it("matches exact name", () => {
-    expect(findForeshadowingByNormalizedName(items, "灰门")?.id).toBe("2")
+    expect(matchForeshadowingNames(items, "灰门")[0]?.id).toBe("2")
   })
 
   it("matches prefix when both names are long enough", () => {
-    expect(findForeshadowingByNormalizedName(items, "世界敌意值上升预示")?.id).toBe("1")
+    expect(matchForeshadowingNames(items, "世界敌意值上升预示")[0]?.id).toBe("1")
   })
 
   it("does not use short bidirectional includes", () => {
-    expect(findForeshadowingByNormalizedName(items, "短名扩展很多字")).toBeUndefined()
+    expect(matchForeshadowingNames(items, "短名扩展很多字")).toEqual([])
   })
 })
 

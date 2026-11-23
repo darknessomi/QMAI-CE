@@ -1,8 +1,12 @@
-import { readFile, writeFile, createDirectory } from "@/commands/fs"
+import { readFile } from "@/commands/fs"
 import { normalizePath } from "@/lib/path-utils"
 import type { StateChangeRecord } from "./tracking-types"
 
 export interface CharacterState {
+  /** 用户单独维护的记录。 */
+  manual?: boolean
+  /** 上次从快照得到的状态，用于保留用户随后改写的状态。 */
+  generatedStatus?: string
   characterName: string
   currentLocation: string
   status: string
@@ -28,24 +32,12 @@ export function createEmptyCharacterStateStore(): CharacterStateStore {
   return { characters: [], lastUpdated: new Date().toISOString() }
 }
 
-export async function saveCharacterStates(
-  projectPath: string,
-  store: CharacterStateStore,
-): Promise<void> {
-  const pp = normalizePath(projectPath)
-  await createDirectory(`${pp}/.novel`)
-  await writeFile(
-    `${pp}/.novel/character-states.json`,
-    JSON.stringify(store, null, 2),
-  )
-}
-
 export async function loadCharacterStates(
   projectPath: string,
 ): Promise<CharacterStateStore> {
   const pp = normalizePath(projectPath)
   try {
-    const raw = await readFile(`${pp}/.novel/character-states.json`)
+    const raw = await readFile(`${pp}/.qmai/novel/character-states.json`)
     return JSON.parse(raw)
   } catch {
     return createEmptyCharacterStateStore()

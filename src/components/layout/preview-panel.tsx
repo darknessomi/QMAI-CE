@@ -1355,7 +1355,7 @@ export function PreviewPanel() {
     let cancelled = false
     void (async () => {
       try {
-        const snapshotDir = `${normalizePath(project.path)}/.novel/snapshots`
+        const snapshotDir = `${normalizePath(project.path)}/.qmai/novel/snapshots`
         const tree = await listDirectory(snapshotDir)
         // 先解析出全部快照号（含大纲的负数），再只留章节的正数。
         const numbers = chapterSnapshotNumbersFrom(chapterSnapshotNumbersFromFileNames(tree.map((file) => file.name)))
@@ -1735,7 +1735,7 @@ export function PreviewPanel() {
   }, [chapterDisplayTitle])
 
   /**
-   * 章节记忆提取（落盘 `.novel/snapshots/NNN.snapshot.json`）—— **唯一**实现。
+   * 章节记忆提取（落盘 `.qmai/novel/snapshots/NNN.snapshot.json`）—— **唯一**实现。
    *
    * 抽出来的理由：它有两个调用方，而两者的前置步骤不同：
    *   · 「重新提取记忆」（章节已是 `chapter_status: final`）：直接提取；

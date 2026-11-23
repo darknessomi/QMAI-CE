@@ -1,3 +1,7 @@
+import { isActiveForeshadowingStatus } from "./foreshadowing-normalize"
+import { loadCharacterStates } from "./character-state"
+import { loadForeshadowingTracker } from "./foreshadowing-tracker"
+import { hasPendingMemoryRefresh } from "./memory-refresh-status"
 import { readFile } from "@/commands/fs"
 import { normalizePath } from "@/lib/path-utils"
 import { listSnapshots, loadSnapshot, type ChapterSnapshot } from "./chapter-ingest"
@@ -47,6 +51,7 @@ export interface MemoryCenterStats {
 }
 
 export interface MemoryCenterData {
+  refreshPending?: boolean
   stats: MemoryCenterStats
   snapshots: MemoryCenterSnapshotCard[]
   allChapterNumbers: number[]
@@ -88,7 +93,7 @@ function snapshotMarkdownPath(projectPath: string, chapterNumber: number): strin
   const prefix = chapterNumber < 0
     ? `outline-${String(Math.abs(chapterNumber)).padStart(3, "0")}`
     : String(chapterNumber).padStart(3, "0")
-  return `${projectPath}/.novel/snapshots/${prefix}.snapshot.md`
+  return `${projectPath}/.qmai/novel/snapshots/${prefix}.snapshot.md`
 }
 
 function hasSectionContent(section: MemoryCenterSection | null): section is MemoryCenterSection {
@@ -114,12 +119,6 @@ function stripFrontmatter(markdown: string): string {
   return normalized
 }
 
-/*
- * parseMemoryMarkdownPreview / buildMemoryCenterSnapshotCards / buildMemoryCenterStats
- * 是本模块自己的测试（memory-center.test.ts）依赖的公开接口，必须保持导出。
- * 它们曾经丢失过 `export`，那三条测试便一直在 import 到 undefined 上失败 ——
- * 而 tsconfig.app.json 排除了 *.test.ts，类型检查也没能发现。恢复导出即修复。
- */
 export function parseMemoryMarkdownPreview(
   markdown: string,
   maxSections = 3,
@@ -247,25 +246,6 @@ export function buildMemoryCenterSnapshotCards(
     })
 }
 
-export function buildMemoryCenterStats(
-  snapshots: MemoryCenterSnapshotCard[],
-  files: MemoryCenterFilePreview[],
-): MemoryCenterStats {
-  const characterFile = files.find((file) => file.key === "character-states")
-  const foreshadowingFile = files.find((file) => file.key === "foreshadowing-tracker")
-  const activeForeshadowingSection =
-    foreshadowingFile?.sections.find((section) => /进行中|in progress|active/i.test(section.title)) ??
-    foreshadowingFile?.sections[0]
-
-  return {
-    snapshotCount: snapshots.length,
-    syncedSnapshotCount: snapshots.filter((snapshot) => snapshot.memorySynced).length,
-    characterCount: characterFile?.sections.reduce((sum, section) => sum + section.groups.length, 0) ?? 0,
-    activeForeshadowingCount: activeForeshadowingSection?.groups.length ?? 0,
-    memoryFileCount: files.length,
-  }
-}
-
 export async function loadMemoryCenterData(projectPath: string): Promise<MemoryCenterData> {
   const pp = normalizePath(projectPath)
   const snapshotNumbers = await listSnapshots(pp)
@@ -306,8 +286,18 @@ export async function loadMemoryCenterData(projectPath: string): Promise<MemoryC
     .filter((card) => card.chapterNumber > 0)
     .map((card) => card.chapterNumber)
 
+  const [characters, foreshadows, refreshPending] = await Promise.all([
+    loadCharacterStates(pp), loadForeshadowingTracker(pp), hasPendingMemoryRefresh(pp),
+  ])
   return {
-    stats: buildMemoryCenterStats(allSnapshotCards, files),
+    refreshPending,
+    stats: {
+      snapshotCount: allSnapshotCards.length,
+      syncedSnapshotCount: allSnapshotCards.filter((s) => s.memorySynced).length,
+      characterCount: characters.characters.length,
+      activeForeshadowingCount: foreshadows.items.filter((f) => isActiveForeshadowingStatus(f.status)).length,
+      memoryFileCount: files.length,
+    },
     // 全量返回：章节与大纲由视图层各自筛选，加载器不再做任何取舍。
     snapshots: allSnapshotCards,
     allChapterNumbers,

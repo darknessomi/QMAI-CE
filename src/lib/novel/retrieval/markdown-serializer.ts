@@ -60,8 +60,8 @@ export function deserializeEntryFromMarkdown(markdown: string): RetrievalEntry |
   const indexStatusText = extractField(autoContent, "索引状态")
   const indexStatus = textToIndexStatus(indexStatusText)
 
-  const manualNotes = extractField(manualContent || "", "人工备注")
-  const manualReminders = extractField(manualContent || "", "后续提醒")
+  const manualNotes = manualContent?.match(/^- 人工备注：[ \t]*([\s\S]*?)(?:\n- 后续提醒：|(?![\s\S]))/m)?.[1]?.trim() ?? ""
+  const manualReminders = manualContent?.match(/^- 后续提醒：[ \t]*([\s\S]*)/m)?.[1]?.trim() ?? ""
 
   return {
     chapterNumber,

@@ -1,5 +1,6 @@
 import { readFile, listDirectory } from "@/commands/fs"
 import { normalizePath } from "@/lib/path-utils"
+import { clearGraphCache } from "@/lib/graph-relevance"
 import { refreshProjectState } from "@/lib/project-refresh"
 import i18n from "@/i18n"
 import { useOutlineGenerationStore } from "@/stores/outline-generation-store"
@@ -8,7 +9,6 @@ import { useWikiStore } from "@/stores/wiki-store"
 import { hasUsableLlm } from "@/lib/has-usable-llm"
 import { mapWithConcurrency } from "@/lib/async-pool"
 import {
-  finalizeProjectMemoryRebuild,
   ingestOutline,
   syncSnapshotToMemory,
   type OutlineIngestResult,
@@ -355,7 +355,6 @@ export async function runOutlineIngestPaths(
 
     try {
       await syncSnapshotToMemory(pp, item.ingestResult.snapshot!, {
-        deferStructuredMemoryExport: true,
         deferDerivedRebuild: true,
       })
       const successMessage = item.ingestResult.truncated
@@ -393,7 +392,7 @@ export async function runOutlineIngestPaths(
   }
 
   if (succeeded > 0) {
-    await finalizeProjectMemoryRebuild(pp)
+    clearGraphCache()
     await refreshProjectState(pp)
   }
 

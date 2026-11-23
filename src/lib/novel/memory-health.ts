@@ -8,7 +8,7 @@
  * 漏掉的摘要会继续"描述"已经不存在的大纲/章节 —— 这就是用户担心的资料污染。
  *
  * 判定方式（确定性，不调模型）：
- * - 现有快照编号来自 `.novel/snapshots`（`listSnapshots`）；
+ * - 现有快照编号来自 `.qmai/novel/snapshots`（`listSnapshots`）；
  * - 合法编号 = 现有章节的 `chapter_number`/文件名数字 ∪ 现有大纲的哈希编号；
  * - 两头都不在 → 孤儿。
  */

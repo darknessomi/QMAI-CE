@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { ChapterSnapshot } from "./chapter-ingest"
 vi.mock("@/commands/fs", () => ({
   readFile: vi.fn(),
+  fileExists: vi.fn(async () => false),
 }))
 
 vi.mock("./chapter-ingest", () => ({
@@ -12,7 +13,6 @@ vi.mock("./chapter-ingest", () => ({
 import { readFile } from "@/commands/fs"
 import {
   buildMemoryCenterSnapshotCards,
-  buildMemoryCenterStats,
   loadMemoryCenterData,
   parseMemoryMarkdownPreview,
 } from "./memory-center"
@@ -110,53 +110,22 @@ describe("memory-center", () => {
     expect(preview[1].items).toEqual(["楚白似乎已经察觉外门长老另有图谋"])
   })
 
-  it("builds memory center stats from snapshots and memory previews", () => {
-    const stats = buildMemoryCenterStats(
-      buildMemoryCenterSnapshotCards([
-        makeSnapshot({ chapterNumber: 4, memorySyncedAt: "2026-05-27T00:00:00.000Z" }),
-        makeSnapshot({ chapterNumber: 5 }),
-      ]),
-      [
-        {
-          key: "character-states",
-          title: "人物状态记忆",
-          path: "/project/wiki/memory/character-states.md",
-          sections: [
-            {
-              title: "当前正式状态",
-              groups: [
-                { title: "楚白", items: ["当前状态：炼气七层"] },
-                { title: "苏青雨", items: ["当前状态：闭关"] },
-              ],
-              items: [],
-            },
-          ],
-        },
-        {
-          key: "foreshadowing-tracker",
-          title: "伏笔追踪记忆",
-          path: "/project/wiki/memory/foreshadowing-tracker.md",
-          sections: [
-            {
-              title: "进行中",
-              groups: [{ title: "雷池钥匙", items: ["状态：推进中"] }],
-              items: [],
-            },
-            {
-              title: "已完成",
-              groups: [{ title: "黑玉令来历", items: ["状态：已完成"] }],
-              items: [],
-            },
-          ],
-        },
-      ],
-    )
-
-    expect(stats.snapshotCount).toBe(2)
-    expect(stats.syncedSnapshotCount).toBe(1)
-    expect(stats.characterCount).toBe(2)
-    expect(stats.activeForeshadowingCount).toBe(1)
-    expect(stats.memoryFileCount).toBe(2)
+  it("按正式 JSON 统计，Markdown 缺失或候选标题不会改变人数和活跃伏笔数", async () => {
+    mockListSnapshots.mockResolvedValue([3, 4])
+    mockLoadSnapshot.mockImplementation(async (_, chapterNumber) => makeSnapshot({
+      chapterNumber, memorySyncedAt: chapterNumber === 3 ? "2026-05-01" : undefined,
+    }))
+    mockReadFile.mockImplementation(async (path) => {
+      if (path.endsWith("/character-states.json")) return JSON.stringify({ characters: [{}, {}] })
+      if (path.endsWith("/foreshadowing-tracker.json")) return JSON.stringify({ items: [
+        { status: "advanced" }, { status: "resolved" }, { status: "abandoned" },
+      ] })
+      if (path.endsWith("/foreshadowing-tracker.md")) return "# 伏笔\n## 候选区\n### 无来源的伏笔"
+      throw new Error("缺页")
+    })
+    const { stats } = await loadMemoryCenterData("/project")
+    expect(stats).toEqual({ snapshotCount: 2, syncedSnapshotCount: 1,
+      characterCount: 2, activeForeshadowingCount: 1, memoryFileCount: 1 })
   })
 
   it("loadMemoryCenterData 返回全部快照，不做任何截断", async () => {

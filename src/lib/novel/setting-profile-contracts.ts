@@ -17,9 +17,9 @@ export const SETTING_PROFILE_SECTIONS: Record<SettingProfileKey, SettingProfileS
    * 人物小传只留「写正文时真的会去查」的 6 个分区。
    *
    * 砍掉的 4 个（都不是能力丢失，是**本来就该由别处负责**）：
-   * - 出场记录：章节记忆（`.novel/memory` / character-states）在每章入库时自动维护，
+   * - 出场记录：章节记忆（`.qmai/novel/memory` / character-states）在每章入库时自动维护，
    *   档案里再排一张静态表必然过期；没有正文时更是只能编「计划出场」。
-   * - 状态追踪：`.novel/character-states.json` 是运行时的当前状态单一权威（chapter-ingest 每章更新），
+   * - 状态追踪：`.qmai/novel/character-states.json` 是运行时的当前状态单一权威（chapter-ingest 每章更新），
    *   档案里再写一份就是两个基准，改章不改档案迟早互相打脸。
    * - 写作使用规则：这是给模型的执行约束，不是设定内容 —— 用户读它拿不到任何新信息，
    *   模型读了也照旧守不住，纯粹是每份档案多付一段 token。

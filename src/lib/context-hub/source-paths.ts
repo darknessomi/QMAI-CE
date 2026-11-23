@@ -31,25 +31,23 @@ export function classifyContextSourcePath(projectPath: string, path: string): Co
   const project = normalizeContextPath(projectPath).toLowerCase()
   const normalized = normalizeContextPath(path)
   const lower = normalized.toLowerCase()
-  const relative = lower.startsWith(`${project}/`) ? lower.slice(project.length + 1) : lower
+  const relative = (lower.startsWith(`${project}/`) ? lower.slice(project.length + 1) : lower).replace(/^qm\//, "wiki/")
 
   if (relative === ".qmai/context-cache" || relative.startsWith(".qmai/context-cache/")) return "ignored"
   if (relative === ".qmai/writing-style.json") return "setting"
   if (relative.startsWith("wiki/chapters/")) return "chapter"
   if (relative.startsWith("wiki/outlines/")) return "outline"
   if (relative.startsWith("wiki/memory/")) return "memory"
-  if (relative === "wiki/tracking/角色状态.md") return "entity"
-  if (relative.startsWith("wiki/tracking/")) return "memory"
   if (relative.startsWith("wiki/entities/") || relative.startsWith("wiki/characters/")) return "entity"
   if (relative.startsWith("wiki/settings/") || relative === "wiki/canon.md" || relative === "wiki/writing-style.md") return "setting"
-  if (relative === ".novel/cognition-state.json") return "entity"
-  if (relative === ".novel/character-states.json") return "entity"
-  if (relative === ".novel/foreshadowing-tracker.json") return "memory"
-  if (relative === ".novel/fanfic-canon.md") return "setting"
-  if (relative === ".novel/revision-feedback.json") return "snapshot"
-  if (relative === ".novel/timeline.json") return "memory"
-  if (relative.startsWith(".novel/snapshots/") || relative.startsWith(".novel/community-summaries/")) return "snapshot"
-  if (relative.startsWith("retrieval/")) return "retrieval"
+  if (relative === ".qmai/novel/cognition-state.json") return "entity"
+  if (relative === ".qmai/novel/character-states.json") return "entity"
+  if (relative === ".qmai/novel/foreshadowing-tracker.json") return "memory"
+  if (relative === ".qmai/novel/fanfic-canon.md") return "setting"
+  if (relative === ".qmai/novel/revision-feedback.json") return "snapshot"
+  if (relative === ".qmai/novel/timeline.json") return "memory"
+  if (relative.startsWith(".qmai/novel/snapshots/") || relative.startsWith(".qmai/novel/community-summaries/")) return "snapshot"
+  if (relative.startsWith(".qmai/retrieval/")) return "retrieval"
   return "other"
 }
 
@@ -64,7 +62,7 @@ export function getDataSourceKinds(sourceName: string): ContextSourceKind[] {
  * 原则：宁可过覆盖、不可漏（漏了会命中过时缓存）。
  */
 export const SOURCE_DEPENDENCY_PREFIXES: Record<string, string[]> = {
-  cognitionText: [".novel/cognition-state.json", "wiki/outlines/"],
+  cognitionText: [".qmai/novel/cognition-state.json", "wiki/outlines/"],
   writingStyle: ["wiki/settings/", "wiki/canon.md", "wiki/writing-style.md", ".qmai/writing-style.json"],
   relatedSettings: [
     "wiki/settings/", "wiki/canon.md", "wiki/writing-style.md",
@@ -74,20 +72,20 @@ export const SOURCE_DEPENDENCY_PREFIXES: Record<string, string[]> = {
     "wiki/settings/", "wiki/canon.md", "wiki/writing-style.md",
     "wiki/memory/", "wiki/entities/", "wiki/characters/",
   ],
-  sourceCanon: [".novel/fanfic-canon.md"],
+  sourceCanon: [".qmai/novel/fanfic-canon.md"],
   outline: ["wiki/outlines/"],
   chapterOutline: ["wiki/outlines/"],
   volumeContext: ["wiki/outlines/", "wiki/settings/", "wiki/canon.md"],
-  snapshots: [".novel/snapshots/", ".novel/community-summaries/", ".novel/revision-feedback.json"],
+  snapshots: [".qmai/novel/snapshots/", ".qmai/novel/community-summaries/", ".qmai/novel/revision-feedback.json"],
   recentChapterContents: ["wiki/chapters/"],
   fallbackRecentSummaries: ["wiki/chapters/"],
-  fallbackPreviousEnding: ["wiki/chapters/", ".novel/snapshots/"],
-  fallbackCharacterStates: ["wiki/entities/", "wiki/characters/"],
-  fallbackForeshadowingStates: ["wiki/memory/", "wiki/entities/", "wiki/characters/"],
-  fallbackTimeline: ["wiki/memory/", ".novel/timeline.json"],
-  revisionFeedback: ["wiki/chapters/", ".novel/snapshots/", ".novel/revision-feedback.json"],
-  retrieval: ["retrieval/"],
-  sectionBriefing: ["wiki/outlines/", ".novel/snapshots/", ".novel/foreshadowing-tracker.json", "wiki/tracking/"],
+  fallbackPreviousEnding: ["wiki/chapters/", ".qmai/novel/snapshots/"],
+  fallbackCharacterStates: [".qmai/novel/character-states.json", "wiki/chapters/"],
+  fallbackForeshadowingStates: [".qmai/novel/foreshadowing-tracker.json", "wiki/chapters/"],
+  fallbackTimeline: [".qmai/novel/timeline.json", "wiki/chapters/"],
+  revisionFeedback: ["wiki/chapters/", ".qmai/novel/snapshots/", ".qmai/novel/revision-feedback.json"],
+  retrieval: [".qmai/retrieval/"],
+  sectionBriefing: ["wiki/outlines/", ".qmai/novel/snapshots/", ".qmai/novel/foreshadowing-tracker.json", ".qmai/novel/character-states.json", "wiki/memory/writing-progress.md"],
 }
 
 /** 返回某数据源的依赖路径前缀；未声明则返回空（调用方回退到 kind 聚合）。 */

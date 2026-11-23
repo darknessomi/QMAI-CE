@@ -15,7 +15,7 @@ export function normalizeMemoryText(text: string): string { return text.normaliz
 export function memoryRemovalKey(value: MemoryRemoval): string {
   return JSON.stringify([value.chapterNumber, value.field, normalizeMemoryText(value.text)])
 }
-export function memoryPolicyPath(projectPath: string): string { return `${normalizePath(projectPath)}/.novel/memory-cleanup.json` }
+export function memoryPolicyPath(projectPath: string): string { return `${normalizePath(projectPath)}/.qmai/novel/memory-cleanup.json` }
 
 // Missing is allowed; corrupt decisions must never silently reactivate deleted memories.
 export async function loadMemoryCleanupPolicy(projectPath: string): Promise<MemoryCleanupPolicy> {
@@ -28,7 +28,7 @@ export async function loadMemoryCleanupPolicy(projectPath: string): Promise<Memo
   return data
 }
 export async function saveMemoryCleanupPolicy(projectPath: string, policy: MemoryCleanupPolicy): Promise<void> {
-  await createDirectory(`${normalizePath(projectPath)}/.novel`)
+  await createDirectory(`${normalizePath(projectPath)}/.qmai/novel`)
   await writeFileAtomic(memoryPolicyPath(projectPath), JSON.stringify(policy, null, 2))
 }
 

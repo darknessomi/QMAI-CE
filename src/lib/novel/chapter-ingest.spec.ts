@@ -24,7 +24,7 @@ describe("chapter ingest draft boundary", () => {
   it("does not persist a snapshot before syncSnapshotToMemory", () => {
     const ingestFn = source.slice(
       source.indexOf("export async function ingestChapter"),
-      source.indexOf("function createRetrievalStore"),
+      source.indexOf("function normalizeOutlineIngestError"),
     )
     const saveBeforeSync = ingestFn.indexOf("await saveSnapshot(")
     const syncCall = ingestFn.indexOf("await syncSnapshotToMemoryUnlocked(")

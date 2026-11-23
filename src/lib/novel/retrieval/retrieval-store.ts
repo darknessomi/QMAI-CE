@@ -1,3 +1,4 @@
+import { parseForeshadowingChange } from "../foreshadowing-normalize"
 import type { ChapterSnapshot } from "../chapter-ingest"
 import type { RetrievalEntry, VolumeIndex, InvertedIndex } from "./types"
 import { DEFAULT_CHAPTERS_PER_VOLUME } from "./types"
@@ -9,6 +10,7 @@ export interface FsAdapter {
   writeFile: (path: string, content: string) => Promise<void>
   fileExists: (path: string) => Promise<boolean>
   listDirectory: (path: string) => Promise<string[]>
+  deleteFile?: (path: string) => Promise<void>
   createDirectory: (path: string) => Promise<void>
   joinPath: (...parts: string[]) => string
 }
@@ -34,7 +36,7 @@ export class RetrievalStore {
   }
 
   get retrievalDir(): string {
-    return this.fs.joinPath(this.projectPath, "retrieval")
+    return this.fs.joinPath(this.projectPath, ".qmai", "retrieval")
   }
 
   get indexPath(): string {
@@ -68,29 +70,39 @@ export class RetrievalStore {
   ): Promise<void> {
     await this.fs.createDirectory(this.retrievalDir)
 
-    const entries: RetrievalEntry[] = snapshots.map((snapshot) => {
-      const volumeName = this.chapterToVolumeName(snapshot.chapterNumber)
-      return projectSnapshotToEntry(snapshot, {
-        filePath: getFilePath(snapshot),
-        volumeName,
-        sourceHash: getSourceHash(snapshot),
-      })
-    })
-
-    const volumes = this.calculateVolumes(entries)
-
-    for (const volume of volumes) {
-      const volumeEntries = entries.filter(
-        (e) => e.chapterNumber >= volume.chapterStart && e.chapterNumber <= volume.chapterEnd
-      )
-      const content = serializeVolumeEntries(volumeEntries, volume.name)
-      await this.fs.writeFile(this.getVolumePath(volume.name), content)
+    const previousFiles = new Map<string, string>()
+    const oldEntries = new Map<number, RetrievalEntry>()
+    for (const file of await this.fs.listDirectory(this.retrievalDir)) {
+      if (!/^volume-\d+\.md$/.test(file)) continue
+      const content = await this.fs.readFile(this.fs.joinPath(this.retrievalDir, file))
+      previousFiles.set(file, content)
+      for (const entry of parseVolumeEntries(content)) oldEntries.set(entry.chapterNumber, entry)
     }
-
+    const entries = snapshots.map((snapshot) => {
+      const previous = oldEntries.get(snapshot.chapterNumber)
+      const filePath = getFilePath(snapshot) || previous?.filePath || ""
+      const sourceHash = getSourceHash(snapshot) || undefined
+      const volumeName = this.chapterToVolumeName(snapshot.chapterNumber)
+      if (!previous) return projectSnapshotToEntry(snapshot, { filePath, volumeName, sourceHash })
+      return { ...updateEntryFromSnapshot(previous, snapshot, { sourceHash }), volumeName, filePath }
+    })
+    const volumes = this.calculateVolumes(entries)
+    for (const volume of volumes) {
+      const content = serializeVolumeEntries(entries.filter((entry) => entry.volumeName === volume.name), volume.name)
+      if (previousFiles.get(volume.fileName) !== content) await this.fs.writeFile(this.getVolumePath(volume.name), content)
+      previousFiles.delete(volume.fileName)
+    }
+    for (const file of previousFiles.keys()) {
+      const volumeName = `第${/^volume-(\d+)/.exec(file)![1]}卷`
+      const path = this.fs.joinPath(this.retrievalDir, file)
+      if (this.fs.deleteFile) await this.fs.deleteFile(path)
+      else await this.fs.writeFile(path, serializeVolumeEntries([], volumeName))
+    }
     const invertedIndex = this.buildInvertedIndex(entries)
     const indexContent = this.serializeMainIndex(volumes, invertedIndex)
-    await this.fs.writeFile(this.indexPath, indexContent)
-
+    if (!await this.fs.fileExists(this.indexPath) || await this.fs.readFile(this.indexPath) !== indexContent) {
+      await this.fs.writeFile(this.indexPath, indexContent)
+    }
     this.cache = { entries, invertedIndex, volumes }
   }
 
@@ -129,50 +141,6 @@ export class RetrievalStore {
   async getEntry(chapterNumber: number): Promise<RetrievalEntry | null> {
     const entries = await this.getAllEntries()
     return entries.find((e) => e.chapterNumber === chapterNumber) || null
-  }
-
-  async updateChapterEntry(
-    chapterNumber: number,
-    snapshot: ChapterSnapshot,
-    options: { filePath?: string; sourceHash?: string } = {}
-  ): Promise<void> {
-    const volumeName = this.chapterToVolumeName(chapterNumber)
-    const volumePath = this.getVolumePath(volumeName)
-
-    let entries: RetrievalEntry[] = []
-    const exists = await this.fs.fileExists(volumePath)
-
-    if (exists) {
-      const content = await this.fs.readFile(volumePath)
-      entries = parseVolumeEntries(content)
-    } else {
-      await this.fs.createDirectory(this.retrievalDir)
-    }
-
-    const existingIndex = entries.findIndex((e) => e.chapterNumber === chapterNumber)
-
-    if (existingIndex >= 0) {
-      entries[existingIndex] = updateEntryFromSnapshot(entries[existingIndex], snapshot, {
-        sourceHash: options.sourceHash,
-      })
-      if (options.filePath) {
-        entries[existingIndex].filePath = options.filePath
-      }
-      entries[existingIndex].volumeName = volumeName
-    } else {
-      const newEntry = projectSnapshotToEntry(snapshot, {
-        filePath: options.filePath || `wiki/chapters/chapter-${String(chapterNumber).padStart(3, "0")}.md`,
-        volumeName,
-        sourceHash: options.sourceHash,
-      })
-      entries.push(newEntry)
-    }
-
-    const content = serializeVolumeEntries(entries, volumeName)
-    await this.fs.writeFile(volumePath, content)
-
-    this.invalidateCache()
-    await this.updateMainIndexIfNeeded()
   }
 
   async validateEntry(chapterNumber: number, currentHash: string): Promise<{
@@ -230,10 +198,10 @@ export class RetrievalStore {
     if (entries.length === 0) return []
 
     const maxChapter = Math.max(...entries.map((e) => e.chapterNumber))
-    const volumeCount = Math.ceil(maxChapter / this.chaptersPerVolume)
+    const occupied = new Set(entries.map((entry) => Math.ceil(entry.chapterNumber / this.chaptersPerVolume)))
     const volumes: VolumeIndex[] = []
 
-    for (let i = 1; i <= volumeCount; i++) {
+    for (const i of [...occupied].sort((a, b) => a - b)) {
       const start = (i - 1) * this.chaptersPerVolume + 1
       const end = Math.min(i * this.chaptersPerVolume, maxChapter)
       volumes.push({
@@ -248,35 +216,25 @@ export class RetrievalStore {
   }
 
   private buildInvertedIndex(entries: RetrievalEntry[]): InvertedIndex {
-    const foreshadowing: Record<string, number[]> = {}
-    const characters: Record<string, number[]> = {}
-    const timeline: Record<string, number[]> = {}
+    const foreshadowing: Record<string, number[]> = Object.create(null)
+    const characters: Record<string, number[]> = Object.create(null)
+    const timeline: Record<string, number[]> = Object.create(null)
 
     for (const entry of entries) {
-      const foreshadowingMatches = entry.foreshadowingChanges.match(/[新埋伏笔|回收伏笔]([^；,，。]+)/g)
-      if (foreshadowingMatches) {
-        for (const match of foreshadowingMatches) {
-          const name = match.replace(/^(新埋伏笔|回收伏笔)/, "").trim()
-          if (name) {
-            if (!foreshadowing[name]) foreshadowing[name] = []
-            if (!foreshadowing[name].includes(entry.chapterNumber)) {
-              foreshadowing[name].push(entry.chapterNumber)
-            }
-          }
-        }
+      for (const change of entry.foreshadowingChanges.split("；")) {
+        if (!change || change === "无") continue
+        const parsed = parseForeshadowingChange(change)
+        if (!parsed) continue
+        const refs = foreshadowing[parsed.name] ??= []
+        if (!refs.includes(entry.chapterNumber)) refs.push(entry.chapterNumber)
       }
 
-      const characterMatches = entry.characterStates.match(/([^；,，。\s]+?)[（(]/g)
-      if (characterMatches) {
-        for (const match of characterMatches) {
-          const name = match.replace(/[（(].*$/, "").trim()
-          if (name && name.length >= 2) {
-            if (!characters[name]) characters[name] = []
-            if (!characters[name].includes(entry.chapterNumber)) {
-              characters[name].push(entry.chapterNumber)
-            }
-          }
-        }
+      for (const change of entry.characterStates.split("；")) {
+        const match = change.match(/^([^：:（(]+)[：:（(]/u)
+        const name = match?.[1]?.trim()
+        if (!name) continue
+        const refs = characters[name] ??= []
+        if (!refs.includes(entry.chapterNumber)) refs.push(entry.chapterNumber)
       }
 
       const timelineMatches = entry.timelineEvents.match(/([^；,，。]+?)[-—]/g)
@@ -302,7 +260,7 @@ export class RetrievalStore {
     lines.push("")
     lines.push("## 分卷目录")
     for (const v of volumes) {
-      lines.push(`- ${v.name}：retrieval/${v.fileName}（第${v.chapterStart}-${v.chapterEnd}章）`)
+      lines.push(`- ${v.name}：.qmai/retrieval/${v.fileName}（第${v.chapterStart}-${v.chapterEnd}章）`)
     }
     lines.push("")
     lines.push("## 伏笔倒排索引")
@@ -346,7 +304,7 @@ export class RetrievalStore {
         break
       }
       if (inVolumeSection && line.startsWith("- ")) {
-        const match = line.match(/- (第\d+卷)：retrieval\/([^（]+)（第(\d+)-(\d+)章）/)
+        const match = line.match(/- (第\d+卷)：\.qmai\/retrieval\/([^（]+)（第(\d+)-(\d+)章）/)
         if (match) {
           volumes.push({
             name: match[1],
@@ -359,21 +317,6 @@ export class RetrievalStore {
     }
 
     return volumes
-  }
-
-  private async updateMainIndexIfNeeded(): Promise<void> {
-    const exists = await this.fs.fileExists(this.indexPath)
-    if (!exists) return
-
-    const allEntries = await this.loadAllEntriesFromDisk()
-    const volumes = this.calculateVolumes(allEntries)
-    const invertedIndex = this.buildInvertedIndex(allEntries)
-    const content = this.serializeMainIndex(volumes, invertedIndex)
-    await this.fs.writeFile(this.indexPath, content)
-
-    this.cache.volumes = volumes
-    this.cache.invertedIndex = invertedIndex
-    this.cache.entries = allEntries
   }
 
   private async loadAllEntriesFromDisk(): Promise<RetrievalEntry[]> {

@@ -1,6 +1,6 @@
 {
   "bundle": {
-    "resources": ["../skills"],
+    "resources": ["../skills", "migration/runtime"],
     "windows": {
       "webviewInstallMode": {
         "type": "skip"

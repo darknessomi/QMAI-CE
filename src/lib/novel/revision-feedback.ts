@@ -34,7 +34,7 @@ interface PersistedRevisionFeedbackByChapter {
   chapters: Record<string, ChapterRevisionFeedbackBuckets>
 }
 
-const REVISION_FEEDBACK_DIRNAME = ".novel"
+const REVISION_FEEDBACK_DIRNAME = ".qmai/novel"
 const REVISION_FEEDBACK_FILENAME = "revision-feedback.json"
 
 let currentRevisionFeedback: NovelRevisionFeedback = createEmptyRevisionFeedback()

@@ -761,6 +761,16 @@ async fn credential_delete(State(state): State<HostApiState>, headers: HeaderMap
     }
 }
 
+async fn migration_barrier(request: axum::extract::Request, next: axum::middleware::Next) -> Response {
+    if crate::migration_gate::locked() {
+        return (StatusCode::SERVICE_UNAVAILABLE, "小说项目正在迁移，请稍后重试。").into_response();
+    }
+    match crate::migration_gate::enter_io() {
+        Ok(_lease) => next.run(request).await,
+        Err(error) => (StatusCode::SERVICE_UNAVAILABLE, error).into_response(),
+    }
+}
+
 pub fn router(state: HostApiState) -> Router {
     Router::new()
         .route("/host/status", get(status))
@@ -776,6 +786,7 @@ pub fn router(state: HostApiState) -> Router {
         .route("/host/credential", get(credential_get))
         .route("/host/credential", post(credential_put))
         .route("/host/credential", axum::routing::delete(credential_delete))
+        .layer(axum::middleware::from_fn(migration_barrier))
         .with_state(state)
 }
 
@@ -1557,16 +1568,16 @@ mod tests {
     // 项目读写地基（设计 §7）：info / field / chapter-note
     // ------------------------------------------------------------------
 
-    /// 造一个最小项目结构：`QM/chapters/` 下两章 + 一份 `.novel/project-meta.json`。
+    /// 造一个最小项目结构：`QM/chapters/` 下两章 + 一份 `.qmai/novel/project-meta.json`。
     fn make_project(tag: &str) -> PathBuf {
         let root = temp_dir(tag);
         let chapters = root.join("QM").join("chapters");
         std::fs::create_dir_all(&chapters).expect("建章节目录");
         std::fs::write(chapters.join("第1章 开局.md"), "正文一").expect("写第一章");
         std::fs::write(chapters.join("第2章 转折.md"), "正文二").expect("写第二章");
-        std::fs::create_dir_all(root.join(".novel")).expect("建 .novel");
+        std::fs::create_dir_all(root.join(".qmai/novel")).expect("建 .qmai/novel");
         std::fs::write(
-            root.join(".novel/project-meta.json"),
+            root.join(".qmai/novel/project-meta.json"),
             r#"{"title":"长夜将至","description":"一句话简介"}"#,
         )
         .expect("写项目元数据");
@@ -1716,7 +1727,7 @@ mod tests {
     async fn known_field_reports_write_unsupported_without_touching_files() {
         let root = make_project("field-unsupported");
         let meta_before =
-            std::fs::read_to_string(root.join(".novel/project-meta.json")).expect("读元数据");
+            std::fs::read_to_string(root.join(".qmai/novel/project-meta.json")).expect("读元数据");
         let state = state_with("tok", session(None, &["fs:project-write"]));
         state.project.set(Some(root.clone()));
         let base = spawn_test_api(state).await;
@@ -1734,7 +1745,7 @@ mod tests {
 
         // 关键断言：一个字节都没动过（宁可明确不支持，也不写坏用户的文件）
         assert_eq!(
-            std::fs::read_to_string(root.join(".novel/project-meta.json")).expect("读元数据"),
+            std::fs::read_to_string(root.join(".qmai/novel/project-meta.json")).expect("读元数据"),
             meta_before
         );
         let _ = std::fs::remove_dir_all(&root);

@@ -251,7 +251,7 @@ export function OutlineWizardDialog({
                       onChange={event => updateRequest({ fanficReuseCanon: event.target.checked }, ["fanficReuseCanon"])}
                     />
                     <span className="ui-test-wizard-fanfic-hint">
-                      项目里已有 .novel/fanfic-canon.md。勾选后直接复用它，无需重新粘贴素材，
+                      项目里已有 .qmai/novel/fanfic-canon.md。勾选后直接复用它，无需重新粘贴素材，
                       也不会重复编译。
                     </span>
                   </label>

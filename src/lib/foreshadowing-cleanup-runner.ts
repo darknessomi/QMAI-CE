@@ -193,17 +193,14 @@ async function backupFiles(
   const backupDir = `${pp}/.qmai/page-history/foreshadowing-${stamp}`
   await createDirectory(backupDir)
 
-  const trackerPath = `${pp}/.novel/foreshadowing-tracker.json`
+  const trackerPath = `${pp}/.qmai/novel/foreshadowing-tracker.json`
   if (await fileExists(trackerPath)) {
     const content = await readFile(trackerPath)
     await writeFile(`${backupDir}/foreshadowing-tracker.json`, content)
   }
 
   for (const rel of [
-    "wiki/tracking/伏笔.md",
-    "QM/tracking/伏笔.md",
     "wiki/memory/foreshadowing-tracker.md",
-    "QM/memory/foreshadowing-tracker.md",
   ]) {
     const abs = `${pp}/${rel}`
     try {
@@ -313,7 +310,7 @@ export async function listInvalidSnapshots(
   }
 
   const results: InvalidSnapshotInfo[] = []
-  for (const node of walkFiles(tree, ".novel/snapshots")) {
+  for (const node of walkFiles(tree, ".qmai/novel/snapshots")) {
     if (!node.name.endsWith(".snapshot.json")) continue
     try {
       const raw = await readFile(node.path)

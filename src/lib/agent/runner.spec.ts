@@ -1848,8 +1848,8 @@ describe("AgentRunner", () => {
     expect(callbacks.onError).not.toHaveBeenCalled()
   })
 
-  describe("Stage F 断点保存与清理", () => {
-    it("config.projectPath 存在时创建并保存断点", async () => {
+  describe("已退役的项目断点", () => {
+    it("运行项目工具时不创建或写入断点", async () => {
       const tool: Tool = {
         name: "read_chapter",
         description: "read",
@@ -1889,14 +1889,12 @@ describe("AgentRunner", () => {
         onError: vi.fn(),
       })
 
-      expect(breakpointMocks.createTaskBreakpoint).toHaveBeenCalledWith(
-        expect.objectContaining({ taskGoal: "写第一章", currentStage: "agent_round_1" })
-      )
-      expect(breakpointMocks.saveTaskBreakpoint).toHaveBeenCalledWith("/test", expect.any(Object))
-      expect(breakpointMocks.updateBreakpointStage).toHaveBeenCalled()
+      expect(breakpointMocks.createTaskBreakpoint).not.toHaveBeenCalled()
+      expect(breakpointMocks.saveTaskBreakpoint).not.toHaveBeenCalled()
+      expect(breakpointMocks.updateBreakpointStage).not.toHaveBeenCalled()
     })
 
-    it("成功完成时清理断点", async () => {
+    it("任务完成后不写入空断点", async () => {
       mockStreamChat.mockImplementation(async (_config: unknown, _msgs: unknown[], cb: StreamCallbacks) => {
         cb.onToken("完成")
         cb.onDone()
@@ -1919,10 +1917,10 @@ describe("AgentRunner", () => {
         onError: vi.fn(),
       })
 
-      expect(breakpointMocks.clearTaskBreakpoint).toHaveBeenCalledWith("/test")
+      expect(breakpointMocks.clearTaskBreakpoint).not.toHaveBeenCalled()
     })
 
-    it("失败时保留断点", async () => {
+    it("失败时也不写断点", async () => {
       mockStreamChat.mockRejectedValueOnce(new Error("模型失败"))
 
       const config: AgentConfig = {
@@ -1942,7 +1940,7 @@ describe("AgentRunner", () => {
         onError: vi.fn(),
       })
 
-      expect(breakpointMocks.saveTaskBreakpoint).toHaveBeenCalled()
+      expect(breakpointMocks.saveTaskBreakpoint).not.toHaveBeenCalled()
       expect(breakpointMocks.clearTaskBreakpoint).not.toHaveBeenCalled()
     })
   })

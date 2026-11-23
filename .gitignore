@@ -113,3 +113,6 @@ typecheck-output.txt
 # Secret 放客户端之类的旧实现），上传会把过期代码混进公开仓库。
 .worktrees/
 .claude/
+# 迁移工作程序的构建产物
+/src-tauri/migration/runtime/*
+!/src-tauri/migration/runtime/run.mjs

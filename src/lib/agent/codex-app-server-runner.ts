@@ -26,13 +26,6 @@ import {
 import { withWritingWakeLock } from "../writing-wake-lock"
 import { ToolEvidenceLedger } from "./tool-evidence-ledger"
 import { DEFAULT_TOOL_RESULT_CONTEXT_LIMIT } from "./tool-result"
-import {
-  clearTaskBreakpoint,
-  createTaskBreakpoint,
-  saveTaskBreakpoint,
-  updateBreakpointStage,
-  type TaskBreakpoint,
-} from "./task-breakpoint"
 import type { AgentConfig, AgentMessage, AgentRunCallbacks, AgentRunRecord } from "./types"
 
 interface ThreadStartResponse {
@@ -155,7 +148,6 @@ export class CodexAppServerRunner {
     let terminalError: Error | null = null
     const emittedItems = new Set<string>()
     const agentMessagePhases = new Map<string, string | null>()
-    const projectPath = config.projectPath
     const latestUserContent = [...messages].reverse().find((message) => message.role === "user")?.content
     const taskGoalText = config.taskGoal || (latestUserContent ? messageContentText(latestUserContent) : "") || "未命名任务"
     const requiredTools = [...new Set((config.requiredToolsOnce ?? []).filter((name) => name.trim()))]
@@ -175,26 +167,6 @@ export class CodexAppServerRunner {
         observedToolCalls: [],
       }
     }
-    let taskBreakpoint: TaskBreakpoint | null = projectPath
-      ? createTaskBreakpoint({ taskGoal: taskGoalText, currentStage: "agent_round_1" })
-      : null
-    const persistTaskBreakpoint = async () => {
-      if (!projectPath || !taskBreakpoint) return
-      try {
-        await saveTaskBreakpoint(projectPath, taskBreakpoint)
-      } catch {
-        // 断点保存失败不应中断当前 AI 会话。
-      }
-    }
-    const clearPersistedBreakpoint = async () => {
-      if (!projectPath) return
-      try {
-        await clearTaskBreakpoint(projectPath)
-      } catch {
-        // 清理失败不改变本轮模型结果。
-      }
-    }
-
     const refreshRequiredToolDiagnostics = () => {
       const diagnostics = record.requiredToolDiagnostics
       if (!diagnostics) return
@@ -236,7 +208,6 @@ export class CodexAppServerRunner {
           diagnostics.fallbackError = fallback.error.message
         }
         refreshRequiredToolDiagnostics()
-        await clearPersistedBreakpoint()
         callbacks.onError(fallback.error)
         return "error"
       }
@@ -246,14 +217,12 @@ export class CodexAppServerRunner {
       if (fallback.finalContent) {
         finalDelivery = fallback.finalContent
         record.finalText = fallback.finalContent
-        await clearPersistedBreakpoint()
         callbacks.onDone()
         return "success"
       }
       return missingRequiredTools().length === 0 ? "success" : "unavailable"
     }
 
-    if (taskBreakpoint) await persistTaskBreakpoint()
 
     if (config.forceRequiredToolsImmediately && requiredTools.length > 0) {
       const outcome = await attemptRequiredToolFallback()
@@ -394,17 +363,6 @@ export class CodexAppServerRunner {
             satisfiedRequiredTools.add(request.tool)
             refreshRequiredToolDiagnostics()
           }
-          if (taskBreakpoint) {
-            const usedTools = taskBreakpoint.usedTools.includes(request.tool)
-              ? taskBreakpoint.usedTools
-              : [...taskBreakpoint.usedTools, request.tool]
-            taskBreakpoint = updateBreakpointStage(
-              { ...taskBreakpoint, usedTools },
-              `agent_round_${record.roundsUsed}`,
-              `tool:${request.tool}`,
-            )
-            await persistTaskBreakpoint()
-          }
           if (
             executed.record.status === "done" &&
             executed.finalContent?.trim() &&
@@ -514,7 +472,6 @@ export class CodexAppServerRunner {
           if (deliveredLastUsage) record.lastRequestUsage = { ...deliveredLastUsage }
           if (deliveredTotalUsage) record.usage = { ...deliveredTotalUsage }
           record.finalText = finalDelivery
-          await clearPersistedBreakpoint()
           callbacks.onDone()
           return record
         }
@@ -535,14 +492,12 @@ export class CodexAppServerRunner {
         if (missing.length === 0) {
           record.finalText = turnText
           if (turnText) callbacks.onText(turnText)
-          await clearPersistedBreakpoint()
           callbacks.onDone()
           return record
         }
         const fallbackOutcome = await attemptRequiredToolFallback()
         if (fallbackOutcome === "success" || fallbackOutcome === "error") return record
         if (round >= Math.max(1, config.maxRounds) - 1) {
-          await clearPersistedBreakpoint()
           throw new RequiredToolsNotCalledError(missing)
         }
         turnInput = [{

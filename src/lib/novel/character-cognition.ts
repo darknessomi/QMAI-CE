@@ -14,7 +14,7 @@ export interface CognitionState {
   lastUpdatedChapter: number
 }
 
-const COGNITION_DIR = ".novel"
+const COGNITION_DIR = ".qmai/novel"
 const COGNITION_FILENAME = "cognition-state.json"
 
 const NOT_KNOW_RE = /^(.+?)不知道(.+)$/

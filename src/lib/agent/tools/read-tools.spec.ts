@@ -241,16 +241,16 @@ describe("read tools", () => {
 
   it("read_outline falls back to outline snapshots only for a bare 大纲 request", async () => {
     vi.mocked(readFile).mockImplementation(async (path) => {
-      if (path === "/project/.novel/snapshots/outline-312.snapshot.md") return "# 大纲快照一"
-      if (path === "/project/.novel/snapshots/outline-765.snapshot.md") return "# 大纲快照二"
+      if (path === "/project/.qmai/novel/snapshots/outline-312.snapshot.md") return "# 大纲快照一"
+      if (path === "/project/.qmai/novel/snapshots/outline-765.snapshot.md") return "# 大纲快照二"
       throw new Error("missing")
     })
     vi.mocked(listDirectory).mockImplementation(async (path) => {
       if (path === "/project/wiki/outlines") return []
-      if (path === "/project/.novel/snapshots") {
+      if (path === "/project/.qmai/novel/snapshots") {
         return [
-          { name: "outline-312.snapshot.md", path: "/project/.novel/snapshots/outline-312.snapshot.md", is_dir: false },
-          { name: "outline-765.snapshot.md", path: "/project/.novel/snapshots/outline-765.snapshot.md", is_dir: false },
+          { name: "outline-312.snapshot.md", path: "/project/.qmai/novel/snapshots/outline-312.snapshot.md", is_dir: false },
+          { name: "outline-765.snapshot.md", path: "/project/.qmai/novel/snapshots/outline-765.snapshot.md", is_dir: false },
         ]
       }
       return []

@@ -37,7 +37,7 @@ pub struct ShelfBook {
     /// 最近打开时间（毫秒时间戳），用于排序。
     #[serde(default)]
     pub last_opened: i64,
-    /// 简介（`.novel/project-meta.json` 里的 `description`），没有则为空。
+    /// 简介（`.qmai/novel/project-meta.json` 里的 `description`），没有则为空。
     #[serde(default)]
     pub description: String,
     /// 章节数（只统计 `wiki/chapters/` 下的 markdown）。
@@ -115,7 +115,7 @@ pub fn enrich(book: &mut ShelfBook) {
 }
 
 fn read_description(root: &Path) -> String {
-    let meta = root.join(".novel").join("project-meta.json");
+    let meta = root.join(".qmai/novel").join("project-meta.json");
     let raw = match std::fs::read_to_string(meta) {
         Ok(text) => text,
         Err(_) => return String::new(),
@@ -292,10 +292,10 @@ mod tests {
     fn enrich_reads_description_and_counts_chapters() {
         let dir = temp_dir("enrich");
         let book = dir.join("book");
-        std::fs::create_dir_all(book.join(".novel")).unwrap();
+        std::fs::create_dir_all(book.join(".qmai/novel")).unwrap();
         std::fs::create_dir_all(book.join("wiki").join("chapters")).unwrap();
         std::fs::write(
-            book.join(".novel").join("project-meta.json"),
+            book.join(".qmai/novel").join("project-meta.json"),
             r#"{"description":"一本讲挖矿成神的书"}"#,
         )
         .unwrap();

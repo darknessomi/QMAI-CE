@@ -12,7 +12,7 @@ describe("getOutlineIngestIdentity", () => {
     const identity = getOutlineIngestIdentity("/proj", "/proj/wiki/outlines/vol-1-outline.md")
     expect(identity.outlineName).toBe("vol-1-outline")
     expect(identity.chapterNumber).toBeLessThan(0)
-    expect(identity.snapshotJsonPath).toMatch(/\.novel\/snapshots\/outline-\d{3}\.snapshot\.json$/)
+    expect(identity.snapshotJsonPath).toMatch(/\.qmai\/novel\/snapshots\/outline-\d{3}\.snapshot\.json$/)
   })
 
   it("returns the same identity for the same outline path", () => {
@@ -33,6 +33,6 @@ describe("outlineSnapshotExists", () => {
   it("checks the derived snapshot json path", async () => {
     vi.mocked(fileExists).mockResolvedValueOnce(true)
     await expect(outlineSnapshotExists("/proj", "/proj/wiki/outlines/plot.md")).resolves.toBe(true)
-    expect(fileExists).toHaveBeenCalledWith(expect.stringContaining("/proj/.novel/snapshots/outline-"))
+    expect(fileExists).toHaveBeenCalledWith(expect.stringContaining("/proj/.qmai/novel/snapshots/outline-"))
   })
 })

@@ -4,7 +4,7 @@
  * 同人写作与原创写作的根本差别：原作的**既成事实**是硬约束。
  * 本模块是同人正典的唯一真相来源：
  *
- * - 正典落盘到 `<project>/.novel/fanfic-canon.md`，**按固定路径读取**，
+ * - 正典落盘到 `<project>/.qmai/novel/fanfic-canon.md`，**按固定路径读取**，
  *   不经过 `searchWiki` 模糊检索——这是它与既有 `canonRules` 最本质的区别。
  * - 正典在落盘时编译成一份可追溯文档：超长原作靠**分片编译**压缩成证据包，
  *   而不是截断丢弃。
@@ -23,7 +23,7 @@ import { hasUsableLlm } from "@/lib/has-usable-llm"
 import { resolveNovelModel } from "@/lib/novel/model-resolver"
 
 /** 正典所在目录（与既有状态类资产同构）。 */
-const FANFIC_CANON_DIR = ".novel"
+const FANFIC_CANON_DIR = ".qmai/novel"
 /** 正典文件名。 */
 export const FANFIC_CANON_FILE = "fanfic-canon.md"
 

@@ -197,7 +197,7 @@ describe("同人创作支持", () => {
     })
 
     expect(section).toContain("### 原作正典")
-    expect(section).toContain(".novel/fanfic-canon.md")
+    expect(section).toContain(".qmai/novel/fanfic-canon.md")
     expect(section).toContain("由上下文包自动注入")
     // 没有原文时不得伪造素材段
     expect(section).not.toContain("### 原作素材（正典来源）")

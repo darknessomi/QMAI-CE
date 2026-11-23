@@ -6,7 +6,7 @@
  *   - `bookTitle` —— **真源是项目目录名**（`rename_project` 改的就是目录名），
  *     前端拿得到，所以是可用的；
  *   - `bookIntro` —— **没有单一存储**。设计上散在 wiki 页面与
- *     `.novel/project-meta.json`。这里只认后者（一次小文件读，成本可控），
+ *     `.qmai/novel/project-meta.json`。这里只认后者（一次小文件读，成本可控），
  *     并且读不到就 `undefined`；
  *   - `bookTags` / `protagonist` / `setting` —— **同样没有单一存储**，一律 `undefined`。
  *
@@ -36,7 +36,7 @@ export interface HostChapterContext {
 /**
  * 当前项目信息（没有打开项目 → `null`）。
  *
- * 读 `.novel/project-meta.json` 只为 `description`（简介）一个字段：那是一次
+ * 读 `.qmai/novel/project-meta.json` 只为 `description`（简介）一个字段：那是一次
  * 几十字节的文件读；失败（文件不存在/格式坏了）按"没有简介"处理，不影响别的字段。
  */
 export async function readProjectContext(): Promise<HostProjectContext | null> {
@@ -53,7 +53,7 @@ export async function readProjectContext(): Promise<HostProjectContext | null> {
     if (description !== "") context.bookIntro = description
   } catch (cause) {
     // 元数据读不到不该让生成失败：作者要的是"这次没有简介"，不是"插件报错"。
-    console.warn("[plugins] 读取 .novel/project-meta.json 失败，简介按空值处理：", cause)
+    console.warn("[plugins] 读取 .qmai/novel/project-meta.json 失败，简介按空值处理：", cause)
   }
 
   return context

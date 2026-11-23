@@ -39,7 +39,7 @@ import { getOutlineIngestIdentity } from "@/lib/novel/outline-ingest-utils"
 const PROJECT = "E:/QMAI-DOT-PERSIST"
 const CHAPTERS_DIR = `${PROJECT}/wiki/chapters`
 const OUTLINES_DIR = `${PROJECT}/wiki/outlines`
-const SNAPSHOTS_DIR = `${PROJECT}/.novel/snapshots`
+const SNAPSHOTS_DIR = `${PROJECT}/.qmai/novel/snapshots`
 
 const CHAPTER_FILES = [
   { name: "第2章-雨夜.md", path: `${CHAPTERS_DIR}/第2章-雨夜.md`, is_dir: false },

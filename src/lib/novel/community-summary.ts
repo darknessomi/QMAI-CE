@@ -136,7 +136,7 @@ async function generateCommunitySummariesUnlocked(
     nodesByCommunity.set(node.community, bucket)
   }
 
-  const summaryDir = `${pp}/.novel/community-summaries`
+  const summaryDir = `${pp}/.qmai/novel/community-summaries`
   await createDirectory(summaryDir)
   const existing = await loadExistingByFingerprint(summaryDir)
   const cleanup = await cleanupFingerprint(pp)
@@ -313,7 +313,7 @@ export async function searchCommunitySummaries(
       const id = result.id.slice("community:".length)
       if (!/^[a-zA-Z0-9_-]+$/.test(id)) return null
       try {
-        const record = parseStoredRecord(JSON.parse(await readFile(`${pp}/.novel/community-summaries/${id}.json`)))
+        const record = parseStoredRecord(JSON.parse(await readFile(`${pp}/.qmai/novel/community-summaries/${id}.json`)))
         return record?.memoryCleanupFingerprint === cleanup.value ? result : null
       } catch { return null }
     }))).filter((r): r is typeof communityResults[number] => r !== null) : communityResults

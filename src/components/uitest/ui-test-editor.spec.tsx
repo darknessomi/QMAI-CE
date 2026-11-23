@@ -40,7 +40,7 @@ const fixture = vi.hoisted(() => ({
   files: new Map<string, string>(),
   write: vi.fn(),
   /*
-   * 磁盘上已有的章节记忆快照号（`.novel/snapshots/NNN.snapshot.json`）。
+   * 磁盘上已有的章节记忆快照号（`.qmai/novel/snapshots/NNN.snapshot.json`）。
    *
    * 默认空 = 一章都没提取过记忆 —— 所以默认情况下每一章的徽章都是「草稿」，
    * 这与改造前的 fixture 行为不同（那时徽章读文件里的 chapter_status）。
@@ -94,12 +94,12 @@ vi.mock("@/commands/fs", async (importOriginal) => ({
   /*
    * ⚠️ 这里必须**按路径**回答，不能一律返回 []。
    *
-   * 标题行徽章与侧栏绿点现在都问「`.novel/snapshots/` 里有没有这一章的快照」，
+   * 标题行徽章与侧栏绿点现在都问「`.qmai/novel/snapshots/` 里有没有这一章的快照」，
    * 所以在测试里造出"提取过记忆的章节"只能靠这个 mock。
    * 其它目录照旧返回 []，既有用例的行为一个字都没变。
    */
   listDirectory: vi.fn(async (path: string) => (
-    path.replace(/\\/g, "/").endsWith("/.novel/snapshots")
+    path.replace(/\\/g, "/").endsWith("/.qmai/novel/snapshots")
       ? fixture.snapshotChapters.map((number) => ({
         name: `${String(number).padStart(3, "0")}.snapshot.json`,
         path: `${path}/${String(number).padStart(3, "0")}.snapshot.json`,

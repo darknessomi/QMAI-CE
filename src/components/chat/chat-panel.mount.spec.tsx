@@ -2,7 +2,6 @@
 import { act } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { agentConfigArgs, renderChatPanel } from "@/test/chat-panel-mount"
-import { clearTaskBreakpoint, loadTaskBreakpoint } from "@/lib/agent/task-breakpoint"
 import type { Conversation } from "@/stores/chat-store"
 import { useChatStore } from "@/stores/chat-store"
 import { chatConversationRunRegistry } from "@/lib/conversation-run-registry"
@@ -143,16 +142,9 @@ describe("ChatPanel mount 基础设施", () => {
   })
 
   it("存在旧断点时不再自动弹出继续未完成任务对话框", async () => {
-    const loadMock = vi.mocked(loadTaskBreakpoint)
-    const clearMock = vi.mocked(clearTaskBreakpoint)
-    loadMock.mockClear()
-    clearMock.mockClear()
-
     const view = await renderChatPanel({ taskBreakpoint: breakpoint })
     await flushEffects()
 
-    expect(loadMock).not.toHaveBeenCalled()
-    expect(clearMock).not.toHaveBeenCalled()
     expect(view.container.textContent).not.toContain("继续未完成任务")
     expect(view.container.textContent).not.toContain("确认后将继续执行断点任务")
     expect(view.container.textContent).not.toContain("恢复提示词")

@@ -116,11 +116,7 @@ describe("chapter ingest reextract path", () => {
 
   it("rebuilds derived memory on reextract instead of applying incremental changes twice", () => {
     expect(source).toContain("const isReingest = existingSnapshot != null")
-    expect(source).toContain("REINGEST_SYNC_OPTIONS")
-    expect(source).toContain("skipDerivedIncremental: true")
-    expect(source).toContain("if (isReingest)")
-    expect(source).toContain("await finalizeProjectMemoryRebuild(pp)")
-    expect(source).toContain("await rebuildTimelineFromSnapshots(projectPath, snapshots)")
+    expect(source).toContain("await rebuildDerivedMemoryFromSnapshots(pp, syncedSnapshot")
     expect(source).toContain("if (!isReingest && shouldRebuildCommunitySummaries")
   })
 

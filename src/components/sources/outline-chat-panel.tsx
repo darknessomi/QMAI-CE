@@ -5662,7 +5662,7 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
       }
       // 同人创作先把原作素材编译成持久正典：超长原作会被分片压缩成证据包，
       // 而不是把几十万字原样塞进提示词。编译后的正典同时落盘到
-      // .novel/fanfic-canon.md，供后续正文生成的上下文包按固定路径读取。
+      // .qmai/novel/fanfic-canon.md，供后续正文生成的上下文包按固定路径读取。
       if (isFanficRequest(request)) {
         const fanficProjectPath = project?.path ? normalizePath(project.path) : "";
         const material = (request.fanficSourceMaterial ?? "").trim();
@@ -5716,8 +5716,8 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
             };
             toast.success(
               compiled.compiled
-                ? `原作正典已编译（${compiled.chunkCount} 个片段）并保存到 .novel/fanfic-canon.md`
-                : "原作正典已编译并保存到 .novel/fanfic-canon.md",
+                ? `原作正典已编译（${compiled.chunkCount} 个片段）并保存到 .qmai/novel/fanfic-canon.md`
+                : "原作正典已编译并保存到 .qmai/novel/fanfic-canon.md",
               { dedupeKey: "outline-fanfic-canon-compile:done" },
             );
           } catch (error) {

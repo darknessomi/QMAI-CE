@@ -1,3 +1,6 @@
+import { normalizeChapterSnapshot, buildSourceHash } from "./snapshot-format"
+import { finishMemoryRefresh, markMemoryRefreshPending } from "./memory-refresh-status"
+export { buildSourceHash } from "./snapshot-format"
 import { readFile, writeFileAtomic, listDirectory, fileExists, createDirectory, deleteFile } from "@/commands/fs"
 import { normalizePath } from "@/lib/path-utils"
 import { chapterSnapshotNumbersFromFileNames } from "./chapter-memory-dot"
@@ -11,30 +14,14 @@ import { getOutputLanguage, buildLanguageReminder } from "@/lib/output-language"
 import type { LlmConfig } from "@/stores/wiki-store"
 import { canonicalizeSnapshotCharacters, writeSnapshotToWiki, writePatchFieldsToWiki } from "./graph-adapter"
 import { resolveNovelModel } from "./model-resolver"
-import { emptyCognitionState, mergeCognitionFromSnapshot, loadCognitionState, saveCognitionState } from "./character-cognition"
-import { createEmptyCharacterStateStore, loadCharacterStates, saveCharacterStates, type CharacterStateStore } from "./character-state"
-import { updateTrackingAfterChapter } from "./tracking-updater"
-import {
-  createEmptyForeshadowingStore,
-  generateForeshadowingId,
-  loadForeshadowingTracker,
-  retractForeshadowingChapter,
-  saveForeshadowingTracker,
-  type Foreshadowing,
-  type ForeshadowingStore,
-} from "./foreshadowing-tracker"
-import {
-  findForeshadowingByNormalizedName,
-  parseForeshadowingChange,
-} from "./foreshadowing-normalize"
+import { listChapterSources, refreshProjectMemory, type ChapterSource } from "./refresh-memory"
+export { createRetrievalStore } from "./refresh-memory"
 import { hasUsableLlm } from "@/lib/has-usable-llm"
 import { shouldRebuildCommunitySummaries, generateCommunitySummaries } from "./community-summary"
 import { learnPersonaSkillsFromChapter } from "./persona-skill-learning"
 import { buildChapterIngestOutput, type ChapterIngestOutput } from "./chapter-ingest-output"
-import { mergeSnapshotTimeline, rebuildTimelineFromSnapshots, removeTimelineChapter } from "./timeline"
-import { buildStructuredMemoryDocuments, isValidMemorySnapshot } from "./memory-rebuild"
+import { isValidMemorySnapshot } from "./memory-rebuild"
 import { clearGraphCache } from "@/lib/graph-relevance"
-import { RetrievalStore } from "./retrieval"
 import { computeOutlineIngestBodyBudget } from "@/lib/context-budget"
 import { parseLlmJsonObject } from "./book-analysis/llm-json"
 import {
@@ -47,9 +34,9 @@ import {
   buildMemoryCleanupExclusions,
 } from "./chapter-ingest-extract"
 import { appendChapterIngestLog, previewLlmOutput } from "./chapter-ingest-log"
-import { normalizeItemCategoryRecord, ITEM_CATEGORY_LABELS, type ItemCategory } from "./item-category"
+import { ITEM_CATEGORY_LABELS, type ItemCategory } from "./item-category"
 import { buildEstablishedContextForExtraction } from "./extract-established-context"
-import { filterRemovedMemories, loadMemoryCleanupPolicy, withMemoryWriteLock, MEMORY_FIELDS, type MemoryField, type MemoryRemoval } from "./memory-cleanup-policy"
+import { filterRemovedMemories, loadMemoryCleanupPolicy, withMemoryWriteLock, type MemoryField, type MemoryRemoval } from "./memory-cleanup-policy"
 
 export interface ValidationWarning {
   type: "entity_new" | "canon_conflict"
@@ -96,6 +83,7 @@ export interface EventDetail {
 export interface ChapterSnapshot {
   chapterId: string
   chapterNumber: number
+  sourceHash?: string
   chapterTitle?: string
   summary: string
   characters: string[]
@@ -135,112 +123,6 @@ export interface ChapterSnapshot {
    */
   itemCategories?: Record<string, ItemCategory>
   eventDetails?: Record<string, EventDetail>
-}
-
-function normalizeSnapshotText(value: unknown): string {
-  if (typeof value === "string") return value
-  if (typeof value === "number" || typeof value === "boolean") return String(value)
-  return ""
-}
-
-function normalizePositiveInteger(value: unknown): number | undefined {
-  const parsed = parseChapterNumber(value)
-  if (typeof parsed !== "number" || !Number.isFinite(parsed) || parsed <= 0) return undefined
-  return parsed
-}
-
-function normalizeSnapshotList(value: unknown): string[] {
-  if (Array.isArray(value)) {
-    return value
-      .map((item) => normalizeSnapshotText(item).trim())
-      .filter(Boolean)
-  }
-
-  const single = normalizeSnapshotText(value).trim()
-  return single ? [single] : []
-}
-
-function normalizeSnapshotAliasRecord(value: unknown): Record<string, string[]> | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
-
-  const aliases = Object.fromEntries(
-    Object.entries(value as Record<string, unknown>)
-      .map(([name, rawAliases]) => [name.trim(), normalizeSnapshotList(rawAliases)] as const)
-      .filter(([name, names]) => name.length > 0 && names.length > 0),
-  )
-
-  return Object.keys(aliases).length > 0 ? aliases : undefined
-}
-
-function normalizeValidationWarnings(value: unknown): ValidationWarning[] | undefined {
-  if (!Array.isArray(value)) return undefined
-  const warnings = value.flatMap((item) => {
-    if (!item || typeof item !== "object" || Array.isArray(item)) return []
-    const rawType = (item as { type?: unknown }).type
-    const message = normalizeSnapshotText((item as { message?: unknown }).message).trim()
-    if (!message) return []
-    if (rawType === "entity_new" || rawType === "canon_conflict") {
-      return [{ type: rawType as ValidationWarning["type"], message }]
-    }
-    return []
-  })
-  return warnings.length > 0 ? warnings : undefined
-}
-
-function normalizeSnapshotDetailRecord<T extends object>(value: unknown): Record<string, T> | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
-  return value as Record<string, T>
-}
-
-function normalizeChapterSnapshot(
-  value: unknown,
-  fallback: Partial<Pick<ChapterSnapshot, "chapterId" | "chapterNumber">> = {},
-): ChapterSnapshot | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null
-
-  const raw = value as Record<string, unknown>
-  const chapterNumber = parseChapterNumber(raw.chapterNumber) ?? fallback.chapterNumber ?? 0
-  const normalizedChapterId = normalizeSnapshotText(raw.chapterId).trim()
-  const chapterId = normalizedChapterId || fallback.chapterId || `chapter-${chapterNumber}`
-
-  return {
-    chapterId,
-    chapterNumber,
-    chapterTitle: normalizeSnapshotText(raw.chapterTitle) || undefined,
-    summary: normalizeSnapshotText(raw.summary),
-    characters: normalizeSnapshotList(raw.characters),
-    characterAliases: normalizeSnapshotAliasRecord(raw.characterAliases),
-    locations: normalizeSnapshotList(raw.locations),
-    organizations: normalizeSnapshotList(raw.organizations),
-    items: normalizeSnapshotList(raw.items),
-    events: normalizeSnapshotList(raw.events),
-    characterStateChanges: normalizeSnapshotList(raw.characterStateChanges),
-    relationshipChanges: normalizeSnapshotList(raw.relationshipChanges),
-    knowledgeChanges: normalizeSnapshotList(raw.knowledgeChanges),
-    foreshadowingChanges: normalizeSnapshotList(raw.foreshadowingChanges),
-    newCanonFacts: normalizeSnapshotList(raw.newCanonFacts),
-    timelineEvents: normalizeSnapshotList(raw.timelineEvents),
-    conflicts: normalizeSnapshotList(raw.conflicts),
-    endingHook: normalizeSnapshotText(raw.endingHook),
-    graphNodes: normalizeSnapshotList(raw.graphNodes),
-    graphEdges: normalizeSnapshotList(raw.graphEdges),
-    sourceType: raw.sourceType === "chapter" || raw.sourceType === "outline" ? raw.sourceType : undefined,
-    sourceSequence: normalizePositiveInteger(raw.sourceSequence),
-    revision: normalizePositiveInteger(raw.revision),
-    snapshotId: normalizeSnapshotText(raw.snapshotId) || undefined,
-    supersedes: normalizeSnapshotText(raw.supersedes) || undefined,
-    isHistorical: typeof raw.isHistorical === "boolean" ? raw.isHistorical : undefined,
-    validationWarnings: normalizeValidationWarnings(raw.validationWarnings),
-    memorySyncedAt: normalizeSnapshotText(raw.memorySyncedAt) || undefined,
-    characterDetails: normalizeSnapshotDetailRecord<CharacterDetail>(raw.characterDetails),
-    locationDetails: normalizeSnapshotDetailRecord<LocationDetail>(raw.locationDetails),
-    organizationDetails: normalizeSnapshotDetailRecord<OrganizationDetail>(raw.organizationDetails),
-    itemDetails: normalizeSnapshotDetailRecord<ItemDetail>(raw.itemDetails),
-    // 用专门的归一化器而不是 normalizeSnapshotDetailRecord：分类是**闭集**，
-    // 模型偶尔会回「其他」「重要」这类词，直接落盘会在读取侧变成无意义的键。
-    itemCategories: normalizeItemCategoryRecord(raw.itemCategories),
-    eventDetails: normalizeSnapshotDetailRecord<EventDetail>(raw.eventDetails),
-  }
 }
 
 function inferSnapshotSourceType(snapshot: Pick<ChapterSnapshot, "chapterNumber">): "chapter" | "outline" {
@@ -439,10 +321,6 @@ export async function ingestChapter(
       snapshot.validationWarnings = []
     }
 
-    await saveChapterIngestOutput(pp, snapshot, {
-      title: typeof fm.title === "string" ? fm.title : undefined,
-    })
-
     const embedPromise = (async () => {
       const embCfg = useWikiStore.getState().embeddingConfig
       if (!embCfg.enabled || !embCfg.model) return
@@ -457,10 +335,13 @@ export async function ingestChapter(
       }
     })()
 
-    const syncResult = await syncSnapshotToMemoryUnlocked(pp, snapshot, isReingest ? REINGEST_SYNC_OPTIONS : undefined)
+    const syncResult = await syncSnapshotToMemoryUnlocked(pp, snapshot, {
+      source: { filePath: normalizePath(chapterPath).slice(pp.length + 1), sourceHash: buildSourceHash(content) },
+      title: typeof fm.title === "string" ? fm.title : undefined,
+    })
 
     try {
-      const patchPath = `${pp}/.novel/chapter-ingest-output/${String(snapshot.chapterNumber).padStart(3, "0")}.wiki-patch.json`
+      const patchPath = `${pp}/.qmai/novel/chapter-ingest-output/${String(snapshot.chapterNumber).padStart(3, "0")}.wiki-patch.json`
       const patchJson = await readFile(patchPath)
       const patch = JSON.parse(patchJson)
       const patchPaths = await writePatchFieldsToWiki(pp, patch)
@@ -499,10 +380,6 @@ export async function ingestChapter(
       signal,
     })
 
-    if (isReingest) {
-      await finalizeProjectMemoryRebuild(pp)
-    }
-
     await embedPromise
 
     // 重新提取只替换本章快照，不必顺带打一次社区摘要（那是另一次 LLM）。
@@ -527,34 +404,6 @@ export async function ingestChapter(
       }
     }
 
-    if (snapshot) {
-      try {
-        const retrievalStore = createRetrievalStore(pp)
-        const sourceHash = buildSourceHash(content)
-        const relativePath = normalizePath(chapterPath).startsWith(normalizePath(pp) + "/")
-          ? normalizePath(chapterPath).slice(normalizePath(pp).length + 1)
-          : chapterPath
-        await retrievalStore.updateChapterEntry(snapshot.chapterNumber, snapshot, {
-          filePath: relativePath,
-          sourceHash,
-        }).catch((err) => {
-          console.warn("[Chapter Ingest] Retrieval index update failed:", err)
-        })
-      } catch (err) {
-        console.warn("[Chapter Ingest] Retrieval index update failed:", err instanceof Error ? err.message : err)
-      }
-    }
-
-    // 章节写完后自动更新追踪文件
-    if (snapshot) {
-      try {
-        const chapterTitle = snapshot.chapterTitle || (typeof fm?.title === "string" ? fm.title : `第${chapterNumber}章`)
-        await updateTrackingAfterChapter(pp, chapterNumber, chapterTitle, body, snapshot.summary)
-      } catch (err) {
-        console.warn("[Chapter Ingest] 追踪文件更新失败:", err instanceof Error ? err.message : err)
-      }
-    }
-
     await appendChapterIngestLog(pp, {
       event: "ok",
       chapterNumber,
@@ -565,31 +414,6 @@ export async function ingestChapter(
     })
     return { snapshot: { ...snapshot, memorySyncedAt: syncResult.memorySyncedAt } }
   })
-}
-
-export function createRetrievalStore(projectPath: string): RetrievalStore {
-  const fsAdapter = {
-    readFile,
-    writeFile: writeFileAtomic,
-    fileExists,
-    listDirectory: async (path: string): Promise<string[]> => {
-      const nodes = await listDirectory(path)
-      return nodes.map((n: any) => n.name)
-    },
-    createDirectory,
-    joinPath: (...parts: string[]) => parts.join("/"),
-  }
-  return new RetrievalStore(projectPath, fsAdapter as any)
-}
-
-export function buildSourceHash(content: string): string {
-  let hash = 0
-  for (let i = 0; i < content.length; i++) {
-    const char = content.charCodeAt(i)
-    hash = ((hash << 5) - hash) + char
-    hash |= 0
-  }
-  return String(hash)
 }
 
 function normalizeOutlineIngestError(err: unknown): Error {
@@ -762,7 +586,7 @@ function snapshotFilePrefix(chapterNumber: number): string {
 }
 
 export function chapterSnapshotJsonPath(projectPath: string, chapterNumber: number): string {
-  return `${normalizePath(projectPath)}/.novel/snapshots/${snapshotFilePrefix(chapterNumber)}.snapshot.json`
+  return `${normalizePath(projectPath)}/.qmai/novel/snapshots/${snapshotFilePrefix(chapterNumber)}.snapshot.json`
 }
 
 function snapshotJsonPath(projectPath: string, chapterNumber: number): string {
@@ -770,15 +594,11 @@ function snapshotJsonPath(projectPath: string, chapterNumber: number): string {
 }
 
 function snapshotMarkdownPath(projectPath: string, chapterNumber: number): string {
-  return `${projectPath}/.novel/snapshots/${snapshotFilePrefix(chapterNumber)}.snapshot.md`
+  return `${projectPath}/.qmai/novel/snapshots/${snapshotFilePrefix(chapterNumber)}.snapshot.md`
 }
 
 function snapshotHistoryDir(projectPath: string, chapterNumber: number): string {
-  return `${projectPath}/.novel/snapshots/history/${snapshotFilePrefix(chapterNumber)}`
-}
-
-function snapshotHistoryFileName(): string {
-  return `${new Date().toISOString().replace(/:/g, "-")}.snapshot.json`
+  return `${projectPath}/.qmai/novel/snapshots/history/${snapshotFilePrefix(chapterNumber)}`
 }
 
 async function backupSnapshotBeforeOverwrite(projectPath: string, chapterNumber: number): Promise<void> {
@@ -794,7 +614,13 @@ async function backupSnapshotBeforeOverwrite(projectPath: string, chapterNumber:
     : currentRaw
   const historyDir = snapshotHistoryDir(projectPath, chapterNumber)
   await createDirectory(historyDir)
-  await writeFileAtomic(`${historyDir}/${snapshotHistoryFileName()}`, currentJson)
+  // 同一毫秒内连续编辑或恢复时也要保留每一份修订。调用方持有项目写锁。
+  let time = Date.now()
+  let path: string
+  do {
+    path = `${historyDir}/${new Date(time++).toISOString().replace(/:/g, "-")}.snapshot.json`
+  } while (await fileExists(path))
+  await writeFileAtomic(path, currentJson)
 }
 
 export async function listSnapshotHistory(projectPath: string, chapterNumber: number): Promise<SnapshotHistoryEntry[]> {
@@ -807,7 +633,7 @@ export async function listSnapshotHistory(projectPath: string, chapterNumber: nu
       .map(node => ({
         fileName: node.name,
         path: node.path,
-        createdAt: node.name.replace(/\.snapshot\.json$/, "").replace(/-(\d{2})-(\d{2})-(\d{2})\.(\d{3})Z$/, ":$1:$2.$3Z"),
+        createdAt: node.name.replace(/\.snapshot\.json$/, "").replace(/T(\d{2})-(\d{2})-(\d{2})/, "T$1:$2:$3"),
       }))
       .sort((a, b) => b.fileName.localeCompare(a.fileName))
   } catch {
@@ -834,89 +660,16 @@ export async function restoreSnapshotHistory(
     }
     const restoredCurrent = materializeRestoredCurrentSnapshot(snapshot, currentSnapshot)
     Object.assign(restoredCurrent, filterRemovedMemories(restoredCurrent, await loadMemoryCleanupPolicy(pp)))
-    await saveSnapshot(pp, restoredCurrent)
     const writtenEntityPaths = await writeSnapshotToWiki(pp, restoredCurrent)
     await cleanupSupersededEntityFiles(pp, restoredCurrent, writtenEntityPaths)
-    await rebuildDerivedMemoryFromSnapshots(pp, restoredCurrent)
+    await saveSnapshot(pp, restoredCurrent)
+    if (chapterNumber > 0) {
+      await rebuildDerivedMemoryFromSnapshots(pp, restoredCurrent)
+    }
     clearGraphCache()
     useWikiStore.getState().bumpDataVersion()
     return restoredCurrent
   })
-}
-
-async function listActualChapterNumbers(projectPath: string): Promise<number[]> {
-  const pp = normalizePath(projectPath)
-  const chaptersDir = `${pp}/wiki/chapters`
-  try {
-    const nodes = await listDirectory(chaptersDir)
-    const chapterNumbers = await Promise.all(
-      nodes
-        .filter((node) => !node.is_dir && node.name.endsWith(".md"))
-        .map(async (node) => {
-          try {
-            const parsed = parseFrontmatter(await readFile(node.path))
-            const frontmatter = parsed.frontmatter as Record<string, unknown> | null
-            if (!frontmatter || !isChapterPage(frontmatter)) {
-              return null
-            }
-            return parseChapterNumber(frontmatter.chapter_number)
-          } catch {
-            return null
-          }
-        }),
-    )
-    return chapterNumbers.filter((chapterNumber): chapterNumber is number => Number.isFinite(chapterNumber))
-  } catch {
-    return []
-  }
-}
-
-async function loadValidMemorySnapshots(
-  projectPath: string,
-  latestSnapshot?: ChapterSnapshot,
-): Promise<ChapterSnapshot[]> {
-  const pp = normalizePath(projectPath)
-  const actualChapterNumbers = await listActualChapterNumbers(pp)
-  const snapshotNumbers = await listSnapshots(pp)
-  const snapshotMap = new Map<number, ChapterSnapshot>()
-  const cleanupPolicy = await loadMemoryCleanupPolicy(pp)
-
-  const loadedSnapshots = await Promise.all(snapshotNumbers.map((chapterNumber) => loadSnapshot(pp, chapterNumber)))
-  for (const loadedSnapshot of loadedSnapshots) {
-    if (isValidMemorySnapshot(loadedSnapshot, actualChapterNumbers)) {
-      snapshotMap.set(loadedSnapshot.chapterNumber, filterRemovedMemories(loadedSnapshot, cleanupPolicy))
-    }
-  }
-
-  if (isValidMemorySnapshot(latestSnapshot ?? null, actualChapterNumbers)) {
-    snapshotMap.set(latestSnapshot!.chapterNumber, filterRemovedMemories(latestSnapshot!, cleanupPolicy))
-  }
-
-  return [...snapshotMap.values()].sort((a, b) => a.chapterNumber - b.chapterNumber)
-}
-
-export async function exportStructuredMemoryToWiki(projectPath: string, snapshot: ChapterSnapshot): Promise<string[]> {
-  const pp = normalizePath(projectPath)
-  const snapshots = await loadValidMemorySnapshots(pp, snapshot)
-  if (snapshots.length === 0) {
-    return []
-  }
-  return writeStructuredMemoryDocuments(pp, snapshots)
-}
-
-async function writeStructuredMemoryDocuments(projectPath: string, snapshots: ChapterSnapshot[]): Promise<string[]> {
-  const pp = normalizePath(projectPath)
-  const memoryDir = `${pp}/wiki/memory`
-  const memoryDocuments = buildStructuredMemoryDocuments(snapshots)
-
-  await createDirectory(memoryDir)
-  const writtenPaths: string[] = []
-  for (const [fileName, content] of Object.entries(memoryDocuments)) {
-    const filePath = `${memoryDir}/${fileName}`
-    await writeFileAtomic(filePath, content)
-    writtenPaths.push(filePath)
-  }
-  return writtenPaths
 }
 
 interface SyncSnapshotToMemoryResult {
@@ -926,16 +679,9 @@ interface SyncSnapshotToMemoryResult {
 }
 
 interface SyncSnapshotToMemoryOptions {
-  deferStructuredMemoryExport?: boolean
   deferDerivedRebuild?: boolean
-  /** 跳过认知/人物/伏笔的增量合并。重新提取时应随后全量重建派生记忆。 */
-  skipDerivedIncremental?: boolean
-}
-
-const REINGEST_SYNC_OPTIONS: SyncSnapshotToMemoryOptions = {
-  skipDerivedIncremental: true,
-  deferStructuredMemoryExport: true,
-  deferDerivedRebuild: true,
+  source?: ChapterSource
+  title?: string
 }
 
 export async function syncSnapshotToMemory(
@@ -953,12 +699,12 @@ async function syncSnapshotToMemoryUnlocked(
 ): Promise<SyncSnapshotToMemoryResult> {
   const pp = normalizePath(projectPath)
   const filtered = filterRemovedMemories(snapshot, await loadMemoryCleanupPolicy(pp))
-  const hadSuppressedFacts = MEMORY_FIELDS.some((field) => snapshot[field].length !== filtered[field].length)
   Object.assign(snapshot, filtered)
   const currentSnapshot = await readCurrentSnapshot(pp, snapshot.chapterNumber)
   const memorySyncedAt = new Date().toISOString()
   const normalizedSnapshot = normalizeChapterSnapshot(
-    { ...snapshot, memorySyncedAt },
+    { ...snapshot, chapterTitle: options?.title || snapshot.chapterTitle,
+      sourceHash: options?.source?.sourceHash ?? snapshot.sourceHash, memorySyncedAt },
     { chapterId: snapshot.chapterId, chapterNumber: snapshot.chapterNumber },
   )
   if (!normalizedSnapshot) {
@@ -1002,26 +748,11 @@ async function syncSnapshotToMemoryUnlocked(
     } catch { /* skip errors */ }
   }
 
-  if (!options?.skipDerivedIncremental && syncedSnapshot.knowledgeChanges.length > 0) {
-    const existing = await loadCognitionState(pp) ?? emptyCognitionState()
-    const updated = mergeCognitionFromSnapshot(existing, syncedSnapshot)
-    await saveCognitionState(pp, updated)
-  }
-
-  if (!options?.skipDerivedIncremental && syncedSnapshot.characterStateChanges.length > 0) {
-    await syncCharacterStateChanges(pp, syncedSnapshot)
-  }
-
-  if (!options?.skipDerivedIncremental && syncedSnapshot.foreshadowingChanges.length > 0) {
-    await syncForeshadowingChanges(pp, syncedSnapshot)
-  }
-
   await backupSnapshotBeforeOverwrite(pp, syncedSnapshot.chapterNumber)
-  await saveSnapshot(pp, syncedSnapshot)
-  if (hadSuppressedFacts) await saveChapterIngestOutput(pp, syncedSnapshot)
-  const memoryPagePaths = options?.deferStructuredMemoryExport
-    ? []
-    : await exportStructuredMemoryToWiki(pp, syncedSnapshot)
+  await saveSnapshot(pp, syncedSnapshot, { title: options?.title })
+  const memoryPagePaths = !options?.deferDerivedRebuild && syncedSnapshot.chapterNumber > 0
+    ? await rebuildDerivedMemoryFromSnapshots(pp, syncedSnapshot, { source: options?.source })
+    : []
   if (!options?.deferDerivedRebuild) {
     clearGraphCache()
     useWikiStore.getState().bumpDataVersion()
@@ -1113,175 +844,87 @@ async function cleanupSupersededEntityFiles(
   }
 }
 
-function applyCharacterStateChangesToStore(existingChars: CharacterStateStore, snapshot: ChapterSnapshot): CharacterStateStore {
-  for (const change of snapshot.characterStateChanges) {
-    const colonIdx = change.indexOf(":") >= 0 ? change.indexOf(":") : change.indexOf("：")
-    if (colonIdx > 0) {
-      const charName = change.slice(0, colonIdx).trim()
-      const changeDesc = change.slice(colonIdx + 1).trim()
-      const existing = existingChars.characters.find(c => c.characterName === charName)
-      if (existing) {
-        existing.status = changeDesc
-        existing.lastUpdatedChapter = snapshot.chapterNumber
-        existing.lastUpdatedAt = new Date().toISOString()
-      } else {
-        existingChars.characters.push({
-          characterName: charName,
-          currentLocation: "",
-          status: changeDesc,
-          equipment: [],
-          abilities: [],
-          relationships: {},
-          lastUpdatedChapter: snapshot.chapterNumber,
-          lastUpdatedAt: new Date().toISOString(),
-        })
-      }
-    } else {
-      const matched = existingChars.characters.find(c => change.includes(c.characterName))
-      if (matched) {
-        matched.status = change
-        matched.lastUpdatedChapter = snapshot.chapterNumber
-        matched.lastUpdatedAt = new Date().toISOString()
-      }
-    }
+/** 调用方持有项目记忆写锁。快照读取失败时终止，避免用缺页数据重建。 */
+export async function rebuildDerivedMemoryFromSnapshots(
+  projectPath: string,
+  latestSnapshot?: ChapterSnapshot,
+  options?: { fields?: readonly MemoryField[]; source?: ChapterSource },
+): Promise<string[]> {
+  // 字段清理有独立的备份、回滚和撤销事务，不覆盖先前未完成的整书刷新。
+  if (options?.fields) return rebuildMemory(projectPath, latestSnapshot, options)
+  await markMemoryRefreshPending(projectPath)
+  try {
+    const paths = await rebuildMemory(projectPath, latestSnapshot, options)
+    await finishMemoryRefresh(projectPath)
+    return paths
+  } catch (error) {
+    throw new Error(`记忆和检索刷新未完成，可在记忆中心从已保存的快照重试。\n${error instanceof Error ? error.message : String(error)}`)
   }
-  existingChars.lastUpdated = new Date().toISOString()
-  return existingChars
 }
 
-async function syncCharacterStateChanges(projectPath: string, snapshot: ChapterSnapshot): Promise<void> {
-  const existingChars = await loadCharacterStates(projectPath)
-  applyCharacterStateChangesToStore(existingChars, snapshot)
-  await saveCharacterStates(projectPath, existingChars)
-}
-
-export function applyForeshadowingChangesToStore(
-  existingForeshadows: ForeshadowingStore,
-  snapshot: ChapterSnapshot,
-): ForeshadowingStore {
-  for (const change of snapshot.foreshadowingChanges) {
-    const parsed = parseForeshadowingChange(change)
-    if (!parsed) continue
-
-    const matched = findForeshadowingByNormalizedName(existingForeshadows.items, parsed.name)
-
-    if (parsed.kind === "plant") {
-      if (matched) {
-        // Same normalized name already exists → treat as advance (ingest-side dedup)
-        if (matched.status !== "resolved" && matched.status !== "abandoned") {
-          matched.status = "advanced"
-        }
-        if (!matched.advancedChapters.includes(snapshot.chapterNumber)) {
-          matched.advancedChapters.push(snapshot.chapterNumber)
-        }
-        if (parsed.description && parsed.description.length > (matched.description?.length ?? 0)) {
-          matched.description = parsed.description
-        }
-        continue
-      }
-      const newForeshadow: Foreshadowing = {
-        id: generateForeshadowingId(existingForeshadows),
-        name: parsed.name,
-        description: parsed.description,
-        status: "planted",
-        plantedChapter: snapshot.chapterNumber,
-        advancedChapters: [],
-        relatedCharacters: [],
-        relatedEvents: [],
-        notes: "",
-      }
-      existingForeshadows.items.push(newForeshadow)
-      continue
-    }
-
-    if (parsed.kind === "advance") {
-      if (matched) {
-        if (matched.status !== "resolved" && matched.status !== "abandoned") {
-          matched.status = "advanced"
-        }
-        if (!matched.advancedChapters.includes(snapshot.chapterNumber)) {
-          matched.advancedChapters.push(snapshot.chapterNumber)
-        }
-        if (parsed.description && parsed.description.length > (matched.description?.length ?? 0)) {
-          matched.description = parsed.description
-        }
-      }
-      continue
-    }
-
-    // resolve — if no match, still record as resolved (same as memory-rebuild:
-    // resolve lines often use different wording than the original plant)
-    if (matched) {
-      matched.status = "resolved"
-      matched.resolvedChapter = snapshot.chapterNumber
-      if (parsed.description && parsed.description.length > (matched.description?.length ?? 0)) {
-        matched.description = parsed.description
-      }
-    } else {
-      existingForeshadows.items.push({
-        id: generateForeshadowingId(existingForeshadows),
-        name: parsed.name,
-        description: parsed.description,
-        status: "resolved",
-        plantedChapter: snapshot.chapterNumber,
-        advancedChapters: [],
-        resolvedChapter: snapshot.chapterNumber,
-        relatedCharacters: [],
-        relatedEvents: [],
-        notes: "",
-      })
-    }
+async function rebuildMemory(
+  projectPath: string,
+  latestSnapshot?: ChapterSnapshot,
+  options?: { fields?: readonly MemoryField[]; source?: ChapterSource },
+): Promise<string[]> {
+  const pp = normalizePath(projectPath)
+  const sources = await listChapterSources(pp)
+  if (latestSnapshot && options?.source) sources.set(latestSnapshot.chapterNumber, options.source)
+  const actual = [...sources.keys()]
+  const policy = await loadMemoryCleanupPolicy(pp)
+  const snapshotDir = `${pp}/.qmai/novel/snapshots`
+  let names = await fileExists(snapshotDir) ? await listDirectory(snapshotDir) : []
+  if (!options?.fields && names.some((node) => node.name.endsWith(".refresh.json"))) {
+    await repairSnapshotArtifacts(pp, names.map((node) => node.name))
+    names = await listDirectory(snapshotDir)
   }
-  existingForeshadows.lastUpdated = new Date().toISOString()
-  return existingForeshadows
-}
-
-async function syncForeshadowingChanges(projectPath: string, snapshot: ChapterSnapshot): Promise<void> {
-  const existingForeshadows = await loadForeshadowingTracker(projectPath)
-  applyForeshadowingChangesToStore(existingForeshadows, snapshot)
-  await saveForeshadowingTracker(projectPath, existingForeshadows)
-}
-
-export async function rebuildDerivedMemoryFromSnapshots(projectPath: string, latestSnapshot?: ChapterSnapshot, options?: { fields?: readonly MemoryField[] }): Promise<void> {
-  const snapshots = await loadValidMemorySnapshots(projectPath, latestSnapshot)
-  const selected = options?.fields ? new Set(options.fields) : null
-
-  if (!selected || selected.has("knowledgeChanges")) {
-    const cognitionState = snapshots.reduce(
-      (state, snapshot) => mergeCognitionFromSnapshot(state, snapshot),
-      emptyCognitionState(),
-    )
-    await saveCognitionState(projectPath, cognitionState)
-  }
-
-  if (!selected || selected.has("characterStateChanges")) {
-    const characterStateStore = createEmptyCharacterStateStore()
-    for (const snapshot of snapshots) {
-      applyCharacterStateChangesToStore(characterStateStore, snapshot)
-    }
-    await saveCharacterStates(projectPath, characterStateStore)
-  }
-
-  if (!selected || selected.has("foreshadowingChanges")) {
-    const foreshadowingStore = createEmptyForeshadowingStore()
-    for (const snapshot of snapshots) {
-      applyForeshadowingChangesToStore(foreshadowingStore, snapshot)
-    }
-    await saveForeshadowingTracker(projectPath, foreshadowingStore)
-  }
-  if (!selected || selected.has("timelineEvents")) await rebuildTimelineFromSnapshots(projectPath, snapshots)
-
-  await writeStructuredMemoryDocuments(projectPath, snapshots)
+  const numbers = chapterSnapshotNumbersFromFileNames(names.map((n) => n.name)).filter((n) => n > 0)
+  if (latestSnapshot && latestSnapshot.chapterNumber > 0 && !numbers.includes(latestSnapshot.chapterNumber)) numbers.push(latestSnapshot.chapterNumber)
+  const snapshots = await Promise.all(numbers.map(async (number) => {
+    const loaded = latestSnapshot?.chapterNumber === number ? latestSnapshot : await loadSnapshot(pp, number)
+    if (!loaded) throw new Error(`读取第${number}章记忆快照失败，请检查文件后重试。`)
+    return filterRemovedMemories(loaded, policy)
+  }))
+  const valid = snapshots.filter((snapshot) => isValidMemorySnapshot(snapshot, actual))
+  return refreshProjectMemory(pp, valid, { sources, fields: options?.fields })
 }
 
 export async function finalizeProjectMemoryRebuild(projectPath: string): Promise<void> {
-  const pp = normalizePath(projectPath)
-  await rebuildDerivedMemoryFromSnapshots(pp)
-  clearGraphCache()
-  useWikiStore.getState().bumpDataVersion()
+  await withMemoryWriteLock(projectPath, async () => {
+    await rebuildDerivedMemoryFromSnapshots(projectPath)
+    clearGraphCache()
+    useWikiStore.getState().bumpDataVersion()
+  })
 }
 
-async function saveSnapshot(projectPath: string, snapshot: ChapterSnapshot, options?: { skipTimeline?: boolean }): Promise<void> {
+function artifactJobPath(projectPath: string, number: number) {
+  return `${projectPath}/.qmai/novel/snapshots/${snapshotFilePrefix(number)}.refresh.json`
+}
+
+// JSON 是章节快照的来源。中断后只补完尚未写齐的章节文件，再重建整书汇总。
+async function repairSnapshotArtifacts(pp: string, names: string[]) {
+  for (const name of names) {
+    const match = /^(\d+)\.refresh\.json$/.exec(name)
+    if (!match) continue
+    const number = Number(match[1])
+    const jobPath = artifactJobPath(pp, number)
+    const job = JSON.parse(await readFile(jobPath))
+    if (job.operation === "delete") {
+      await removeSnapshotArtifacts(pp, number)
+    } else if (job.operation === "save") {
+      if (await fileExists(snapshotJsonPath(pp, number))) {
+        const snapshot = await loadSnapshot(pp, number)
+        if (!snapshot) throw new Error(`第${number}章快照损坏，无法恢复记忆。`)
+        await writeFileAtomic(snapshotMarkdownPath(pp, number), snapshotToMarkdown(snapshot))
+        await saveChapterIngestOutput(pp, snapshot, { title: job.title })
+      }
+    } else throw new Error(`第${number}章记忆刷新记录损坏。`)
+    await deleteFile(jobPath)
+  }
+}
+
+async function saveSnapshot(projectPath: string, snapshot: ChapterSnapshot,
+  options: { transactionalCleanup?: boolean; title?: string } = {}): Promise<void> {
   snapshot = filterRemovedMemories(snapshot, await loadMemoryCleanupPolicy(projectPath))
   const canonicalSnapshot = ensureSnapshotIdentity(canonicalizeSnapshotCharacters(snapshot))
   const normalizedSnapshot = normalizeChapterSnapshot(canonicalSnapshot, {
@@ -1291,15 +934,21 @@ async function saveSnapshot(projectPath: string, snapshot: ChapterSnapshot, opti
   if (!normalizedSnapshot) {
     throw new Error("Invalid snapshot data.")
   }
-  const snapshotDir = `${projectPath}/.novel/snapshots`
+  const snapshotDir = `${projectPath}/.qmai/novel/snapshots`
   const jsonPath = snapshotJsonPath(projectPath, normalizedSnapshot.chapterNumber)
   const mdPath = snapshotMarkdownPath(projectPath, normalizedSnapshot.chapterNumber)
 
   await createDirectory(snapshotDir)
+  const jobPath = artifactJobPath(projectPath, snapshot.chapterNumber)
+  const needsJob = snapshot.chapterNumber > 0 && !options.transactionalCleanup
+  if (needsJob) {
+    await markMemoryRefreshPending(projectPath)
+    await writeFileAtomic(jobPath, JSON.stringify({ operation: "save", title: options.title }))
+  }
   await writeFileAtomic(jsonPath, JSON.stringify(normalizedSnapshot, null, 2))
   await writeFileAtomic(mdPath, snapshotToMarkdown(normalizedSnapshot))
-
-  if (!options?.skipTimeline) await mergeSnapshotTimeline(projectPath, normalizedSnapshot.chapterNumber, normalizedSnapshot.timelineEvents)
+  if (snapshot.chapterNumber > 0) await saveChapterIngestOutput(projectPath, normalizedSnapshot, { title: options.title })
+  if (needsJob && await fileExists(jobPath)) await deleteFile(jobPath)
 }
 
 /** Called with the project memory lock held; no model call or incremental merge. */
@@ -1307,12 +956,11 @@ export async function replaceSnapshotForMemoryCleanup(projectPath: string, snaps
   const previous = await readCurrentSnapshot(projectPath, snapshot.chapterNumber)
   await backupSnapshotBeforeOverwrite(projectPath, snapshot.chapterNumber)
   const next = materializeNextCurrentSnapshot(snapshot, previous)
-  await saveSnapshot(projectPath, next, { skipTimeline: true })
-  await saveChapterIngestOutput(projectPath, next)
+  await saveSnapshot(projectPath, next, { transactionalCleanup: true })
 }
 
 async function saveChapterIngestOutput(projectPath: string, snapshot: ChapterSnapshot, options: { title?: string } = {}): Promise<ChapterIngestOutput> {
-  const outputDir = `${projectPath}/.novel/chapter-ingest-output`
+  const outputDir = `${projectPath}/.qmai/novel/chapter-ingest-output`
   const prefix = `${outputDir}/${String(snapshot.chapterNumber).padStart(3, "0")}`
   let title = snapshot.chapterTitle
   if (!options.title && await fileExists(`${prefix}.output.json`)) {
@@ -1411,7 +1059,7 @@ export async function loadSnapshot(
   const prefix = chapterNumber < 0
     ? `outline-${String(Math.abs(chapterNumber)).padStart(3, "0")}`
     : String(chapterNumber).padStart(3, "0")
-  const jsonPath = `${pp}/.novel/snapshots/${prefix}.snapshot.json`
+  const jsonPath = `${pp}/.qmai/novel/snapshots/${prefix}.snapshot.json`
   try {
     const raw = await readFile(jsonPath)
     return normalizeChapterSnapshot(JSON.parse(raw), {
@@ -1425,7 +1073,7 @@ export async function loadSnapshot(
 
 export async function listSnapshots(projectPath: string): Promise<number[]> {
   const pp = normalizePath(projectPath)
-  const snapshotDir = `${pp}/.novel/snapshots`
+  const snapshotDir = `${pp}/.qmai/novel/snapshots`
   try {
     const tree = await listDirectory(snapshotDir)
     return chapterSnapshotNumbersFromFileNames(tree.map((file) => file.name))
@@ -1436,47 +1084,33 @@ export async function listSnapshots(projectPath: string): Promise<number[]> {
 
 export async function deleteChapterSnapshotArtifacts(projectPath: string, chapterNumber: number): Promise<boolean> {
   const pp = normalizePath(projectPath)
-  const jsonPath = snapshotJsonPath(pp, chapterNumber)
-  const mdPath = snapshotMarkdownPath(pp, chapterNumber)
-  const historyDir = snapshotHistoryDir(pp, chapterNumber)
-  let deleted = false
-  try {
-    if (await fileExists(jsonPath)) {
-      await deleteFile(jsonPath)
-      deleted = true
-    }
-  } catch { /* ignore */ }
-  try {
-    if (await fileExists(mdPath)) {
-      await deleteFile(mdPath)
-      deleted = true
-    }
-  } catch { /* ignore */ }
-  try {
-    if (await fileExists(historyDir)) {
-      await deleteFile(historyDir)
-      deleted = true
-    }
-  } catch { /* ignore */ }
-  return deleted
+  if (chapterNumber <= 0) return removeSnapshotArtifacts(pp, chapterNumber)
+  await markMemoryRefreshPending(pp)
+  const jobPath = artifactJobPath(pp, chapterNumber)
+  await writeFileAtomic(jobPath, JSON.stringify({ operation: "delete" }))
+  const removed = await removeSnapshotArtifacts(pp, chapterNumber)
+  if (await fileExists(jobPath)) await deleteFile(jobPath)
+  return removed
 }
 
-async function retractOutlineDerivedEntries(projectPath: string, chapterNumber: number): Promise<void> {
-  await removeTimelineChapter(projectPath, chapterNumber)
-  await retractForeshadowingChapter(projectPath, chapterNumber)
+async function removeSnapshotArtifacts(pp: string, chapterNumber: number): Promise<boolean> {
+  const prefix = `${pp}/.qmai/novel/chapter-ingest-output/${String(chapterNumber).padStart(3, "0")}`
+  const paths = [snapshotMarkdownPath(pp, chapterNumber), snapshotHistoryDir(pp, chapterNumber),
+    `${prefix}.output.json`, `${prefix}.wiki-patch.json`, snapshotJsonPath(pp, chapterNumber)]
+  let deleted = false
+  for (const path of paths) {
+    if (!await fileExists(path)) continue
+    await deleteFile(path)
+    deleted = true
+  }
+  return deleted
 }
 
 export async function deleteChapterSnapshots(projectPath: string, chapterNumber: number): Promise<void> {
   const pp = normalizePath(projectPath)
   return withMemoryWriteLock(pp, async () => {
     await deleteChapterSnapshotArtifacts(pp, chapterNumber)
-    // 大纲快照章号为负，派生记忆重放不读取它们。删除时只撤该编号在时间线和伏笔中的记录，
-    // 不用章节快照重写人物状态、认知和其余手改内容。
-    if (chapterNumber < 0) {
-      await retractOutlineDerivedEntries(pp, chapterNumber)
-    } else {
-      await rebuildDerivedMemoryFromSnapshots(pp)
-    }
+    if (chapterNumber > 0) await rebuildDerivedMemoryFromSnapshots(pp)
     clearGraphCache()
     useWikiStore.getState().bumpDataVersion()
   })
@@ -1538,7 +1172,6 @@ export async function ingestOutline(
   const userPrompt = buildOutlineIngestUserPrompt(body) + buildMemoryCleanupExclusions(
     (await loadMemoryCleanupPolicy(pp)).removed.filter((r) => r.chapterNumber === outlineNumber),
   )
-  const existingSnapshotPromise = readCurrentSnapshot(pp, outlineNumber)
 
   try {
     const messages: ChatMessage[] = [
@@ -1586,11 +1219,7 @@ export async function ingestOutline(
       }
     }
 
-    const isReingest = (await existingSnapshotPromise) != null
-    const syncResult = await syncSnapshotToMemory(pp, snapshot, isReingest ? REINGEST_SYNC_OPTIONS : undefined)
-    if (isReingest) {
-      await finalizeProjectMemoryRebuild(pp)
-    }
+    const syncResult = await syncSnapshotToMemory(pp, snapshot)
     return {
       snapshot: { ...snapshot, memorySyncedAt: syncResult.memorySyncedAt },
       truncated,

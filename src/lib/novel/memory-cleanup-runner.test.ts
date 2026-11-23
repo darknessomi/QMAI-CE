@@ -39,7 +39,7 @@ const source = (n: number): ChapterSnapshot => ({
   characterStateChanges: [`林默：${n === 1 ? "状态噪声" : "健康"}`], relationshipChanges: [], knowledgeChanges: [`林默知道${n === 1 ? "认知噪声" : "密室位置"}`],
   foreshadowingChanges: [`新增：${n === 1 ? "伏笔噪声" : "钟楼钥匙"}`], newCanonFacts: [n === 1 ? "事实噪声" : "本世界存在魔法"], timelineEvents: [n === 1 ? "时间噪声" : "正式事件"], conflicts: [n === 1 ? "冲突噪声" : "正式冲突"], endingHook: "", graphNodes: [], graphEdges: [],
 })
-const snapPath = (n: number) => `/project/.novel/snapshots/00${n}.snapshot.json`
+const snapPath = (n: number) => `/project/.qmai/novel/snapshots/00${n}.snapshot.json`
 async function scanFixture(): Promise<MemoryCleanupScan> {
   const snapshots = (await Promise.all([loadSnapshot("/project", 1), loadSnapshot("/project", 2)])).filter((s): s is ChapterSnapshot => !!s)
   const records = collectMemoryRecords(snapshots)
@@ -57,13 +57,13 @@ describe("来源删除与派生文件同步", () => {
   it("只清理认知时，保留其他类别的运行状态及手工补充", async () => {
     const scan = await scanFixture()
     const state = JSON.stringify({ characters: [{ characterName: "林默", currentLocation: "作者指定地点", status: "作者补充状态", equipment: ["手工装备"], abilities: [], relationships: {}, lastUpdatedChapter: 2, lastUpdatedAt: "" }], lastUpdated: "" })
-    fs.files.set("/project/.novel/character-states.json", state)
-    const timeline = fs.files.get("/project/.novel/timeline.json")
+    fs.files.set("/project/.qmai/novel/character-states.json", state)
+    const timeline = fs.files.get("/project/.qmai/novel/timeline.json")
     const selected = scan.issues.filter((issue) => scan.records.find((r) => r.id === issue.removeIds[0])?.field === "knowledgeChanges")
     await applyMemoryCleanup("/project", scan, selected)
-    expect(fs.files.get("/project/.novel/character-states.json")).toBe(state)
-    expect(fs.files.get("/project/.novel/timeline.json")).toBe(timeline)
-    expect(fs.files.get("/project/wiki/tracking/角色状态.md")).toContain("作者补充状态")
+    expect(fs.files.get("/project/.qmai/novel/character-states.json")).toBe(state)
+    expect(fs.files.get("/project/.qmai/novel/timeline.json")).toBe(timeline)
+    expect(fs.files.get("/project/wiki/memory/character-states.md")).toContain("作者补充状态")
   })
   it("清理六类来源并同步全部派生文件；重提取及重建也不恢复已删条目", async () => {
     const scan = await scanFixture()
@@ -72,36 +72,37 @@ describe("来源删除与派生文件同步", () => {
     for (const field of ["knowledgeChanges", "characterStateChanges", "foreshadowingChanges", "timelineEvents", "newCanonFacts", "conflicts"]) expect(snapshot[field]).toEqual([])
     for (const [path, text] of fs.files) if (/\/(?:wiki\/(?:memory|tracking|entities)|retrieval)\//.test(path)) expect(text, path).not.toContain("噪声")
     expect(fs.files.get("/project/wiki/entities/林默.md")).toContain("私有设定保留")
-    expect(fs.files.get("/project/.novel/snapshots/001.snapshot.md")).not.toContain("噪声")
-    expect(fs.files.get("/project/.novel/chapter-ingest-output/001.output.json")).not.toContain("噪声")
+    expect(fs.files.get("/project/.qmai/novel/snapshots/001.snapshot.md")).not.toContain("噪声")
+    expect(fs.files.get("/project/.qmai/novel/chapter-ingest-output/001.output.json")).not.toContain("噪声")
     const reextracted = source(1)
     await syncSnapshotToMemory("/project", reextracted)
     await rebuildDerivedMemoryFromSnapshots("/project")
     expect(reextracted.knowledgeChanges).toEqual([])
     expect(fs.files.get(snapPath(1))).not.toContain("噪声")
-    expect(fs.files.get("/project/.novel/cognition-state.json")).not.toContain("噪声")
+    expect(fs.files.get("/project/.qmai/novel/cognition-state.json")).not.toContain("噪声")
     expect(fs.files.get("/project/wiki/memory/character-cognition.md")).toContain("密室位置")
   })
   it("扫描后来源修订变化时，在写入任何清理记录前拒绝执行", async () => {
     const scan = await scanFixture()
     fs.files.set(snapPath(1), JSON.stringify({ ...source(1), revision: 2 }))
     await expect(applyMemoryCleanup("/project", scan, scan.issues)).rejects.toThrow("已变化")
-    expect(fs.files.has("/project/.novel/memory-cleanup.json")).toBe(false)
+    expect(fs.files.has("/project/.qmai/novel/memory-cleanup.json")).toBe(false)
   })
   it("派生同步失败会恢复来源、JSON、Markdown，并清除本次新建检索文件", async () => {
+    for (const path of fs.files.keys()) if (path.startsWith("/project/.qmai/retrieval/")) fs.files.delete(path)
     const scan = await scanFixture(), before = new Map(fs.files)
     fs.failPath = "/project/wiki/entities/林默.md"
     await expect(applyMemoryCleanup("/project", scan, scan.issues)).rejects.toThrow("已恢复")
     for (const [path, text] of before) expect(fs.files.get(path), path).toBe(text)
-    expect(fs.files.has("/project/.novel/memory-cleanup.json")).toBe(false)
-    expect([...fs.files.keys()].some((path) => path.startsWith("/project/retrieval/"))).toBe(false)
+    expect(fs.files.has("/project/.qmai/novel/memory-cleanup.json")).toBe(false)
+    expect([...fs.files.keys()].some((path) => path.startsWith("/project/.qmai/retrieval/"))).toBe(false)
   })
   it("撤销恢复所有备份；若清理后用户修改过文件则拒绝覆盖", async () => {
     const before = fs.files.get(snapPath(1)), scan = await scanFixture()
     await applyMemoryCleanup("/project", scan, scan.issues)
     await undoLastMemoryCleanup("/project")
     expect(fs.files.get(snapPath(1))).toBe(before)
-    expect(fs.files.has("/project/.novel/memory-cleanup.json")).toBe(false)
+    expect(fs.files.has("/project/.qmai/novel/memory-cleanup.json")).toBe(false)
     const again = await scanFixture()
     await applyMemoryCleanup("/project", again, again.issues)
     fs.files.set("/project/wiki/entities/林默.md", "用户的新内容")
@@ -133,7 +134,7 @@ describe("来源删除与派生文件同步", () => {
     expect((await loadSnapshot("/project", 2))?.knowledgeChanges).toEqual(source(2).knowledgeChanges)
   })
   it("撤销不检查或覆盖本次未改动的文件", async () => {
-    const path = "/project/retrieval/notes.txt"
+    const path = "/project/.qmai/retrieval/notes.txt"
     fs.files.set(path, "与清理无关")
     const scan = await scanFixture()
     await applyMemoryCleanup("/project", scan, scan.issues)
@@ -299,7 +300,7 @@ describe("自动超量提醒", () => {
     expect((await loadMemoryMaintenanceSettings("/project")).limits.cognition).toBe(500)
   })
   it("活跃伏笔数量不包含已回收和已放弃项", async () => {
-    fs.files.set("/project/.novel/foreshadowing-tracker.json", JSON.stringify({ items: [{ status: "planted" }, { status: "resolved" }, { status: "abandoned" }], lastUpdated: "" }))
+    fs.files.set("/project/.qmai/novel/foreshadowing-tracker.json", JSON.stringify({ items: [{ status: "planted" }, { status: "resolved" }, { status: "abandoned" }], lastUpdated: "" }))
     expect((await loadMemoryMaintenanceOverview("/project")).counts.foreshadowing).toBe(1)
   })
 })

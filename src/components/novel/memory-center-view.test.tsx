@@ -53,12 +53,6 @@ describe("memory-center-view", () => {
     expect(source).not.toContain('setActiveView("wiki")')
   })
 
-  it("strips markdown frontmatter before rendering memory details", () => {
-    expect(source).toContain("parseFrontmatter")
-    expect(source).toContain("splitRenderableMarkdown")
-    expect(source).toContain("content: rendered.body")
-  })
-
   it("restores the previous memory-center position after closing detail view", () => {
     expect(source).toContain("scrollContainerRef")
     expect(source).toContain("restoreScrollTop")

@@ -1,5 +1,8 @@
 import type { ChapterSnapshot } from "./chapter-ingest"
-import { normalizeForeshadowingName } from "./foreshadowing-normalize"
+import { parseForeshadowingChange, matchForeshadowingNames } from "./foreshadowing-normalize"
+import type { CharacterState, CharacterStateStore } from "./character-state"
+import type { Foreshadowing, ForeshadowingStore } from "./foreshadowing-tracker"
+import type { TimelineEntry } from "./timeline"
 
 const UNCERTAIN_RE = /(可能|也许|似乎|疑似|或许|大概|推测|猜测|尚不确定|未证实)/u
 const PUNCTUATION_RE = /[，。；：？！“”‘’（）《》【】<>]/u
@@ -18,7 +21,7 @@ interface StructuredMemoryDocuments {
 
 export function isValidMemorySnapshot(snapshot: ChapterSnapshot | null, actualChapterNumbers: number[]): snapshot is ChapterSnapshot {
   if (!snapshot || !Number.isFinite(snapshot.chapterNumber)) return false
-  if (snapshot.chapterNumber <= 0) return false
+  if (snapshot.chapterNumber <= 0 || snapshot.isHistorical || snapshot.sourceType === "outline") return false
   if (actualChapterNumbers.length === 0) return true
   const maxActual = Math.max(...actualChapterNumbers)
   return snapshot.chapterNumber <= maxActual + 5
@@ -175,115 +178,179 @@ function buildCharacterCognitionDocument(snapshots: ChapterSnapshot[]): string {
   return `${lines.join("\n").trimEnd()}\n`
 }
 
-function buildCharacterStatesDocument(snapshots: ChapterSnapshot[]): string {
-  const latest = new Map<string, { detail: string; chapter: number }>()
-  const candidates: string[] = []
+export interface MemoryProjection {
+  characters: CharacterStateStore
+  foreshadows: ForeshadowingStore
+  timeline: TimelineEntry[]
+  officialSnapshots: ChapterSnapshot[]
+  candidates: { characters: string[]; foreshadows: string[]; timeline: string[] }
+}
 
-  for (const snapshot of snapshots) {
-    for (const raw of snapshot.characterStateChanges) {
+export function buildMemoryProjection(
+  snapshots: ChapterSnapshot[],
+  previousCharacters?: CharacterStateStore,
+  previousForeshadows?: ForeshadowingStore,
+): MemoryProjection {
+  const chapters = snapshots.filter((s) => isValidMemorySnapshot(s, [])).sort((a, b) => a.chapterNumber - b.chapterNumber)
+  const lastUpdated = chapters.reduce((latest, s) => (s.memorySyncedAt ?? "") > latest ? s.memorySyncedAt! : latest, "")
+  const characters = new Map<string, CharacterState>()
+  const previousPeople = new Map(previousCharacters?.characters.map((p) => [p.characterName, p]))
+  const previousItems = previousForeshadows?.items ?? []
+  const previousByName = new Map(previousItems.map((item) => [item.name, item]))
+  let serial = previousItems.reduce((max, item) => Math.max(max, Number(/^F(\d+)$/.exec(item.id)?.[1] ?? 0)), previousForeshadows?.lastSerial ?? 0)
+  const items: Foreshadowing[] = []
+  const candidates: MemoryProjection["candidates"] = { characters: [], foreshadows: [], timeline: [] }
+  const timeline: TimelineEntry[] = []
+  const officialSnapshots: ChapterSnapshot[] = []
+  const owners = new Map<string, Set<string>>()
+  for (const s of chapters) {
+    for (const [name, aliases] of Object.entries(s.characterAliases ?? {})) {
+      for (const alias of [name, ...aliases]) {
+        const names = owners.get(alias) ?? new Set<string>()
+        names.add(name)
+        owners.set(alias, names)
+      }
+    }
+  }
+  for (const s of chapters) {
+    const official: ChapterSnapshot = { ...s, characterStateChanges: [], foreshadowingChanges: [], timelineEvents: [] }
+    officialSnapshots.push(official)
+    const candidate = (raw: string) => `${chapterLabel(s.chapterNumber)}：${raw}`
+    for (const raw of s.characterStateChanges) {
       const text = raw.trim()
       if (!text) continue
-      if (UNCERTAIN_RE.test(text)) {
-        candidates.push(`${chapterLabel(snapshot.chapterNumber)}：${text}`)
+      if (UNCERTAIN_RE.test(text)) { candidates.characters.push(candidate(text)); continue }
+      const subject = pickStableSubject(text, s)
+      const names = subject ? owners.get(subject) : undefined
+      if (!subject || (names && names.size > 1)) { candidates.characters.push(candidate(text)); continue }
+      const name = names?.values().next().value ?? subject
+      const generated = parseSubjectChange(text)?.detail || text
+      official.characterStateChanges.push(`${name}：${generated}`)
+      const previous = previousPeople.get(name)
+      const override = previous && (previous.manual || (previous.generatedStatus != null && previous.status !== previous.generatedStatus))
+        ? previous.status : undefined
+      characters.set(name, {
+        characterName: name, currentLocation: "", equipment: [], abilities: [], relationships: {},
+        ...previous, status: override ?? generated, generatedStatus: generated,
+        lastUpdatedAt: s.memorySyncedAt || previous?.lastUpdatedAt || "",
+        lastUpdatedChapter: s.chapterNumber,
+      })
+    }
+
+    for (const raw of s.foreshadowingChanges) {
+      const parsed = parseForeshadowingChange(raw)
+      if (!parsed) continue
+      const matches = matchForeshadowingNames(items, parsed.name)
+      const match = matches[0]
+      if (matches.length > 1 || UNCERTAIN_RE.test(raw) || (!match && parsed.kind === "advance")) {
+        candidates.foreshadows.push(candidate(raw))
         continue
       }
-      const subject = pickStableSubject(text, snapshot)
-      if (!subject) continue
-      const parsed = parseSubjectChange(text)
-      latest.set(subject, {
-        detail: parsed?.detail || text,
-        chapter: snapshot.chapterNumber,
-      })
+      official.foreshadowingChanges.push(raw)
+      if (match) {
+        if (parsed.description.length > match.description.length) match.description = parsed.description
+        if (parsed.kind === "resolve") {
+          if (match.status !== "abandoned") match.status = "resolved"
+          match.resolvedChapter = s.chapterNumber
+        } else {
+          if (match.status !== "resolved" && match.status !== "abandoned") match.status = "advanced"
+          if (!match.advancedChapters.includes(s.chapterNumber)) match.advancedChapters.push(s.chapterNumber)
+        }
+      } else {
+        const previous = previousByName.get(parsed.name)
+        items.push({
+          relatedCharacters: [], relatedEvents: [], notes: "", ...previous,
+          name: parsed.name, description: parsed.description,
+          id: previous?.id ?? `F${String(++serial).padStart(3, "0")}`,
+          plantedChapter: s.chapterNumber, advancedChapters: [],
+          resolvedChapter: parsed.kind === "resolve" ? s.chapterNumber : undefined,
+          status: previous?.status === "abandoned" ? "abandoned" : parsed.kind === "resolve" ? "resolved" : "planted",
+        })
+      }
+    }
+
+    const eventKeys = new Set<string>()
+    for (const raw of s.timelineEvents) {
+      const event = raw.trim()
+      const key = event.normalize("NFKC").replace(/\s+/gu, "")
+      if (!key || eventKeys.has(key)) continue
+      eventKeys.add(key)
+      if (UNCERTAIN_RE.test(event)) candidates.timeline.push(candidate(event))
+      else {
+        timeline.push({ chapterNumber: s.chapterNumber, event })
+        official.timelineEvents.push(event)
+      }
     }
   }
 
-  const lines = pageHeader("character-states", "人物状态记忆")
-  lines.push("## 当前正式状态", "")
-  const entries = [...latest.entries()].sort((a, b) => a[0].localeCompare(b[0], "zh-CN"))
-  if (entries.length === 0) {
-    lines.push("暂无正式状态记录。", "")
-  } else {
-    for (const [subject, value] of entries) {
-      lines.push(`### ${subject}`)
-      lines.push(`- 当前状态：${value.detail}`)
-      lines.push(`- 最近更新：${chapterLabel(value.chapter)}`)
-      lines.push("")
+  // 手工补充的位置、装备、备注等在最后一个自动来源撤回后仍应保留。
+  for (const p of previousPeople.values()) {
+    if (!characters.has(p.characterName) && (p.manual || (p.generatedStatus != null && p.status !== p.generatedStatus) || p.currentLocation || p.equipment?.length || p.abilities?.length
+      || Object.keys(p.relationships ?? {}).length || p.publicImage || p.pendingForeshadowing?.length || p.stateChangeHistory?.length)) {
+      const status = p.manual || (p.generatedStatus != null && p.status !== p.generatedStatus) ? p.status : ""
+      characters.set(p.characterName, { ...p, status, generatedStatus: "", lastUpdatedChapter: 0, lastUpdatedAt: "" })
     }
   }
-  appendCandidateSection(lines, candidates)
+  for (const previous of previousItems) {
+    if (!items.some((f) => f.id === previous.id) && (previous.manual || previous.notes || previous.relatedCharacters?.length
+      || previous.relatedEvents?.length || previous.expectedResolveChapter != null || previous.importance || previous.status === "abandoned")) {
+      items.push({ ...previous })
+    }
+  }
+  return { characters: { characters: [...characters.values()], lastUpdated }, foreshadows: { items, lastUpdated, lastSerial: serial }, timeline, candidates, officialSnapshots }
+}
+
+function buildCharacterStatesDocument(memory: MemoryProjection): string {
+  const lines = pageHeader("character-states", "人物状态记忆")
+  lines.push("## 当前正式状态", "")
+  for (const p of memory.characters.characters) {
+    lines.push(`### ${p.characterName}`, `- 当前状态：${p.status}`)
+    if (p.currentLocation) lines.push(`- 当前位置：${p.currentLocation}`)
+    if (p.publicImage) lines.push(`- 公众形象：${p.publicImage}`)
+    if (p.equipment?.length) lines.push(`- 装备：${p.equipment.join("、")}`)
+    if (p.abilities?.length) lines.push(`- 能力：${p.abilities.join("、")}`)
+    for (const [name, relationship] of Object.entries(p.relationships ?? {})) lines.push(`- 与${name}的关系：${relationship}`)
+    if (p.pendingForeshadowing?.length) lines.push(`- 待回收伏笔：${p.pendingForeshadowing.join("、")}`)
+    for (const history of p.stateChangeHistory ?? []) lines.push(`- ${chapterLabel(history.chapter)}变化：${history.change}`)
+    if (p.lastUpdatedChapter > 0) lines.push(`- 最近更新：${chapterLabel(p.lastUpdatedChapter)}`)
+    lines.push("")
+  }
+  appendCandidateSection(lines, memory.candidates.characters)
   return `${lines.join("\n").trimEnd()}\n`
 }
 
-function buildForeshadowingDocument(snapshots: ChapterSnapshot[]): string {
-  const tracker = new Map<string, { name: string; description: string; planted: number; advanced: Set<number>; resolved?: number; sources: Set<number>; status: "planted" | "advanced" | "resolved" }>()
-  const candidates: string[] = []
-
-  for (const snapshot of snapshots) {
-    for (const raw of snapshot.foreshadowingChanges) {
-      const text = raw.trim()
-      if (!text) continue
-      if (UNCERTAIN_RE.test(text)) {
-        candidates.push(`${chapterLabel(snapshot.chapterNumber)}：${text}`)
-        continue
-      }
-      const normalized = normalizeForeshadowingName(text)
-      if (!normalized.name) continue
-      const existing = tracker.get(normalized.name) ?? {
-        name: normalized.name,
-        description: normalized.description,
-        planted: snapshot.chapterNumber,
-        advanced: new Set<number>(),
-        sources: new Set<number>(),
-        status: "planted" as const,
-      }
-      existing.description = existing.description.length >= normalized.description.length ? existing.description : normalized.description
-      existing.planted = Math.min(existing.planted, snapshot.chapterNumber)
-      existing.sources.add(snapshot.chapterNumber)
-      if (/^(回收伏笔|回收)/u.test(text)) {
-        existing.status = "resolved"
-        existing.resolved = snapshot.chapterNumber
-      } else if (/^(推进伏笔|推进)/u.test(text)) {
-        if (existing.status !== "resolved") existing.status = "advanced"
-        existing.advanced.add(snapshot.chapterNumber)
-      }
-      tracker.set(normalized.name, existing)
-    }
-  }
-
-  const official = [...tracker.values()].sort((a, b) => a.planted - b.planted || a.name.localeCompare(b.name, "zh-CN"))
+function buildForeshadowingDocument(memory: MemoryProjection): string {
   const lines = pageHeader("foreshadowing-tracker", "伏笔追踪记忆")
-  lines.push("## 进行中", "")
-  const active = official.filter((item) => item.status !== "resolved")
-  if (active.length === 0) {
-    lines.push("暂无进行中的正式伏笔。", "")
-  } else {
-    for (const item of active) {
-      lines.push(`### ${item.name}`)
-      lines.push(`- 状态：${item.status === "advanced" ? "推进中" : "待推进"}`)
-      lines.push(`- 说明：${item.description}`)
-      lines.push(`- 初次出现：${chapterLabel(item.planted)}`)
-      lines.push(`- 来源回查：${joinChapterLabels(item.sources)}`)
+  const labels = { planted: "待推进", advanced: "推进中", resolved: "已完成", abandoned: "已放弃" }
+  for (const section of ["进行中", "已完成", "已放弃"]) {
+    lines.push(`## ${section}`, "")
+    for (const item of memory.foreshadows.items) {
+      const state = item.status === "resolved" ? "已完成" : item.status === "abandoned" ? "已放弃" : "进行中"
+      if (state !== section) continue
+      const sources = [item.plantedChapter, ...item.advancedChapters]
+      if (item.resolvedChapter != null) sources.push(item.resolvedChapter)
+      lines.push(`### ${item.name}`, `- 编号：${item.id}`, `- 状态：${labels[item.status]}`, `- 说明：${item.description}`,
+        `- 初次出现：${chapterLabel(item.plantedChapter)}`, `- 来源回查：${joinChapterLabels(sources)}`)
+      if (item.resolvedChapter != null) lines.push(`- 完成章节：${chapterLabel(item.resolvedChapter)}`)
+      if (item.expectedResolveChapter != null) lines.push(`- 预计回收：${chapterLabel(item.expectedResolveChapter)}`)
+      if (item.importance) lines.push(`- 重要度：${({ high: "高", medium: "中", low: "低" })[item.importance]}`)
+      if (item.relatedCharacters?.length) lines.push(`- 相关人物：${item.relatedCharacters.join("、")}`)
+      if (item.relatedEvents?.length) lines.push(`- 相关事件：${item.relatedEvents.join("、")}`)
+      if (item.notes) lines.push(`- 备注：${item.notes}`)
       lines.push("")
     }
+    if (lines[lines.length - 2] === `## ${section}`) lines.push("暂无正式记录。", "")
   }
-  lines.push("## 已完成", "")
-  const resolved = official.filter((item) => item.status === "resolved")
-  if (resolved.length === 0) {
-    lines.push("暂无已完成伏笔。", "")
-  } else {
-    for (const item of resolved) {
-      lines.push(`### ${item.name}`)
-      lines.push("- 状态：已完成")
-      lines.push(`- 说明：${item.description}`)
-      lines.push(`- 初次出现：${chapterLabel(item.planted)}`)
-      if (item.resolved) {
-        lines.push(`- 完成章节：${chapterLabel(item.resolved)}`)
-      }
-      lines.push(`- 来源回查：${joinChapterLabels(item.sources)}`)
-      lines.push("")
-    }
-  }
-  appendCandidateSection(lines, candidates)
+  appendCandidateSection(lines, memory.candidates.foreshadows)
+  return `${lines.join("\n").trimEnd()}\n`
+}
+
+function buildTimelineDocument(memory: MemoryProjection): string {
+  const lines = pageHeader("timeline", "时间线记忆")
+  lines.push("## 已发生事件", "")
+  for (const entry of memory.timeline) lines.push(`- ${entry.event}（来源：${chapterLabel(entry.chapterNumber)}）`)
+  lines.push("")
+  appendCandidateSection(lines, memory.candidates.timeline)
   return `${lines.join("\n").trimEnd()}\n`
 }
 
@@ -330,20 +397,14 @@ function buildSimpleFactDocument(
   return `${lines.join("\n").trimEnd()}\n`
 }
 
-export function buildStructuredMemoryDocuments(snapshots: ChapterSnapshot[]): StructuredMemoryDocuments {
-  const sortedSnapshots = [...snapshots].sort((a, b) => a.chapterNumber - b.chapterNumber)
+export function buildStructuredMemoryDocuments(snapshots: ChapterSnapshot[], memory = buildMemoryProjection(snapshots)): StructuredMemoryDocuments {
+  const sortedSnapshots = snapshots.filter((s) => isValidMemorySnapshot(s, [])).sort((a, b) => a.chapterNumber - b.chapterNumber)
   return {
     "chapter-snapshots.md": buildChapterSnapshotsDocument(sortedSnapshots),
     "character-cognition.md": buildCharacterCognitionDocument(sortedSnapshots),
-    "character-states.md": buildCharacterStatesDocument(sortedSnapshots),
-    "foreshadowing-tracker.md": buildForeshadowingDocument(sortedSnapshots),
-    "timeline.md": buildSimpleFactDocument(sortedSnapshots, {
-      memoryType: "timeline",
-      title: "时间线记忆",
-      sectionTitle: "已发生事件",
-      pick: (snapshot) => snapshot.timelineEvents,
-      keep: (item) => item.length <= 80,
-    }),
+    "character-states.md": buildCharacterStatesDocument(memory),
+    "foreshadowing-tracker.md": buildForeshadowingDocument(memory),
+    "timeline.md": buildTimelineDocument(memory),
     "canon-facts.md": buildSimpleFactDocument(sortedSnapshots, {
       memoryType: "canon-facts",
       title: "正式设定记忆",

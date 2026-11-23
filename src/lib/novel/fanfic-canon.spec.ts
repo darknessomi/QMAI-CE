@@ -25,9 +25,9 @@ const baseDoc = () =>
   })
 
 describe("fanfic canon document", () => {
-  it("落盘路径固定在 .novel/fanfic-canon.md，与项目既有资产同构", () => {
-    expect(fanficCanonPath("E:/Novel")).toBe("E:/Novel/.novel/fanfic-canon.md")
-    expect(fanficCanonPath("E:\\Novel\\")).toBe("E:/Novel/.novel/fanfic-canon.md")
+  it("落盘路径固定在 .qmai/novel/fanfic-canon.md，与项目既有资产同构", () => {
+    expect(fanficCanonPath("E:/Novel")).toBe("E:/Novel/.qmai/novel/fanfic-canon.md")
+    expect(fanficCanonPath("E:\\Novel\\")).toBe("E:/Novel/.qmai/novel/fanfic-canon.md")
   })
 
   it("写入模式、原作、容许偏离与六条硬规则", () => {

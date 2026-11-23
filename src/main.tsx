@@ -5,6 +5,7 @@ import ReactDOM from "react-dom/client"
 import * as Sentry from "@sentry/react"
 import { invoke } from "@tauri-apps/api/core"
 import App from "./App"
+import { NovelMigrationDialog } from "@/components/project/novel-migration-dialog"
 import { ReaderWindow } from "./components/reader/reader-window"
 import { resolveReaderWindowPayload } from "./lib/reader-window"
 import { applyReaderWindowAppearance, resolveReaderWindowAppearance } from "./lib/reader-window-appearance"
@@ -55,6 +56,7 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement, {
   <React.StrictMode>
     <ToastProvider>
       {readerPayload ? <ReaderWindow payload={readerPayload} /> : <App />}
+      {!readerPayload && isTauri() && <NovelMigrationDialog />}
     </ToastProvider>
   </React.StrictMode>,
 )

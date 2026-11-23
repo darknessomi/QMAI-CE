@@ -147,10 +147,6 @@ pub struct BackupProgressPayload {
 
 const PROJECT_FILES: &[&str] = &["schema.md", "purpose.md"];
 
-// 知识目录的可能名称（新版用 QM，旧版用 wiki），导出时统一以 wiki 名称存入 zip
-const KNOWLEDGE_DIR_CANDIDATES: &[&str] = &["QM", "wiki"];
-const KNOWLEDGE_ZIP_NAME: &str = "wiki";
-
 /*
  * `.qmai/` 里**属于项目自身**的文件名（相对 `.qmai/` 的直接子项）。
  *
@@ -484,6 +480,7 @@ fn add_project_meta_dir_to_zip(
     base_dir: &Path,
     zip_prefix: &str,
     include_analysis: bool,
+    include_memory: bool,
     include_indexes: bool,
     include_credentials: bool,
     file_count: &mut usize,
@@ -492,8 +489,24 @@ fn add_project_meta_dir_to_zip(
     let options =
         zip::write::SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
 
+    let novel_dir = base_dir.join("novel");
+    let format_path = base_dir.parent().unwrap().join(crate::project_migration::FORMAT_FILE);
     let entries = WalkDir::new(base_dir).into_iter().filter_entry(|entry| {
-        entry.depth() != 1 || !is_retired_project_meta_entry(&entry.file_name().to_string_lossy())
+        if !include_memory && entry.path().parent() == Some(novel_dir.as_path()) {
+            return entry.file_type().is_file() && entry.path() == format_path;
+        }
+        if entry.depth() != 1 {
+            return true;
+        }
+        let name = entry.file_name().to_string_lossy();
+        if is_retired_project_meta_entry(&name) {
+            return false;
+        }
+        match name.as_ref() {
+            "novel" => include_memory || format_path.is_file(),
+            "lancedb" | "retrieval" => include_indexes,
+            _ => is_project_owned_entry(&name) || include_analysis,
+        }
     });
     for entry in entries {
         let entry = match entry {
@@ -511,22 +524,6 @@ fn add_project_meta_dir_to_zip(
             .strip_prefix(base_dir)
             .map_err(|error| format!("路径剥离失败: {error}"))?;
         let relative_slash = relative.to_string_lossy().replace('\\', "/");
-        let top_level = relative_slash.split('/').next().unwrap_or("");
-        let is_index_entry = top_level.eq_ignore_ascii_case("lancedb");
-        /*
-         * 三分类，取代原来的二分（index / 其余都是 analysis）：
-         *   · lancedb 目录下        → 索引，只受 include_indexes 控制
-         *   · 项目自身文件 + covers/ → 只要项目被备份就带上，与勾选哪些 section 无关
-         *                             （见 PROJECT_OWNED_FILES 的说明）
-         *   · 其余                   → AI 工作数据，受 include_analysis 控制
-         */
-        let project_owned = is_project_owned_entry(&relative_slash);
-        if !project_owned
-            && ((is_index_entry && !include_indexes) || (!is_index_entry && !include_analysis))
-        {
-            continue;
-        }
-
         let zip_name = format!("{}/{}", zip_prefix, relative_slash);
         if entry.file_type().is_dir() {
             zip.add_directory(&zip_name, options)
@@ -1027,24 +1024,16 @@ fn write_backup_zip<F: Fn(&BackupProgressPayload)>(
         let include_trash = project.sections.contains(&ProjectBackupSection::Trash);
 
         if include_content {
-            // 导出知识目录（优先 QM，兼容 wiki），统一以 wiki 名称存入 zip
-            for knowledge_dir in KNOWLEDGE_DIR_CANDIDATES {
-                let knowledge_path = project_path.join(knowledge_dir);
-                if knowledge_path.exists() && knowledge_path.is_dir() {
-                    let zip_sub_prefix = format!("{}/{}", zip_prefix, KNOWLEDGE_ZIP_NAME);
-                    if let Err(e) = add_dir_to_zip(
-                        &mut zip,
-                        &knowledge_path,
-                        &zip_sub_prefix,
-                        &mut file_count,
-                        &mut warnings,
-                    ) {
-                        warnings.push(format!(
-                            "复制项目 {} 的知识目录({})失败: {}",
-                            project.name, knowledge_dir, e
-                        ));
-                    }
-                    break;
+            let knowledge_path = project_path.join("QM");
+            if knowledge_path.is_dir() {
+                if let Err(e) = add_dir_to_zip(
+                    &mut zip,
+                    &knowledge_path,
+                    &format!("{zip_prefix}/QM"),
+                    &mut file_count,
+                    &mut warnings,
+                ) {
+                    warnings.push(format!("复制项目 {} 的知识目录失败: {e}", project.name));
                 }
             }
 
@@ -1096,42 +1085,17 @@ fn write_backup_zip<F: Fn(&BackupProgressPayload)>(
             }
         }
 
-        if include_memory {
-            if !include_content {
-                for knowledge_dir in KNOWLEDGE_DIR_CANDIDATES {
-                    let memory_knowledge_path = project_path.join(knowledge_dir).join("memory");
-                    if memory_knowledge_path.exists() && memory_knowledge_path.is_dir() {
-                        let zip_sub_prefix =
-                            format!("{}/{}/memory", zip_prefix, KNOWLEDGE_ZIP_NAME);
-                        if let Err(e) = add_dir_to_zip(
-                            &mut zip,
-                            &memory_knowledge_path,
-                            &zip_sub_prefix,
-                            &mut file_count,
-                            &mut warnings,
-                        ) {
-                            warnings
-                                .push(format!("复制项目 {} 的结构化记忆失败: {}", project.name, e));
-                        }
-                        break;
-                    }
-                }
-            }
-
-            let memory_path = project_path.join(".novel");
-            if memory_path.exists() && memory_path.is_dir() {
-                let zip_sub_prefix = format!("{}/.novel", zip_prefix);
+        if include_memory && !include_content {
+            let memory = project_path.join("QM/memory");
+            if memory.is_dir() {
                 if let Err(e) = add_dir_to_zip(
                     &mut zip,
-                    &memory_path,
-                    &zip_sub_prefix,
+                    &memory,
+                    &format!("{zip_prefix}/QM/memory"),
                     &mut file_count,
                     &mut warnings,
                 ) {
-                    warnings.push(format!(
-                        "复制项目 {} 的 .novel 目录失败: {}",
-                        project.name, e
-                    ));
+                    warnings.push(format!("复制项目 {} 的结构化记忆失败: {e}", project.name));
                 }
             }
         }
@@ -1151,6 +1115,7 @@ fn write_backup_zip<F: Fn(&BackupProgressPayload)>(
                     &meta_path,
                     &zip_sub_prefix,
                     include_analysis,
+                    include_memory,
                     include_indexes,
                     params.include_credentials,
                     &mut file_count,
@@ -1160,22 +1125,6 @@ fn write_backup_zip<F: Fn(&BackupProgressPayload)>(
                         "复制项目 {} 的 AI 工作数据失败: {}",
                         project.name, e
                     ));
-                }
-            }
-        }
-
-        if include_indexes {
-            let retrieval_path = project_path.join("retrieval");
-            if retrieval_path.exists() && retrieval_path.is_dir() {
-                let zip_sub_prefix = format!("{}/retrieval", zip_prefix);
-                if let Err(e) = add_dir_to_zip(
-                    &mut zip,
-                    &retrieval_path,
-                    &zip_sub_prefix,
-                    &mut file_count,
-                    &mut warnings,
-                ) {
-                    warnings.push(format!("复制项目 {} 的检索索引失败: {}", project.name, e));
                 }
             }
         }
@@ -1484,10 +1433,6 @@ pub fn do_import_backup<F: Fn(&BackupProgressPayload)>(
 
             match extract_dir_from_zip(&mut archive, &zip_prefix, target) {
                 Ok(_count) => {
-                    // 导入后自动迁移目录（旧知识目录 -> QM，旧元数据目录 -> .qmai 等）
-                    if let Err(e) = crate::commands::project::migrate_project_dirs(target) {
-                        warnings.push(format!("项目 {} 目录迁移失败: {}", project_name, e));
-                    }
                     project_results.push(ProjectRestoreResult {
                         id: project_id.clone(),
                         path: target_path.clone(),
@@ -1734,19 +1679,20 @@ mod tests {
         let project = tmp.join("project");
         std::fs::create_dir_all(project.join("QM/chapters")).unwrap();
         std::fs::create_dir_all(project.join("raw/sources")).unwrap();
-        std::fs::create_dir_all(project.join(".novel/snapshots")).unwrap();
+        std::fs::create_dir_all(project.join(".qmai/novel/snapshots")).unwrap();
         std::fs::create_dir_all(project.join("book-analysis/book-1")).unwrap();
         std::fs::create_dir_all(project.join(".qmai/lancedb")).unwrap();
-        std::fs::create_dir_all(project.join("retrieval")).unwrap();
+        std::fs::create_dir_all(project.join(".qmai/retrieval")).unwrap();
         std::fs::create_dir_all(project.join(".trash")).unwrap();
         std::fs::write(project.join("QM/chapters/chapter-1.md"), "正文").unwrap();
         std::fs::write(project.join("raw/sources/source.txt"), "资料").unwrap();
         std::fs::write(project.join("soul.md"), "灵魂").unwrap();
-        std::fs::write(project.join(".novel/snapshots/001.md"), "快照").unwrap();
+        crate::project_migration::write_current_format(&project).unwrap();
+        std::fs::write(project.join(".qmai/novel/snapshots/001.md"), "快照").unwrap();
         std::fs::write(project.join("book-analysis/book-1/result.json"), "{}").unwrap();
         std::fs::write(project.join(".qmai/chat.json"), "{}").unwrap();
         std::fs::write(project.join(".qmai/lancedb/index.bin"), "index").unwrap();
-        std::fs::write(project.join("retrieval/index.md"), "索引").unwrap();
+        std::fs::write(project.join(".qmai/retrieval/index.md"), "索引").unwrap();
         std::fs::write(project.join(".trash/deleted.md"), "删除").unwrap();
 
         let app_state = tmp.join("app-state.json");
@@ -1773,7 +1719,7 @@ mod tests {
         let names: Vec<String> = archive.file_names().map(str::to_string).collect();
         assert!(names
             .iter()
-            .any(|name| name == "projects/p1/wiki/chapters/chapter-1.md"));
+            .any(|name| name == "projects/p1/QM/chapters/chapter-1.md"));
         assert!(names
             .iter()
             .any(|name| name == "projects/p1/raw/sources/source.txt"));
@@ -1783,8 +1729,9 @@ mod tests {
             .any(|name| name == "projects/p1/.qmai/lancedb/index.bin"));
         assert!(names
             .iter()
-            .any(|name| name == "projects/p1/retrieval/index.md"));
-        assert!(!names.iter().any(|name| name.contains("/.novel/")));
+            .any(|name| name == "projects/p1/.qmai/retrieval/index.md"));
+        assert!(names.iter().any(|name| name == "projects/p1/.qmai/novel/project-format.json"));
+        assert!(!names.iter().any(|name| name.contains("/.qmai/novel/snapshots")));
         assert!(!names.iter().any(|name| name.contains("/book-analysis/")));
         assert!(!names.iter().any(|name| name.ends_with("/.qmai/chat.json")));
         assert!(!names.iter().any(|name| name.contains("/.trash/")));
@@ -1798,10 +1745,10 @@ mod tests {
         let project = tmp.join("project");
         std::fs::create_dir_all(project.join("QM/memory")).unwrap();
         std::fs::create_dir_all(project.join("QM/chapters")).unwrap();
-        std::fs::create_dir_all(project.join(".novel/snapshots")).unwrap();
+        std::fs::create_dir_all(project.join(".qmai/novel/snapshots")).unwrap();
         std::fs::write(project.join("QM/memory/canon-facts.md"), "事实").unwrap();
         std::fs::write(project.join("QM/chapters/chapter-1.md"), "正文").unwrap();
-        std::fs::write(project.join(".novel/snapshots/001.md"), "快照").unwrap();
+        std::fs::write(project.join(".qmai/novel/snapshots/001.md"), "快照").unwrap();
         let app_state = tmp.join("app-state.json");
         std::fs::write(&app_state, "{}").unwrap();
         let zip_path = tmp.join("memory.zip");
@@ -1830,13 +1777,13 @@ mod tests {
         let names: Vec<String> = archive.file_names().map(str::to_string).collect();
         assert!(names
             .iter()
-            .any(|name| name == "projects/p1/wiki/memory/canon-facts.md"));
+            .any(|name| name == "projects/p1/QM/memory/canon-facts.md"));
         assert!(names
             .iter()
-            .any(|name| name == "projects/p1/.novel/snapshots/001.md"));
+            .any(|name| name == "projects/p1/.qmai/novel/snapshots/001.md"));
         assert!(!names
             .iter()
-            .any(|name| name == "projects/p1/wiki/chapters/chapter-1.md"));
+            .any(|name| name == "projects/p1/QM/chapters/chapter-1.md"));
 
         let restore_dir = tmp.join("restore");
         let mut path_overrides = std::collections::HashMap::new();
@@ -2419,11 +2366,6 @@ mod tests {
         let b = result.projects.iter().find(|p| p.id == "B").unwrap();
         assert_eq!(b.name, "第二本", "名称应取自 registry");
         assert_eq!(b.path, b_dir.to_string_lossy(), "路径应应用重映射");
-        /*
-         * 落盘位置用"递归找文件名"而不是写死 QString 路径：
-         * 导入后会自动跑 migrate_project_dirs，知识目录可能从 wiki 被改名成 QM。
-         * 钉住具体目录名会让这条用例在无关的目录迁移改动上误报。
-         */
         let landed = WalkDir::new(&b_dir)
             .into_iter()
             .filter_map(|entry| entry.ok())

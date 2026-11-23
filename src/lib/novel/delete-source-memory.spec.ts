@@ -103,6 +103,16 @@ describe("deleteNovelSourceMemory", () => {
     },
   )
 
+  it("已提取的草稿被删除后也会移除快照并刷新", async () => {
+    fsMocks.fileExists.mockImplementation(async (path: string) => path.endsWith("/snapshots/012.snapshot.json"))
+    await deleteNovelSourceMemory("/project", {
+      kind: "chapter", pagePath: "/project/wiki/chapters/chapter-012.md", content: chapterContent("draft"),
+    })
+    await flushDeletedChapterMemoryCleanup()
+    expect(ingestMocks.deleteChapterSnapshotArtifacts).toHaveBeenCalledWith("/project", 12)
+    expect(ingestMocks.rebuildDerivedMemoryFromSnapshots).toHaveBeenCalledTimes(1)
+  })
+
   it("queues final chapter cleanup and returns before the background batch runs", async () => {
     await deleteNovelSourceMemory("/project", {
       kind: "chapter",

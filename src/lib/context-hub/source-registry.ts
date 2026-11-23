@@ -68,9 +68,9 @@ export async function scanProjectContextFiles(
   const roots = await Promise.all([
     safeList(projectPath, { maxDepth: 1 }, io),
     safeList(`${projectPath}/wiki`, { maxDepth: 30 }, io),
-    safeList(`${projectPath}/.novel`, { includeHidden: true, maxDepth: 30 }, io),
+    safeList(`${projectPath}/.qmai/novel`, { includeHidden: true, maxDepth: 30 }, io),
     safeList(`${projectPath}/.qmai`, { includeHidden: true, maxDepth: 1 }, io),
-    safeList(`${projectPath}/retrieval`, { maxDepth: 30 }, io),
+    safeList(`${projectPath}/.qmai/retrieval`, { maxDepth: 30 }, io),
   ])
   return flattenFiles(roots.flat())
 }
@@ -87,7 +87,7 @@ function toFingerprintPath(projectPath: string, path: string): string {
   const matchesProject = windowsPath
     ? normalizedPath.toLowerCase().startsWith(prefix.toLowerCase())
     : normalizedPath.startsWith(prefix)
-  return matchesProject ? normalizedPath.slice(prefix.length) : normalizedPath
+  return matchesProject ? normalizedPath.slice(prefix.length).replace(/^QM\//i, "wiki/") : normalizedPath
 }
 
 /** 判断一个已扫描的项目文件路径是否命中某项目相对路径前缀（含文件路径本身）。 */
@@ -130,7 +130,7 @@ export class ContextSourceRegistry {
   markDirty(path: string): void {
     const normalized = normalizeContextPath(path)
     const kind = classifyContextSourcePath(this.projectPath, normalized)
-    if (kind !== "ignored" && kind !== "other") this.dirtyPaths.add(normalized)
+    if (kind !== "ignored" && kind !== "other") this.dirtyPaths.add(toFingerprintPath(this.projectPath, normalized))
   }
 
   getDependencyStamp(kinds?: ContextSourceKind[]): Promise<DependencyStamp> {
@@ -207,7 +207,7 @@ export class ContextSourceRegistry {
     for (const path of sortContextSourcePaths([...byPath.keys()])) {
       const node = byPath.get(path)!
       const oldVersion = previous[path]
-      const dirty = this.dirtyPaths.has(path)
+      const dirty = this.dirtyPaths.has(toFingerprintPath(this.projectPath, path))
       if (oldVersion && !dirty && metadataMatches(oldVersion, node)) {
         next[path] = oldVersion
         continue

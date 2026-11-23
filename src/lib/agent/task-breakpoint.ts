@@ -50,48 +50,6 @@ export function updateBreakpointStage(
   }
 }
 
-export async function saveTaskBreakpoint(
-  projectPath: string,
-  breakpoint: TaskBreakpoint
-): Promise<void> {
-  const { writeFileAtomic } = await import("@/commands/fs")
-  const { normalizePath } = await import("@/lib/path-utils")
-  const pp = normalizePath(projectPath)
-  const filePath = `${pp}/.qm/breakpoint.json`
-  await writeFileAtomic(filePath, JSON.stringify(breakpoint, null, 2))
-}
-
-export async function loadTaskBreakpoint(
-  projectPath: string
-): Promise<TaskBreakpoint | null> {
-  try {
-    const { readFile, fileExists } = await import("@/commands/fs")
-    const { normalizePath } = await import("@/lib/path-utils")
-    const pp = normalizePath(projectPath)
-    const filePath = `${pp}/.qm/breakpoint.json`
-    const exists = await fileExists(filePath)
-    if (!exists) return null
-    const content = await readFile(filePath)
-    return JSON.parse(content) as TaskBreakpoint
-  } catch {
-    return null
-  }
-}
-
-export async function clearTaskBreakpoint(
-  projectPath: string
-): Promise<void> {
-  try {
-    const { writeFileAtomic } = await import("@/commands/fs")
-    const { normalizePath } = await import("@/lib/path-utils")
-    const pp = normalizePath(projectPath)
-    const filePath = `${pp}/.qm/breakpoint.json`
-    await writeFileAtomic(filePath, JSON.stringify(null))
-  } catch {
-    // Ignore clear errors
-  }
-}
-
 export function buildBreakpointResumePrompt(bp: TaskBreakpoint): string {
   return [
     "## 任务断点恢复",

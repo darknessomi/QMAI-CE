@@ -393,6 +393,9 @@ fn build_reader_window(
     title: &str,
     payload: &Value,
 ) -> Result<(), String> {
+    if crate::migration_gate::locked() { return Err("正在迁移项目，暂时无法打开编辑窗口。".into()); }
+    let session = payload.get("projectPath").and_then(Value::as_str)
+        .map(|path| crate::project_migration::acquire_project_session(Path::new(path))).transpose()?;
     let script = match serde_json::to_string(payload) {
         Ok(json) => format!("window.__QMAI_READER_PAYLOAD__ = {json};"),
         Err(err) => {
@@ -452,7 +455,13 @@ fn build_reader_window(
     }
 
     match builder.build() {
-        Ok(_) => {
+        Ok(window) => {
+            let session = std::sync::Mutex::new(session);
+            window.on_window_event(move |event| {
+                if matches!(event, tauri::WindowEvent::Destroyed) {
+                    session.lock().unwrap_or_else(|e| e.into_inner()).take();
+                }
+            });
             log_line(&format!("build() returned ok label={label}"));
             if let Ok(mut pending) = pending_labels().lock() {
                 if !pending.iter().any(|item| item == label) {

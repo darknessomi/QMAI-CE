@@ -2,7 +2,7 @@
  * 同人正典的端到端集成测试。
  *
  * 前面的单元测试各自验证了一段（数据源读文件、上下文包渲染正典），
- * 这里把整条链串起来验证：磁盘上的 `.novel/fanfic-canon.md`
+ * 这里把整条链串起来验证：磁盘上的 `.qmai/novel/fanfic-canon.md`
  * → buildContextPack 真实装配 → contextPackToPrompt 正文提示词。
  *
  * 这是「同人作品在正文生成时确实看得到原作正典」这一验收点的直接证据。
@@ -12,7 +12,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const PROJECT = "/proj"
-const CANON_PATH = `${PROJECT}/.novel/fanfic-canon.md`
+const CANON_PATH = `${PROJECT}/.qmai/novel/fanfic-canon.md`
 
 const CANON_FILE = [
   "---",

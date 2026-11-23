@@ -48,9 +48,9 @@ describe("sourceCanon 数据源", () => {
     expect(getDataSourceNamesForCategories(["outline"])).not.toContain("sourceCanon")
   })
 
-  it("按固定路径直读 .novel/fanfic-canon.md，不经模糊检索", async () => {
+  it("按固定路径直读 .qmai/novel/fanfic-canon.md，不经模糊检索", async () => {
     const readFile = vi.fn(async (path: string) => {
-      if (path === `${projectPath}/.novel/fanfic-canon.md`) {
+      if (path === `${projectPath}/.qmai/novel/fanfic-canon.md`) {
         return [
           "---",
           'fanfic_mode: "canon"',
@@ -79,7 +79,7 @@ describe("sourceCanon 数据源", () => {
     const source = loadSources().find((item) => item.name === "sourceCanon")!
     const value = await source.load({ projectPath } as never)
 
-    expect(readFile).toHaveBeenCalledWith(`${projectPath}/.novel/fanfic-canon.md`)
+    expect(readFile).toHaveBeenCalledWith(`${projectPath}/.qmai/novel/fanfic-canon.md`)
     // 注入的是正文，frontmatter 不占上下文预算
     expect(value).toContain("斗气分九段。")
     expect(value).not.toContain("fanfic_mode")

@@ -61,7 +61,7 @@ describe("ContextSourceRegistry", () => {
     expect(result).toEqual([writingStyle])
     expect(calls).toContainEqual(["E:/Novel/.qmai", { includeHidden: true, maxDepth: 1 }])
     expect(calls.some(([path]) => path === "E:/Novel/.qmai/simulations")).toBe(false)
-    expect(calls).toContainEqual(["E:/Novel/retrieval", { maxDepth: 30 }])
+    expect(calls).toContainEqual(["E:/Novel/.qmai/retrieval", { maxDepth: 30 }])
   })
 
   it("propagates a scan error when an existing directory is unreadable", async () => {
@@ -168,7 +168,7 @@ describe("ContextSourceRegistry", () => {
   })
 
   it("isolates retrieval fingerprints from unrelated entity changes", async () => {
-    const retrieval = "E:/Novel/retrieval/index.md"
+    const retrieval = "E:/Novel/.qmai/retrieval/index.md"
     const entity = "E:/Novel/wiki/entities/one.md"
     const harness = createHarness([file(retrieval, 1), file(entity, 1)])
     harness.hashes.set(retrieval, "retrieval-v1")

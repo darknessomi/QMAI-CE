@@ -4,7 +4,8 @@ import { parseFrontmatter } from "@/lib/frontmatter"
 import { getOpenDocumentGuard } from "@/lib/mcp/open-document"
 import { normalizePath } from "@/lib/path-utils"
 import { useImportProgressStore } from "@/stores/import-progress-store"
-import { chapterSnapshotJsonPath, ingestChapter } from "./chapter-ingest"
+import { hasPendingMemoryRefresh } from "./memory-refresh-status"
+import { chapterSnapshotJsonPath, finalizeProjectMemoryRebuild, ingestChapter } from "./chapter-ingest"
 import { isAiExcludedContent } from "./ai-exclude"
 import { isFinalChapter, updateChapterStatus } from "./chapter-meta"
 import { extractChapterNumber, flattenMdFiles } from "./chapter-utils"
@@ -214,6 +215,17 @@ export async function runBulkChapterIngest(
     if (chapter.chapterNumber) return chapter.chapterNumber
     if (chapter.fileChapterNumber) return chapter.fileChapterNumber
     return chapterNumberOf(chapter.fileName, content ?? await readFile(chapter.path))
+  }
+
+  if (await hasPendingMemoryRefresh(root)) {
+    useImportProgressStore.getState().updateTask(taskId, { message: "正在从已保存快照刷新记忆" })
+    try {
+      await finalizeProjectMemoryRebuild(root)
+    } catch (error) {
+      const reason = `已保存快照的记忆刷新失败：${error instanceof Error ? error.message : String(error)}`
+      useImportProgressStore.getState().finishTask(taskId, "error", { message: reason, completed: 0, total: 1 })
+      return { total: 1, succeeded: 0, failed: 1, cancelled: false, failures: [{ name: "刷新记忆", reason }] }
+    }
   }
 
   const pending: ResolvedChapter[] = []

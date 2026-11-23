@@ -57,7 +57,7 @@
 - 同人、二创、衍生文、原作续写、原作番外、AU、OOC、CP 向、穿书：`fanfic-derivative`
 
 同人与其它题材是**叠加**关系，不是替代关系：`同人 + 玄幻` 需要同时加载 `fanfic-derivative`
-与对应题材 Skill。同人还额外依赖一份**原作正典**（`.novel/fanfic-canon.md`），
+与对应题材 Skill。同人还额外依赖一份**原作正典**（`.qmai/novel/fanfic-canon.md`），
 没有正典就不允许进入生成。
 
 ## 2. 下一批建议补齐

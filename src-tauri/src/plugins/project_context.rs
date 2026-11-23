@@ -107,7 +107,7 @@ pub fn is_writable_field(field: &str) -> bool {
 // ── 项目信息读取 ─────────────────────────────────────
 
 /// 小说项目元数据文件，与前端 `src/lib/novel/project-meta.ts` 读的是同一份。
-const NOVEL_META_FILE: &str = ".novel/project-meta.json";
+const NOVEL_META_FILE: &str = ".qmai/novel/project-meta.json";
 /// 知识库目录（与 `commands/project.rs` 的 `KNOWLEDGE_DIR` 一致）。
 const KNOWLEDGE_DIR: &str = "QM";
 /// 旧版知识库目录名（`commands/project.rs` 里的 `LEGACY_KNOWLEDGE_DIR`）。
@@ -245,7 +245,7 @@ fn count_markdown_files(dir: &Path, depth_left: usize) -> usize {
 /// 1. **书名的真源是项目目录名**：`commands/project.rs::open_project` 用目录名构造
 ///    `WikiProject.name`，`rename_project` 改书名的方式是重命名目录。要「把书名改掉」
 ///    等于重命名用户的项目目录 —— 那不是插件该触发的高危动作。
-/// 2. `.novel/project-meta.json` 里虽然有 `title` / `description` / `genre`，但全仓
+/// 2. `.qmai/novel/project-meta.json` 里虽然有 `title` / `description` / `genre`，但全仓
 ///    **只读不写**（唯一消费点是 `project-store.ts:627` 读它的 `novelMode`）。往里面
 ///    写东西界面上不会有任何变化 —— 静默无效比明确报错更糟，用户会以为已生效。
 /// 3. `bookTags` / `protagonist` / `setting` 没有项目级单值存储：它们分别散在
@@ -254,7 +254,7 @@ fn count_markdown_files(dir: &Path, depth_left: usize) -> usize {
 ///    索引、双向链接）走宿主已有链路，而不是由这里拼一个 JSON 回写。
 ///
 /// 所以：**读通了，写按 D9 保留枚举并明确回不支持**。等宿主接入项目元数据写入
-/// （或把书名正式搬进 `.novel/project-meta.json`）后，这里换掉实现即可，
+/// （或把书名正式搬进 `.qmai/novel/project-meta.json`）后，这里换掉实现即可，
 /// HTTP 契约与前端都不用动。
 pub fn write_project_field(
     _root: &Path,
@@ -270,7 +270,7 @@ pub fn write_project_field(
 /// 向当前章节追加一条备注（设计 D2 的 `chapter-note` target）。
 ///
 /// **同样一律返回 `E_NOTE_WRITE_UNSUPPORTED`**：查证结果是「章节备注没有独立存储」——
-/// 章节只有 `QM/chapters/*.md` 正文与 `.novel/snapshots/` 快照两种落点，前者是用户
+/// 章节只有 `QM/chapters/*.md` 正文与 `.qmai/novel/snapshots/` 快照两种落点，前者是用户
 /// 最珍贵的资产（设计 D9：一次 bug 就毁一本书），后者是备份快照（往里写等于污染备份）。
 /// 没有第三种「只追加、不改正文」的位置之前，写正文或写快照都不能接受。
 pub fn append_chapter_note(
@@ -349,7 +349,7 @@ mod tests {
     #[test]
     fn info_falls_back_to_directory_name_and_counts_chapters() {
         let root = temp_dir("info-fallback");
-        // 没有 .novel/project-meta.json 的老项目：书名退回目录名，其余为空
+        // 没有 .qmai/novel/project-meta.json 的老项目：书名退回目录名，其余为空
         let chapters = root.join("QM").join("chapters");
         std::fs::create_dir_all(&chapters).expect("建章节目录");
         std::fs::write(chapters.join("第1章.md"), "正文").expect("写第一章");
@@ -373,7 +373,7 @@ mod tests {
     #[test]
     fn info_reads_novel_meta_when_present() {
         let root = temp_dir("info-meta");
-        std::fs::create_dir_all(root.join(".novel")).expect("建 .novel");
+        std::fs::create_dir_all(root.join(".qmai/novel")).expect("建 .qmai/novel");
         std::fs::write(
             root.join(NOVEL_META_FILE),
             r#"{"title":"长夜将至","description":"一句话简介","tags":["悬疑","都市"]}"#,
@@ -393,7 +393,7 @@ mod tests {
     #[test]
     fn info_survives_a_broken_meta_file() {
         let root = temp_dir("info-broken");
-        std::fs::create_dir_all(root.join(".novel")).expect("建 .novel");
+        std::fs::create_dir_all(root.join(".qmai/novel")).expect("建 .qmai/novel");
         std::fs::write(root.join(NOVEL_META_FILE), "{not json").expect("写坏元数据");
 
         let info = read_project_info(&root);

@@ -3,6 +3,9 @@ mod atomic_file;
 mod ce_import;
 mod commands;
 mod mcp;
+mod migration_gate;
+mod migration_worker;
+pub mod project_migration;
 mod plugins;
 #[cfg(target_os = "macos")]
 mod macos_window;
@@ -139,6 +142,7 @@ pub fn run() {
             if let Ok(dir) = app.path().resource_dir() {
                 commands::fs::set_resource_dir_hint(dir);
             }
+            migration_gate::restore_on_start(app.handle()).map_err(std::io::Error::other)?;
             app_state::prepare_app_state_store(app.handle());
             if let Ok(dir) = app.path().app_data_dir() {
                 let store_path = dir.join("app-state.json");
@@ -179,7 +183,16 @@ pub fn run() {
             commands::reader_window::maybe_run_selftest(app.handle());
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![
+        .invoke_handler({
+            let dispatch: Box<dyn Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync> = Box::new(tauri::generate_handler![
+            migration_gate::reserve_window_exit,
+            migration_gate::cancel_window_exit,
+            migration_gate::inspect_novel_migration,
+            migration_gate::novel_migration_status,
+            migration_gate::run_novel_migration,
+            migration_gate::release_project_session,
+            migration_gate::fail_novel_migration_preparation,
+            migration_gate::leave_novel_migration,
             commands::fs::read_file,
             commands::fs::write_file,
             commands::fs::write_file_if_absent,
@@ -316,8 +329,24 @@ pub fn run() {
             // 项目读写地基（设计 §7）：前端在「打开/切换/关闭项目」时登记项目根，
             // 插件通过 /host/project/* 读到的是这个动态值（不是启动时固化进会话的值）。
             plugins::plugins_set_project,
-        ])
+            ]);
+            move |invoke: tauri::ipc::Invoke<tauri::Wry>| {
+                if !migration_gate::allow_command(invoke.message.command()) {
+                    invoke.resolver.reject("小说项目正在迁移，完成前无法操作。");
+                    return true;
+                }
+                dispatch(invoke)
+            }
+        })
         .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if migration_gate::locked() {
+                    use tauri::Manager;
+                    api.prevent_close();
+                    migration_gate::warn_exit(window.app_handle());
+                    return;
+                }
+            }
             // 独立窗口（label 前缀 reader-）的生死要留痕：用户反馈的是
             // "点开弹一下就没"，光看界面分不出是建窗失败、页面没起来，
             // 还是起来之后被谁关掉了。日志与建窗命令共用一个文件。
@@ -411,7 +440,12 @@ pub fn run() {
                 }
             }
             // macOS 红叉只 hide；真正退出（Cmd+Q）必须在这里落盘。
-            if matches!(event, tauri::RunEvent::ExitRequested { .. }) {
+            if let tauri::RunEvent::ExitRequested { api, .. } = event {
+                if !migration_gate::reserve_window_exit() {
+                    api.prevent_exit();
+                    migration_gate::warn_exit(app);
+                    return;
+                }
                 app_state::persist_app_state_before_exit(app);
 
                 // 插件是常驻子进程，必须在进程退出前显式停掉：虽然 Child 设了

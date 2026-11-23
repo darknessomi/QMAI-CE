@@ -18,7 +18,7 @@ export function getOutlineIngestIdentity(projectPath: string, outlinePath: strin
   }
   const chapterNumber = -(Math.abs(hash % 999) + 1)
   const prefix = `outline-${String(Math.abs(chapterNumber)).padStart(3, "0")}`
-  const snapshotJsonPath = `${normalizePath(projectPath)}/.novel/snapshots/${prefix}.snapshot.json`
+  const snapshotJsonPath = `${normalizePath(projectPath)}/.qmai/novel/snapshots/${prefix}.snapshot.json`
 
   return { outlineName, chapterNumber, snapshotJsonPath }
 }

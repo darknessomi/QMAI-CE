@@ -7,16 +7,20 @@ import { useWikiStore } from "@/stores/wiki-store"
 
 const hoisted = vi.hoisted(() => ({
   loadMemoryCenterData: vi.fn(),
+  fileExists: vi.fn(),
+  rebuild: vi.fn(),
   readFile: vi.fn(),
   writeFile: vi.fn(),
   deleteFile: vi.fn(),
 }))
 
 vi.mock("@/commands/fs", () => ({
+  fileExists: hoisted.fileExists,
   readFile: hoisted.readFile,
   writeFile: hoisted.writeFile,
   deleteFile: hoisted.deleteFile,
 }))
+vi.mock("@/lib/novel/chapter-ingest", () => ({ finalizeProjectMemoryRebuild: hoisted.rebuild }))
 vi.mock("@/lib/novel/memory-center", () => ({
   loadMemoryCenterData: hoisted.loadMemoryCenterData,
 }))
@@ -41,7 +45,7 @@ function makeCard(chapterNumber: number, chapterTitle?: string): MemoryCenterSna
     summary: `摘要 ${chapterNumber}`,
     endingHook: "",
     memorySynced: false,
-    snapshotPath: `.novel/snapshots/${chapterNumber}.snapshot.json`,
+    snapshotPath: `.qmai/novel/snapshots/${chapterNumber}.snapshot.json`,
     characterStateChanges: [],
     knowledgeChanges: [],
     foreshadowingChanges: [],
@@ -98,6 +102,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   useWikiStore.setState({ project: PROJECT })
   hoisted.loadMemoryCenterData.mockResolvedValue(makeData())
+  hoisted.fileExists.mockResolvedValue(false)
   hoisted.readFile.mockImplementation(async (path: string) => `# ${path}\n\n正文内容`)
   host = document.createElement("div")
   document.body.appendChild(host)
@@ -110,6 +115,14 @@ afterEach(() => {
 })
 
 describe("记忆中心：单页结构", () => {
+  it("页面打开后才发生刷新失败，点击刷新仍会从现存快照补写", async () => {
+    await render()
+    hoisted.fileExists.mockResolvedValue(true)
+    const refresh = [...host.querySelectorAll("button")].find((button) => button.textContent?.includes("刷新"))
+    expect(refresh).toBeDefined()
+    await act(async () => { refresh!.click() })
+    await vi.waitFor(() => expect(hoisted.rebuild).toHaveBeenCalledWith(PROJECT.path))
+  })
   it("渲染 8 个标签，顺序为两类快照在前、6 个记忆文件在后", async () => {
     await render()
     expect(tabs().map((tab) => tab.getAttribute("data-tab-key"))).toEqual([
@@ -128,6 +141,17 @@ describe("记忆中心：单页结构", () => {
     await render()
     expect(host.textContent).not.toContain("请先从左侧记忆列表选择一个项目")
     expect(host.querySelectorAll("button").length).toBeGreaterThan(0)
+  })
+
+  it("派生记忆页只展示正文，修改入口指向来源快照", async () => {
+    hoisted.readFile.mockResolvedValue("---\ntype: structured-memory\n---\n# 正式记忆")
+    await render()
+    await clickTab("人物状态")
+    const detail = host.querySelector('[data-ui="memory-detail"]')
+    expect(detail?.textContent).toContain("编辑对应章节")
+    expect(detail?.textContent).toContain("正式记忆")
+    expect(detail?.textContent).not.toContain("structured-memory")
+    expect(detail?.querySelector("button, textarea")).toBeNull()
   })
 
   it("每个标签都带计数，且两种快照的计数各算各的", async () => {

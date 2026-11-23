@@ -45,7 +45,7 @@ import { useImportProgressStore } from "@/stores/import-progress-store"
 
 const PROJECT = "D:/QM-BOOK/他，只想活着"
 const CHAPTERS_DIR = `${PROJECT}/wiki/chapters`
-const SNAPSHOTS_DIR = `${PROJECT}/.novel/snapshots`
+const SNAPSHOTS_DIR = `${PROJECT}/.qmai/novel/snapshots`
 
 /** 真实文件（名字与 fm 都照抄盘上内容）。 */
 const REAL_CHAPTERS = [
@@ -172,7 +172,7 @@ describe("绿点取号：真实作品的矛盾章号", () => {
   })
 
   it("盘上只有 2 号快照时，只有第2章.md 亮（其余 16 章都不亮）", async () => {
-    // 这是用户这台机器上的真实现状：.novel/snapshots 里只有 002.snapshot.json。
+    // 这是用户这台机器上的真实现状：.qmai/novel/snapshots 里只有 002.snapshot.json。
     const { container, cleanup } = mount([2])
     await flush()
 

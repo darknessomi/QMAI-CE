@@ -1,3 +1,5 @@
+import { invoke } from "@tauri-apps/api/core"
+import { getMigrationView, MigrationReturned, restoreDesktopMigration, setMigrationShelfReturn } from "@/lib/novel-migration"
 import { useState, useEffect, useRef } from "react"
 import i18n from "@/i18n"
 import { useWikiStore } from "@/stores/wiki-store"
@@ -304,7 +306,7 @@ function App() {
         getCurrentWindow().onCloseRequested(async (event) => {
           // 先同步阻止本次关闭：确认与保存都是异步的，不先阻止窗口会先被销毁。
           event.preventDefault()
-          if (isClosing) return
+          if (getMigrationView() || isClosing) return
           if (!(await confirmAppQuit())) return
           isClosing = true
 
@@ -385,7 +387,15 @@ function App() {
 
           // 保存完成后强制销毁窗口。不能改用 close()：它会再触发一次 close-requested，
           // 而这里已阻止关闭，会变成「永远关不掉」。
-          await getCurrentWindow().destroy().catch((err) => console.error("关闭窗口失败:", err))
+          if (getMigrationView() || !(await invoke<boolean>("reserve_window_exit"))) {
+            isClosing = false
+            return
+          }
+          await getCurrentWindow().destroy().catch(async (err) => {
+            isClosing = false
+            await invoke("cancel_window_exit")
+            console.error("关闭窗口失败:", err)
+          })
         }).then((fn) => { unlisten = fn })
       })
     }
@@ -402,6 +412,7 @@ function App() {
   useEffect(() => {
     async function init() {
       try {
+        const recoveryPath = await restoreDesktopMigration()
         await restoreImportedUiPreferences().catch((error) => console.warn("恢复导入的界面偏好失败", error))
         // 先加载和应用主题
         const themeToUse = isTauri() ? await loadTheme() : readUiTestSkin()
@@ -530,10 +541,11 @@ function App() {
         const savedRevisionFeedbackWindowConfig = await loadRevisionFeedbackWindowConfig()
         useWikiStore.getState().setRevisionFeedbackWindowConfig(savedRevisionFeedbackWindowConfig)
         const lastProject = await getLastProject()
-        if (lastProject) {
+        const openingPath = recoveryPath ?? lastProject?.path
+        if (openingPath) {
           try {
             // 走 `openProjectWithPluginSync`：打开成功才通知插件宿主（顺序见该函数注释）。
-            const proj = await openProjectWithPluginSync(() => openProject(lastProject.path))
+            const proj = await openProjectWithPluginSync(() => openProject(openingPath))
             await handleProjectOpened(proj)
           } catch (err) {
             console.error("打开上次项目失败:", err)
@@ -702,7 +714,11 @@ function App() {
   openShelfRef.current = handleProjectOpened
   useEffect(() => {
     registerShelfOpener((project) => openShelfRef.current(project))
-    return () => registerShelfOpener(null)
+    setMigrationShelfReturn(handleSwitchProject)
+    return () => {
+      registerShelfOpener(null)
+      setMigrationShelfReturn(undefined)
+    }
   }, [])
 
   async function handleSelectRecent(proj: WikiProject) {
@@ -711,6 +727,7 @@ function App() {
       const validated = await openProjectWithPluginSync(() => openProject(proj.path))
       await handleProjectOpened(validated)
     } catch (err) {
+      if (err instanceof MigrationReturned) return
       window.alert(`打开项目失败：${err}`)
     }
   }
@@ -722,6 +739,7 @@ function App() {
       const proj = await openProjectWithPluginSync(() => openProject(path))
       await handleProjectOpened(proj)
     } catch (err) {
+      if (err instanceof MigrationReturned) return
       window.alert(`打开项目失败：${err}`)
     }
   }
@@ -730,6 +748,7 @@ function App() {
     // Clear all per-project state BEFORE flipping back to the welcome screen
     // so old data cannot leak in via any async render pass.
     await resetProjectState()
+    if (isTauri()) await invoke("release_project_session")
     setProject(null)
     setFileTree([])
     setSelectedFile(null)

@@ -1,3 +1,4 @@
+import { withMemoryWriteLock } from "./memory-cleanup-policy"
 import { normalizePath } from "@/lib/path-utils"
 import { deleteFile, fileExists, listDirectory, readFile, writeFileAtomic } from "@/commands/fs"
 import { parseSources, writeSources } from "@/lib/sources-merge"
@@ -203,12 +204,7 @@ async function runDeletedChapterCleanupBatch(
     async (chapterNumber) => deleteChapterSnapshotArtifacts(projectPath, chapterNumber),
   )
 
-  try {
-    await rebuildDerivedMemoryFromSnapshots(projectPath)
-  } catch (error) {
-    console.error("[delete-source-memory] failed to rebuild derived memory:", projectPath, error)
-  }
-
+  await rebuildDerivedMemoryFromSnapshots(projectPath)
   await cleanupDeletedSourceEntities(projectPath, snapshotNumbers)
   clearGraphCache()
   useWikiStore.getState().bumpDataVersion()
@@ -224,7 +220,7 @@ async function processPendingChapterCleanups(): Promise<void> {
     const [projectPath, pending] = next
     pendingChapterCleanups.delete(projectPath)
     try {
-      await runDeletedChapterCleanupBatch(projectPath, [...pending.values()])
+      await withMemoryWriteLock(projectPath, () => runDeletedChapterCleanupBatch(projectPath, [...pending.values()]))
     } catch (error) {
       console.error("[delete-source-memory] background cleanup failed:", projectPath, error)
     }
@@ -279,7 +275,10 @@ export async function deleteNovelSourceMemory(
   if (snapshotNumber === null) return
 
   if (input.kind === "chapter") {
-    if (!shouldCleanupDeletedChapterMemory(input.content)) return
+    if (!shouldCleanupDeletedChapterMemory(input.content)) {
+      const path = `${normalizePath(projectPath)}/.qmai/novel/snapshots/${String(snapshotNumber).padStart(3, "0")}.snapshot.json`
+      if (!await fileExists(path)) return
+    }
     enqueueDeletedChapterMemoryCleanup(projectPath, snapshotNumber, input.pagePath)
     return
   }
@@ -300,6 +299,10 @@ export async function deleteOrphanMemorySnapshots(
   projectPath: string,
   snapshotNumbers: readonly number[],
 ): Promise<number> {
+  return withMemoryWriteLock(projectPath, () => deleteOrphansLocked(projectPath, snapshotNumbers))
+}
+
+async function deleteOrphansLocked(projectPath: string, snapshotNumbers: readonly number[]): Promise<number> {
   const unique = [...new Set(snapshotNumbers)].filter((value) => Number.isInteger(value))
   if (unique.length === 0) return 0
 
@@ -309,20 +312,9 @@ export async function deleteOrphanMemorySnapshots(
 
   let removed = 0
   await mapWithConcurrency(unique, ENTITY_CLEANUP_CONCURRENCY, async (snapshotNumber) => {
-    try {
-      const deleted = await deleteChapterSnapshotArtifacts(projectPath, snapshotNumber)
-      if (deleted) removed += 1
-    } catch (error) {
-      console.error("[delete-source-memory] 清理孤儿快照失败:", snapshotNumber, error)
-    }
+    if (await deleteChapterSnapshotArtifacts(projectPath, snapshotNumber)) removed += 1
   })
-
-  try {
-    await rebuildDerivedMemoryFromSnapshots(projectPath)
-  } catch (error) {
-    console.error("[delete-source-memory] 重建派生记忆失败:", projectPath, error)
-  }
-
+  await rebuildDerivedMemoryFromSnapshots(projectPath)
   await cleanupDeletedSourceEntities(projectPath, unique)
   clearGraphCache()
   useWikiStore.getState().bumpDataVersion()

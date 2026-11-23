@@ -60,9 +60,6 @@ const STATIC_SOURCES = new Set([
   "relatedSettings",
   // 以下源加载的是项目级数据（不依赖章节号），改用恒定 key 跨章节/跨消息复用
   "fallbackRecentSummaries",
-  "fallbackCharacterStates",
-  "fallbackForeshadowingStates",
-  "fallbackTimeline",
   // retrieval 现在返回项目级原始条目（按章节过滤移到构建阶段），同样跨章节复用
   "retrieval",
 ])
@@ -84,6 +81,9 @@ const CHAPTER_SCOPED_SOURCES = new Set([
   "volumeContext",
   "snapshots",
   "recentChapterContents",
+  "fallbackCharacterStates",
+  "fallbackForeshadowingStates",
+  "fallbackTimeline",
   "fallbackPreviousEnding",
   "revisionFeedback",
 ])
@@ -99,7 +99,12 @@ const SOURCE_CACHE_VERSIONS: Partial<Record<string, number>> = {
   // 2 → 3：sectionBriefing 现在会额外输出「相关道具」小节。旧缓存条目是
   // 用不含物品的代码算出来的，而它的依赖戳（大纲 + 快照）并没有变，
   // 不bump 就会一直命中旧值，表现为「改了代码但提示词里始终没有道具」。
-  sectionBriefing: 3,
+  sectionBriefing: 4,
+  snapshots: 2,
+  retrieval: 2,
+  fallbackCharacterStates: 2,
+  fallbackForeshadowingStates: 2,
+  fallbackTimeline: 2,
 }
 
 function canonicalize(value: unknown): unknown {

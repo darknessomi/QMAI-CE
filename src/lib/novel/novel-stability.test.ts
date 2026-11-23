@@ -28,7 +28,7 @@ describe("长篇稳定性测试", () => {
     it("能正确列出 1000 个快照文件", async () => {
       const snapshotFiles = Array.from({ length: 1000 }, (_, i) => ({
         name: `${String(i + 1).padStart(3, "0")}.snapshot.json`,
-        path: `/project/.novel/snapshots/${String(i + 1).padStart(3, "0")}.snapshot.json`,
+        path: `/project/.qmai/novel/snapshots/${String(i + 1).padStart(3, "0")}.snapshot.json`,
         is_dir: false,
       }))
 
@@ -43,7 +43,7 @@ describe("长篇稳定性测试", () => {
     it("快照序号排序正确", async () => {
       const snapshotFiles = [50, 3, 999, 1, 100, 500].map(n => ({
         name: `${String(n).padStart(3, "0")}.snapshot.json`,
-        path: `/project/.novel/snapshots/${String(n).padStart(3, "0")}.snapshot.json`,
+        path: `/project/.qmai/novel/snapshots/${String(n).padStart(3, "0")}.snapshot.json`,
         is_dir: false,
       }))
 
@@ -310,7 +310,7 @@ describe("Phase 8 长篇吞吐量压力测试", () => {
     it("模拟 1000 章快照文件列表", async () => {
       const snapshotFiles = Array.from({ length: 1000 }, (_, i) => ({
         name: `${String(i + 1).padStart(3, "0")}.snapshot.json`,
-        path: `/project/.novel/snapshots/${String(i + 1).padStart(3, "0")}.snapshot.json`,
+        path: `/project/.qmai/novel/snapshots/${String(i + 1).padStart(3, "0")}.snapshot.json`,
         is_dir: false,
       }))
       mockListDirectory.mockResolvedValue(snapshotFiles)

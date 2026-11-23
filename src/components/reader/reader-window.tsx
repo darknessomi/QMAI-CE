@@ -15,6 +15,8 @@ import { WikiReader } from "@/components/editor/wiki-reader"
 import { OutlineDualPreview } from "@/components/editor/outline-dual-preview"
 import { splitChapterHeading } from "@/lib/chapter-selection"
 import { parseFrontmatter } from "@/lib/frontmatter"
+import { registerMigrationReaderFlush } from "@/lib/migration-reader-flush"
+import { invoke } from "@tauri-apps/api/core"
 import { isTauri } from "@/lib/platform"
 import { resolveReaderWindowPayload, type ReaderWindowPayload } from "@/lib/reader-window"
 import {
@@ -238,6 +240,13 @@ export function ReaderWindow({ payload: providedPayload }: ReaderWindowProps) {
    * 时刻只会添堵。写不成功（冲突 / 磁盘拒绝）时**不关窗**，把冲突条留在界面上
    * 让用户处理 —— 悄悄关掉等于丢字。
    */
+  const saveForMigration = useRef(async () => true)
+  saveForMigration.current = async () => !hasPendingChanges() || (await flushNow() && !hasPendingChanges())
+  useEffect(() => {
+    if (!isTauri()) return
+    const pending = registerMigrationReaderFlush(() => saveForMigration.current())
+    return () => { void pending.then((stop) => stop()).catch(() => undefined) }
+  }, [])
   const closingRef = useRef(false)
   useEffect(() => {
     if (!isTauri()) return
@@ -269,6 +278,7 @@ export function ReaderWindow({ payload: providedPayload }: ReaderWindowProps) {
           event.preventDefault()
           const ok = await flushNow()
           if (!ok || hasPendingChanges()) return
+          if (await invoke("novel_migration_status")) return
           closingRef.current = true
           try {
             await win.destroy()

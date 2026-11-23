@@ -129,6 +129,7 @@ fn handle_connection(
 }
 
 fn call_frontend(app: &AppHandle, pending: &PendingCalls, params: &Value) -> Result<Value, String> {
+    if crate::migration_gate::locked() { return Err("小说项目正在迁移，请稍后重试。".into()); }
     let id = Uuid::new_v4().to_string();
     let (sender, receiver) = mpsc::channel();
     pending

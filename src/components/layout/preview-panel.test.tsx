@@ -152,12 +152,12 @@ describe("preview-panel final chapter save state", () => {
    * ── 标题行徽章以「记忆是否已提取」为准（用户口径）──
    *
    * 缺陷现场：第 6、15 章的文件里写着 `chapter_status: final`（批量导入落下的），
-   * 但没有 `.novel/snapshots/` 快照，于是侧栏那一行没有绿点、
+   * 但没有 `.qmai/novel/snapshots/` 快照，于是侧栏那一行没有绿点、
    * 标题行徽章却是绿色「正式」。
    *
    * 这三条各自守一环，少任何一环徽章都会退回错误语义：
    *   1. 取号走共享解析器（与侧栏绿点同一个），不是 frontmatter 的 chapter_number；
-   *   2. 快照号从 `.novel/snapshots` 目录读；
+   *   2. 快照号从 `.qmai/novel/snapshots` 目录读；
    *   3. 口径通过 `memoryExtracted` 交给 buildChapterEditorHeader
    *      —— 摘掉它，`status` 就退回读 `chapter_status`，缺陷原样复现。
    */
@@ -166,7 +166,7 @@ describe("preview-panel final chapter save state", () => {
     expect(source).toContain("resolveChapterMemoryDotState")
     expect(source).toContain("chapterSnapshotNumbersFromFileNames")
     expect(source).toContain("chapterSnapshotNumbersFrom")
-    expect(source).toContain("/.novel/snapshots")
+    expect(source).toContain("/.qmai/novel/snapshots")
     expect(source).toContain("{ memoryExtracted: chapterMemoryExtracted }")
   })
 

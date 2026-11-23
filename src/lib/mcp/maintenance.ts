@@ -46,7 +46,7 @@ function requireCleanEditor(projectPath: string): void {
   if (selected && isMemoryDocument(selected) && getOpenDocumentGuard(selected)?.isDirty()) throw new Error("当前记忆文档有未保存修改，请先保存或放弃编辑，再执行维护。")
   if (normalizeComparablePath(useWikiStore.getState().project?.path ?? "") !== projectPath) throw new Error("当前项目已变化，未执行维护。")
 }
-function isMemoryDocument(path: string): boolean { return /\/(?:wiki|QM)\/(?:memory|tracking|entities)\/|\/\.novel\/|\/retrieval\//.test(path.replace(/\\/g, "/")) }
+function isMemoryDocument(path: string): boolean { return /\/(?:wiki|QM)\/(?:memory|entities)\/|\/\.qmai\/novel\/|\/\.qmai\/retrieval\//.test(path.replace(/\\/g, "/")) }
 async function refreshLive(projectPath: string, documents: boolean) {
   const state = useWikiStore.getState()
   if (normalizeComparablePath(state.project?.path ?? "") !== projectPath) return

@@ -12,7 +12,7 @@ vi.mock("@/commands/fs", () => ({
   writeFileAtomic: vi.fn(),
   createDirectory: vi.fn(),
   fileExists: vi.fn(),
-  listDirectory: vi.fn(),
+  listDirectory: vi.fn(async () => []),
   deleteFile: vi.fn(),
 }))
 
@@ -117,11 +117,11 @@ describe("snapshot-history", () => {
 
     expect(restored.summary).toBe("历史摘要")
     expect(mockWriteFileAtomic).toHaveBeenCalledWith(
-      "/project/.novel/snapshots/003.snapshot.json",
+      "/project/.qmai/novel/snapshots/003.snapshot.json",
       expect.stringContaining('"revision": 2'),
     )
     expect(mockWriteFileAtomic).toHaveBeenCalledWith(
-      "/project/.novel/snapshots/003.snapshot.md",
+      "/project/.qmai/novel/snapshots/003.snapshot.md",
       expect.stringContaining("历史摘要"),
     )
   })
@@ -220,12 +220,12 @@ describe("snapshot-history", () => {
       "/project/wiki/memory/character-states.md",
       expect.stringContaining("林烬"),
     )
-    expect(mockWriteFile).toHaveBeenCalledWith(
-      "/project/.novel/character-states.json",
+    expect(mockWriteFileAtomic).toHaveBeenCalledWith(
+      "/project/.qmai/novel/character-states.json",
       expect.stringContaining('"characterName": "林烬"'),
     )
     expect(mockWriteFileAtomic).toHaveBeenCalledWith(
-      "/project/.novel/cognition-state.json",
+      "/project/.qmai/novel/cognition-state.json",
       expect.stringContaining("手机不是这个世界的产物"),
     )
   })

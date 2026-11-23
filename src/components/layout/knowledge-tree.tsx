@@ -550,7 +550,7 @@ export function KnowledgeTree({
   /**
    * 章节记忆快照的号码集合。只在**章节**页签下读。
    *
-   * 这里直接读 `.novel/snapshots` 目录名，而不是走 `chapter-ingest` 的
+   * 这里直接读 `.qmai/novel/snapshots` 目录名，而不是走 `chapter-ingest` 的
    * `listSnapshots`：那条路径要先动态 import 整个 chapter-ingest 模块图，
    * 于是章节目录第一次打开时绿点要等模块加载完才亮（少则几十毫秒，
    * 慢机器上肉眼可见），而绿点需要的只是目录里的几个文件名。
@@ -578,7 +578,7 @@ export function KnowledgeTree({
     let cancelled = false
     void (async () => {
       try {
-        const snapshotDir = `${normalizePath(project.path)}/.novel/snapshots`
+        const snapshotDir = `${normalizePath(project.path)}/.qmai/novel/snapshots`
         const tree = await listDirectory(snapshotDir)
         // 先解析出全部快照号（含大纲的负数），再只留章节的正数。
         const numbers = chapterSnapshotNumbersFrom(chapterSnapshotNumbersFromFileNames(tree.map((file) => file.name)))

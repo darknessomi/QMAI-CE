@@ -15,6 +15,7 @@ pub fn run_guarded<T, F>(label: &str, f: F) -> Result<T, String>
 where
     F: FnOnce() -> Result<T, String>,
 {
+    let _lease = crate::migration_gate::enter_io()?;
     match catch_unwind(AssertUnwindSafe(f)) {
         Ok(r) => r,
         Err(payload) => Err(report(label, payload)),
@@ -27,6 +28,7 @@ where
     Fut: std::future::Future<Output = Result<T, String>>,
 {
     use futures::FutureExt;
+    let _lease = crate::migration_gate::enter_io()?;
     match AssertUnwindSafe(fut).catch_unwind().await {
         Ok(r) => r,
         Err(payload) => Err(report(label, payload)),

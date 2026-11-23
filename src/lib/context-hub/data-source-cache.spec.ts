@@ -20,10 +20,10 @@ function prefixToKinds(prefix: string): ContextSourceKind[] {
   if (prefix.startsWith("wiki/chapters/")) return ["chapter"]
   if (prefix.startsWith("wiki/outlines/")) return ["outline"]
   if (prefix.startsWith("wiki/settings/") || prefix === "wiki/canon.md" || prefix === "wiki/writing-style.md" || prefix === ".qmai/writing-style.json") return ["setting"]
-  if (prefix.startsWith("wiki/entities/") || prefix.startsWith("wiki/characters/") || prefix === ".novel/cognition-state.json") return ["entity"]
-  if (prefix.startsWith("wiki/memory/") || prefix === ".novel/timeline.json") return ["memory"]
-  if (prefix.startsWith(".novel/snapshots/") || prefix.startsWith(".novel/community-summaries/") || prefix === ".novel/revision-feedback.json") return ["snapshot"]
-  if (prefix.startsWith("retrieval/")) return ["retrieval"]
+  if (prefix.startsWith("wiki/entities/") || prefix.startsWith("wiki/characters/") || prefix === ".qmai/novel/cognition-state.json") return ["entity"]
+  if (prefix.startsWith("wiki/memory/") || prefix === ".qmai/novel/timeline.json") return ["memory"]
+  if (prefix.startsWith(".qmai/novel/snapshots/") || prefix.startsWith(".qmai/novel/community-summaries/") || prefix === ".qmai/novel/revision-feedback.json") return ["snapshot"]
+  if (prefix.startsWith(".qmai/retrieval/")) return ["retrieval"]
   return ["other"]
 }
 
@@ -440,7 +440,7 @@ describe("DataSourceCacheAdapter", () => {
 
     await harness.adapter.load(source, context, directLoad)
     await harness.adapter.load(source, context, directLoad)
-    harness.revisions.snapshot!["E:/Novel/.novel/community-summaries/new.json"] = 1
+    harness.revisions.snapshot!["E:/Novel/.qmai/novel/community-summaries/new.json"] = 1
     await harness.adapter.load(source, context, directLoad)
 
     expect(directLoad).toHaveBeenCalledTimes(2)

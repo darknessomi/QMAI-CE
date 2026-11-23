@@ -20,7 +20,7 @@ async function readOutlineSnapshots(
   const projectPath = deriveProjectPathFromOutlinesDir(outlinesDir)
   if (!projectPath) return null
 
-  const snapshotDir = `${projectPath}/.novel/snapshots`
+  const snapshotDir = `${projectPath}/.qmai/novel/snapshots`
   let files: Array<{ name: string; path: string }> = []
   try {
     const nodes = await listDirectory(snapshotDir)

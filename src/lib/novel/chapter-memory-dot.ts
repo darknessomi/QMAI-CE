@@ -2,7 +2,7 @@
  * 章节目录里「是否已提取记忆」那枚小圆点的判定。
  *
  * 为什么不看 frontmatter：章节记忆提取**不往章节文件写任何标记**
- * （`chapter-ingest.ts` 只落 `.novel/snapshots/NNN.snapshot.json`），
+ * （`chapter-ingest.ts` 只落 `.qmai/novel/snapshots/NNN.snapshot.json`），
  * 所以「已提取」的唯一依据就是该章号的快照文件存在。
  *
  * 单独抽成纯函数是因为它有两条容易写错的分支：章号有两个来源、
@@ -54,7 +54,7 @@ export function chapterSnapshotNumbersFrom(snapshotNumbers: readonly number[]): 
 }
 
 /**
- * `.novel/snapshots` 目录里的文件名 → 快照号（大纲是负数，章节是正数），升序。
+ * `.qmai/novel/snapshots` 目录里的文件名 → 快照号（大纲是负数，章节是正数），升序。
  *
  * 这是 `listSnapshots` 的解析部分，单独抽出来是为了让**只需要这几个数字**的调用方
  * （章节目录的绿点）不必再去动态 import `chapter-ingest` 这个重模块。

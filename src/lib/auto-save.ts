@@ -3,6 +3,7 @@ import { useChatStore } from "@/stores/chat-store"
 import { useWikiStore } from "@/stores/wiki-store"
 import { saveReviewItems, saveChatHistory } from "./persist"
 import { isTauri } from "@/lib/platform"
+import { getMigrationView } from "./novel-migration"
 
 let reviewTimer: ReturnType<typeof setTimeout> | null = null
 let chatTimer: ReturnType<typeof setTimeout> | null = null
@@ -17,7 +18,7 @@ const PERIODIC_SAVE_INTERVAL_MS = 30_000
  */
 function doPeriodicSave(): void {
   const project = useWikiStore.getState().project
-  if (!project || !isTauri()) return
+  if (!project || !isTauri() || getMigrationView()?.ioFrozen) return
   const state = useChatStore.getState()
   if (Object.keys(state.streamingContents).length > 0) return
   if (state.conversations.length === 0) return
@@ -25,10 +26,21 @@ function doPeriodicSave(): void {
     .catch((err) => console.error("兜底保存失败:", err))
 }
 
+/** 保存真正待处理的审查变更，避免尚未加载时用空列表覆盖旧项目。 */
+export async function flushQueuedReviewBeforeMigration(projectPath: string): Promise<void> {
+  if (reviewTimer === null) return
+  const pending = reviewTimer
+  clearTimeout(pending)
+  await saveReviewItems(projectPath, useReviewStore.getState().items)
+  if (reviewTimer === pending) reviewTimer = null
+}
+
 export function setupAutoSave(): void {
   useReviewStore.subscribe(() => {
     if (reviewTimer) clearTimeout(reviewTimer)
     reviewTimer = setTimeout(() => {
+      reviewTimer = null
+      if (getMigrationView()?.ioFrozen) return
       const project = useWikiStore.getState().project
       if (project && isTauri()) {
         const state = useReviewStore.getState()
@@ -43,6 +55,8 @@ export function setupAutoSave(): void {
     if (Object.keys(state.streamingContents).length > 0) return
     if (chatTimer) clearTimeout(chatTimer)
     chatTimer = setTimeout(() => {
+      chatTimer = null
+      if (getMigrationView()?.ioFrozen) return
       // 在回调中重新获取最新状态，避免闭包捕获陈旧数据
       const latestState = useChatStore.getState()
       const project = useWikiStore.getState().project

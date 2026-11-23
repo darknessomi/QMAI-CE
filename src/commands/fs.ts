@@ -186,6 +186,8 @@ export async function saveProjectCover(path: string, source: string): Promise<st
 }
 
 export async function openProject(path: string): Promise<WikiProject> {
+  const { ensureProjectMigrated } = await import("@/lib/novel-migration")
+  await ensureProjectMigrated(path)
   const raw = await invoke<RawProject>("open_project", { path })
   const id = await ensureProjectId(raw.path)
   await upsertProjectInfo(id, raw.path, raw.name)

@@ -2,7 +2,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { FileNode } from "@/types/wiki"
 import type { ChapterSnapshot } from "./chapter-ingest"
 import { clearGraphCache, buildRetrievalGraph } from "@/lib/graph-relevance"
-import { deleteChapterSnapshots, listSnapshotHistory, syncSnapshotToMemory } from "./chapter-ingest"
+import { deleteChapterSnapshots, finalizeProjectMemoryRebuild, listSnapshotHistory, restoreSnapshotHistory, syncSnapshotToMemory } from "./chapter-ingest"
+import { deleteFile, writeFileAtomic } from "@/commands/fs"
+import { hasPendingMemoryRefresh } from "./memory-refresh-status"
 
 const files = new Map<string, string>()
 const dirs = new Set<string>()
@@ -125,7 +127,7 @@ describe("syncSnapshotToMemory", () => {
     clearGraphCache()
     ensureDir("/project/wiki/entities")
     ensureDir("/project/wiki/chapters")
-    ensureDir("/project/.novel/snapshots")
+    ensureDir("/project/.qmai/novel/snapshots")
     writeTestFile("/project/wiki/chapters/chapter-001.md", [
       "---",
       "type: chapter",
@@ -186,7 +188,7 @@ describe("syncSnapshotToMemory", () => {
   })
 
   it("鍚屾澶х翰蹇収鏃朵細鐢熸垚鍙洖鐪嬬殑鍘嗗彶蹇収", async () => {
-    writeTestFile("/project/.novel/snapshots/outline-001.snapshot.json", JSON.stringify({
+    writeTestFile("/project/.qmai/novel/snapshots/outline-001.snapshot.json", JSON.stringify({
       ...syncedOutlineSnapshot,
       summary: "鍚屾鍓嶇殑澶х翰蹇収",
     }, null, 2))
@@ -200,7 +202,7 @@ describe("syncSnapshotToMemory", () => {
     expect(backupContent).not.toContain("memorySyncedAt")
   })
   it("writes revision metadata to the current snapshot and archives the superseded snapshot as history", async () => {
-    writeTestFile("/project/.novel/snapshots/001.snapshot.json", JSON.stringify({
+    writeTestFile("/project/.qmai/novel/snapshots/001.snapshot.json", JSON.stringify({
       ...syncedSnapshot,
       summary: "old synced snapshot",
       sourceType: "chapter",
@@ -212,7 +214,7 @@ describe("syncSnapshotToMemory", () => {
 
     await syncSnapshotToMemory("/project", syncedSnapshot)
 
-    const current = JSON.parse(files.get("/project/.novel/snapshots/001.snapshot.json") ?? "{}")
+    const current = JSON.parse(files.get("/project/.qmai/novel/snapshots/001.snapshot.json") ?? "{}")
     expect(current.sourceType).toBe("chapter")
     expect(current.sourceSequence).toBe(1)
     expect(current.revision).toBe(2)
@@ -230,7 +232,7 @@ describe("syncSnapshotToMemory", () => {
   })
 
   it("removes stale projection pages that only belong to the superseded snapshot id", async () => {
-    writeTestFile("/project/.novel/snapshots/001.snapshot.json", JSON.stringify({
+    writeTestFile("/project/.qmai/novel/snapshots/001.snapshot.json", JSON.stringify({
       ...syncedSnapshot,
       summary: "old synced snapshot",
       sourceType: "chapter",
@@ -261,6 +263,107 @@ describe("syncSnapshotToMemory", () => {
     expect(files.has("/project/wiki/entities/mobile-phone.md")).toBe(false)
   })
 
+  it("编辑、恢复及删除同步检索、人物页、时间线和进度，重提早章不使进度回退", async () => {
+    const initial = { ...syncedSnapshot, chapterTitle: "钟声", characterStateChanges: ["林默：在车站"], timelineEvents: ["夜里抵达车站"] }
+    const later = { ...syncedSnapshot, chapterNumber: 2, chapterId: "chapter-2", chapterTitle: "返程" }
+    const people = "/project/wiki/memory/character-states.md", timeline = "/project/wiki/memory/timeline.md"
+    const index = "/project/.qmai/retrieval/index.md", volume = "/project/.qmai/retrieval/volume-1.md"
+    const progress = "/project/wiki/memory/writing-progress.md"
+    await syncSnapshotToMemory("/project", initial)
+    await syncSnapshotToMemory("/project", later)
+    writeTestFile(volume, files.get(volume)!.replace("- 人工备注：", "- 人工备注：保留第一行\n保留第二行"))
+    await syncSnapshotToMemory("/project", { ...initial, characterStateChanges: [], timelineEvents: [] })
+    expect(files.get(people)).not.toContain("在车站")
+    expect(files.get(volume)).not.toContain("夜里抵达车站")
+    expect(files.get(progress)).toContain("第2章：返程")
+    const [revision] = await listSnapshotHistory("/project", 1)
+    await restoreSnapshotHistory("/project", 1, revision.fileName)
+    expect(files.get(people)).toContain("在车站")
+    expect(files.get(timeline)).toContain("夜里抵达车站")
+    expect(files.get(volume)).toContain("夜里抵达车站")
+    expect(files.get(volume)).toContain("保留第一行\n保留第二行")
+    expect(files.has(index)).toBe(true)
+    await deleteChapterSnapshots("/project", 2)
+    expect(files.get(progress)).toContain("第1章：钟声")
+    expect(files.get(volume)).not.toContain("## 第2章")
+    await deleteChapterSnapshots("/project", 1)
+    expect(files.has(volume)).toBe(false)
+    expect(files.get(index)).not.toContain("volume-1")
+  })
+
+  it("索引写入失败后用原快照补刷，保留提取时的正文指纹和修订号", async () => {
+    const index = "/project/.qmai/retrieval/index.md"
+    const writer = vi.mocked(writeFileAtomic)
+    const normalWrite = writer.getMockImplementation()!
+    writer.mockImplementation(async (path, content) => {
+      if (path === index) throw new Error("模拟磁盘写入失败")
+      await normalWrite(path, content)
+    })
+    try {
+      await expect(syncSnapshotToMemory("/project", syncedSnapshot, {
+        source: { filePath: "wiki/chapters/chapter-001.md", sourceHash: "12345" },
+      })).rejects.toThrow("可在记忆中心")
+    } finally {
+      writer.mockImplementation(normalWrite)
+    }
+    expect(await hasPendingMemoryRefresh("/project")).toBe(true)
+    const snapshotPath = "/project/.qmai/novel/snapshots/001.snapshot.json"
+    const original = files.get(snapshotPath)
+    expect(original).toBeTruthy()
+    writeTestFile("/project/wiki/chapters/chapter-001.md", "---\nchapter_number: 1\n---\n正文已修改")
+    await finalizeProjectMemoryRebuild("/project")
+    expect(await hasPendingMemoryRefresh("/project")).toBe(false)
+    expect(files.get(snapshotPath)).toBe(original)
+    expect(files.get(index)).toContain("volume-1")
+    expect(files.get("/project/.qmai/retrieval/volume-1.md")).toContain("sourceHash：12345")
+  })
+
+  it("同一毫秒保存和恢复不覆盖所选历史快照", async () => {
+    const time = vi.spyOn(Date, "now").mockReturnValue(1780000000000)
+    try {
+      await syncSnapshotToMemory("/project", { ...syncedSnapshot, summary: "原稿" })
+      await syncSnapshotToMemory("/project", { ...syncedSnapshot, summary: "修改稿" })
+      const [original] = await listSnapshotHistory("/project", 1)
+      const restored = await restoreSnapshotHistory("/project", 1, original.fileName)
+      expect(restored.summary).toBe("原稿")
+      const versions = await listSnapshotHistory("/project", 1)
+      expect(versions.map((v) => JSON.parse(files.get(v.path)!).summary)).toEqual(["修改稿", "原稿"])
+      expect(versions.every((v) => Number.isFinite(Date.parse(v.createdAt)))).toBe(true)
+    } finally {
+      time.mockRestore()
+    }
+  })
+
+  it("在写章节附属文件和删除快照中途出错时，重试完成原操作", async () => {
+    const md = "/project/.qmai/novel/snapshots/001.snapshot.md"
+    const writer = vi.mocked(writeFileAtomic)
+    const normalWrite = writer.getMockImplementation()!
+    writer.mockImplementation(async (path, content) => {
+      if (path === md) throw new Error("写盘失败")
+      await normalWrite(path, content)
+    })
+    try {
+      await expect(syncSnapshotToMemory("/project", syncedSnapshot)).rejects.toThrow("写盘失败")
+    } finally { writer.mockImplementation(normalWrite) }
+    await finalizeProjectMemoryRebuild("/project")
+    expect(files.get(md)).toContain(syncedSnapshot.summary)
+    expect(files.has("/project/.qmai/novel/chapter-ingest-output/001.output.json")).toBe(true)
+
+    const remove = vi.mocked(deleteFile)
+    const normalRemove = remove.getMockImplementation()!
+    remove.mockImplementation(async (path) => {
+      if (path.endsWith(".snapshot.json")) throw new Error("删除失败")
+      await normalRemove(path)
+    })
+    try {
+      await expect(deleteChapterSnapshots("/project", 1)).rejects.toThrow("删除失败")
+    } finally { remove.mockImplementation(normalRemove) }
+    await finalizeProjectMemoryRebuild("/project")
+    expect([...files.keys()].some((path) => path.includes("/001."))).toBe(false)
+    expect(await hasPendingMemoryRefresh("/project")).toBe(false)
+    expect(files.has("/project/.qmai/retrieval/volume-1.md")).toBe(false)
+  })
+
   it("clears derived memory files when deleting the last snapshot", async () => {
     const snapshotWithMemory: ChapterSnapshot = {
       ...syncedSnapshot,
@@ -268,110 +371,30 @@ describe("syncSnapshotToMemory", () => {
       characterStateChanges: ["主角: 正在追查旧手机"],
       foreshadowingChanges: ["新增伏笔: 旧手机 - 屏幕仍会亮"],
     }
-    writeTestFile("/project/.novel/snapshots/001.snapshot.json", JSON.stringify(snapshotWithMemory, null, 2))
+    writeTestFile("/project/.qmai/novel/snapshots/001.snapshot.json", JSON.stringify(snapshotWithMemory, null, 2))
     await syncSnapshotToMemory("/project", snapshotWithMemory)
 
     expect(files.get("/project/wiki/memory/chapter-snapshots.md")).toContain("新的设定")
 
     await deleteChapterSnapshots("/project", 1)
 
-    expect(files.has("/project/.novel/snapshots/001.snapshot.json")).toBe(false)
+    expect(files.has("/project/.qmai/novel/snapshots/001.snapshot.json")).toBe(false)
     expect(files.get("/project/wiki/memory/chapter-snapshots.md")).not.toContain("新的设定")
     expect(files.get("/project/wiki/memory/character-cognition.md")).not.toContain("误以为手机")
     expect(files.get("/project/wiki/memory/character-states.md")).not.toContain("正在追查")
     expect(files.get("/project/wiki/memory/foreshadowing-tracker.md")).not.toContain("旧手机")
   })
 
-  it("删除大纲快照时只撤该编号，不用章节快照重写手改的派生记忆", async () => {
-    writeTestFile("/project/.novel/snapshots/001.snapshot.json", JSON.stringify({
-      ...syncedSnapshot,
-      characterStateChanges: ["主角: 来自章节快照"],
-      knowledgeChanges: ["主角知道来自章节快照"],
-      timelineEvents: ["章节快照时间线"],
-      foreshadowingChanges: ["新增伏笔: 章节伏笔 - 不该在删大纲时重放"],
-    }, null, 2))
-    writeTestFile("/project/.novel/snapshots/outline-005.snapshot.json", JSON.stringify({
-      ...syncedOutlineSnapshot,
-      chapterNumber: -5,
-    }, null, 2))
-    writeTestFile("/project/.novel/snapshots/outline-005.snapshot.md", "# 大纲快照")
-
-    const characterStates = JSON.stringify({
-      characters: [{ characterName: "手改角色", status: "保留" }],
-      lastUpdated: "manual",
-    }, null, 2)
-    const cognition = JSON.stringify({
-      characters: [],
-      readerKnows: ["手改认知"],
-      lastUpdatedChapter: 1,
-    }, null, 2)
-    const memoryPage = "# 手改记忆页\n\n不要重写。"
-    writeTestFile("/project/.novel/character-states.json", characterStates)
-    writeTestFile("/project/.novel/cognition-state.json", cognition)
-    writeTestFile("/project/wiki/memory/character-states.md", memoryPage)
-    writeTestFile("/project/.novel/timeline.json", JSON.stringify({
-      version: 1,
-      serial: 3,
-      updatedAt: "manual",
-      entries: [
-        { chapterNumber: 1, event: "章节时间线" },
-        { chapterNumber: -5, event: "大纲时间线" },
-        { chapterNumber: 99, event: "手改时间线" },
-      ],
-    }, null, 2))
-    writeTestFile("/project/.novel/foreshadowing-tracker.json", JSON.stringify({
-      items: [
-        {
-          id: "F001",
-          name: "大纲伏笔",
-          description: "",
-          status: "planted",
-          plantedChapter: -5,
-          advancedChapters: [],
-          relatedCharacters: [],
-          relatedEvents: [],
-          notes: "",
-        },
-        {
-          id: "F008",
-          name: "手改伏笔",
-          description: "留下",
-          status: "planted",
-          plantedChapter: 2,
-          advancedChapters: [-5],
-          relatedCharacters: [],
-          relatedEvents: [],
-          notes: "",
-        },
-      ],
-      lastUpdated: "manual",
-    }, null, 2))
-
-    await deleteChapterSnapshots("/project", -5)
-
-    expect(files.has("/project/.novel/snapshots/outline-005.snapshot.json")).toBe(false)
-    expect(files.has("/project/.novel/snapshots/outline-005.snapshot.md")).toBe(false)
-    expect(files.has("/project/.novel/snapshots/001.snapshot.json")).toBe(true)
-    expect(files.get("/project/.novel/character-states.json")).toBe(characterStates)
-    expect(files.get("/project/.novel/cognition-state.json")).toBe(cognition)
-    expect(files.get("/project/wiki/memory/character-states.md")).toBe(memoryPage)
+  it("大纲快照的编辑和删除只更新大纲记忆，不改写正式状态", async () => {
+    const state = JSON.stringify({ characters: [{ characterName: "手改角色", status: "保留" }] })
+    writeTestFile("/project/.qmai/novel/character-states.json", state)
+    await syncSnapshotToMemory("/project", { ...syncedOutlineSnapshot,
+      characterStateChanges: ["手改角色：改写"], timelineEvents: ["大纲计划"], foreshadowingChanges: ["新增：大纲计划"],
+    })
+    await deleteChapterSnapshots("/project", syncedOutlineSnapshot.chapterNumber)
+    expect(files.has("/project/.qmai/novel/snapshots/outline-001.snapshot.json")).toBe(false)
+    expect(files.get("/project/.qmai/novel/character-states.json")).toBe(state)
     expect(files.has("/project/wiki/memory/timeline.md")).toBe(false)
-
-    const timeline = JSON.parse(files.get("/project/.novel/timeline.json") ?? "{}")
-    expect(timeline.entries).toEqual([
-      { chapterNumber: 1, event: "章节时间线" },
-      { chapterNumber: 99, event: "手改时间线" },
-    ])
-
-    const foreshadowing = JSON.parse(files.get("/project/.novel/foreshadowing-tracker.json") ?? "{}")
-    expect(foreshadowing.items).toEqual([
-      expect.objectContaining({
-        id: "F008",
-        name: "手改伏笔",
-        description: "留下",
-        plantedChapter: 2,
-        advancedChapters: [],
-      }),
-    ])
+    expect(files.has("/project/.qmai/novel/foreshadowing-tracker.json")).toBe(false)
   })
 })

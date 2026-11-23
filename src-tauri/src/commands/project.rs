@@ -12,14 +12,13 @@ use crate::panic_guard::run_guarded;
 use crate::types::wiki::WikiProject;
 
 const KNOWLEDGE_DIR: &str = "QM";
-const LEGACY_KNOWLEDGE_DIR: &str = "wiki";
-const META_DIR: &str = ".qmai";
-/// 旧版项目元数据目录名：仅用于历史项目的兼容迁移，任何情况下都不要修改此值。
-const LEGACY_META_DIR: &str = ".llm-wiki";
-
 #[tauri::command]
 pub fn create_project(name: String, path: String) -> Result<WikiProject, String> {
-    run_guarded("create_project", || create_project_impl(name, path))
+    run_guarded("create_project", || {
+        let project = create_project_impl(name, path)?;
+        crate::migration_gate::retain_session(Path::new(&project.path))?;
+        Ok(project)
+    })
 }
 
 pub fn create_project_impl(name: String, path: String) -> Result<WikiProject, String> {
@@ -41,7 +40,7 @@ pub fn create_project_impl(name: String, path: String) -> Result<WikiProject, St
         "QM/chapters",
         "QM/outlines",
         ".qmai",
-        ".novel/snapshots",
+        ".qmai/novel/snapshots",
     ];
     for dir in &dirs {
         fs::create_dir_all(root.join(dir))
@@ -232,6 +231,7 @@ related: []
   "starred": true
 }"#;
     write_file_inner(root.join(".obsidian/core-plugins.json"), obsidian_core_plugins)?;
+    crate::project_migration::write_current_format(&root)?;
 
     Ok(WikiProject {
         name,
@@ -245,8 +245,7 @@ pub fn open_project(path: String) -> Result<WikiProject, String> {
     run_guarded("open_project", || {
         let root = Path::new(&path);
 
-        validate_wiki_project_root(root)?;
-        migrate_project_dirs(root)?;
+        crate::migration_gate::retain_session(root)?;
 
         // Derive project name from the directory name
         let name = root
@@ -273,8 +272,9 @@ fn validate_project_name(name: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn project_parent_and_name(path: &str) -> Result<(PathBuf, String), String> {
+fn project_parent_and_name(path: &str) -> Result<(PathBuf, String, fs::File), String> {
     let root = PathBuf::from(resolve_project_storage_path(path));
+    let session = crate::project_migration::acquire_project_session(&root)?;
     validate_wiki_project_root(&root)?;
     let parent = root.parent().filter(|parent| !parent.as_os_str().is_empty())
         .ok_or_else(|| "小说目录没有可写入的上级文件夹。".to_string())?
@@ -282,7 +282,7 @@ fn project_parent_and_name(path: &str) -> Result<(PathBuf, String), String> {
     let name = root.file_name().and_then(|value| value.to_str())
         .ok_or_else(|| "小说目录名称无法读取。".to_string())?
         .to_string();
-    Ok((parent, name))
+    Ok((parent, name, session))
 }
 
 #[tauri::command]
@@ -290,7 +290,7 @@ pub fn rename_project(path: String, name: String) -> Result<WikiProject, String>
     run_guarded("rename_project", || {
         let next_name = name.trim().to_string();
         validate_project_name(&next_name)?;
-        let (parent, current_name) = project_parent_and_name(&path)?;
+        let (parent, current_name, _session) = project_parent_and_name(&path)?;
         let source = parent.join(&current_name);
         let target = parent.join(&next_name);
         if current_name.eq_ignore_ascii_case(&next_name) && current_name != next_name {
@@ -299,8 +299,7 @@ pub fn rename_project(path: String, name: String) -> Result<WikiProject, String>
         if target.exists() {
             return Err(format!("目录已存在：'{}'", target.display()));
         }
-        fs::rename(&source, &target)
-            .map_err(|error| format!("重命名小说失败：{}", error))?;
+        crate::migration_gate::rename_with_session(&source, &target)?;
         Ok(WikiProject { name: next_name, path: target.to_string_lossy().replace('\\', "/") })
     })
 }
@@ -322,7 +321,7 @@ fn suppress_windows_console(cmd: &mut Command) {
 #[tauri::command]
 pub fn move_project_to_system_trash(path: String) -> Result<(), String> {
     run_guarded("move_project_to_system_trash", || {
-        let (parent, name) = project_parent_and_name(&path)?;
+        let (parent, name, _session) = project_parent_and_name(&path)?;
         let source = parent.join(&name);
         move_dir_to_trash(&source)
     })
@@ -453,11 +452,6 @@ fn copy_dir_all(source: &Path, target: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-fn cover_directory(path: &str) -> Result<PathBuf, String> {
-    let (parent, name) = project_parent_and_name(path)?;
-    Ok(parent.join(name).join(".qmai").join("covers"))
-}
-
 #[tauri::command]
 pub fn save_project_cover(path: String, source: String) -> Result<String, String> {
     run_guarded("save_project_cover", || {
@@ -466,7 +460,8 @@ pub fn save_project_cover(path: String, source: String) -> Result<String, String
         if !["png", "jpg", "jpeg", "webp", "gif"].contains(&extension.as_str()) {
             return Err("封面仅支持 PNG、JPEG、WebP 或 GIF。".to_string());
         }
-        let directory = cover_directory(&path)?;
+        let (parent, name, _session) = project_parent_and_name(&path)?;
+        let directory = parent.join(name).join(".qmai").join("covers");
         fs::create_dir_all(&directory).map_err(|error| format!("创建封面文件夹失败：{}", error))?;
         let destination = directory.join(format!("cover.{extension}"));
         fs::copy(&source_path, &destination).map_err(|error| format!("保存封面失败：{}", error))?;
@@ -478,6 +473,7 @@ pub fn save_project_cover(path: String, source: String) -> Result<String, String
 pub fn open_project_folder(app: AppHandle, path: String) -> Result<(), String> {
     run_guarded("open_project_folder", || {
         let root = Path::new(&path);
+        let _session = crate::project_migration::acquire_project_session(root)?;
         validate_wiki_project_root(root)?;
 
         let canonical = root
@@ -530,9 +526,10 @@ pub fn validate_wiki_project_root(root: &Path) -> Result<(), String> {
         return Err(format!("路径不是文件夹：'{}'", root.display()));
     }
 
+    crate::project_migration::project_format(root)?;
     let has_schema = root.join("schema.md").exists();
-    let has_wiki = root.join(KNOWLEDGE_DIR).is_dir() || root.join(LEGACY_KNOWLEDGE_DIR).is_dir();
-    let has_novel = root.join(".novel").is_dir();
+    let has_wiki = root.join(KNOWLEDGE_DIR).is_dir();
+    let has_novel = root.join(".qmai/novel").is_dir();
     let has_md_files = fs::read_dir(root)
         .map(|mut entries| {
             entries.any(|e| {
@@ -544,7 +541,7 @@ pub fn validate_wiki_project_root(root: &Path) -> Result<(), String> {
 
     if !has_schema && !has_wiki && !has_novel && !has_md_files {
         return Err(format!(
-            "不是有效的项目文件夹（未找到 schema.md、wiki 目录或 Markdown 文件）：'{}'",
+            "未识别到小说项目，请选择包含 QM、.qmai/novel 或 Markdown 文件的项目目录：'{}'",
             root.display()
         ));
     }
@@ -597,28 +594,6 @@ outline_type: master-outline | volume-outline | chapter-outline
     Ok(())
 }
 
-pub fn migrate_project_dirs(root: &Path) -> Result<(), String> {
-    rename_project_dir_if_safe(root, LEGACY_META_DIR, META_DIR)?;
-    rename_project_dir_if_safe(root, LEGACY_KNOWLEDGE_DIR, KNOWLEDGE_DIR)?;
-    Ok(())
-}
-
-fn rename_project_dir_if_safe(root: &Path, from: &str, to: &str) -> Result<(), String> {
-    let source = root.join(from);
-    let target = root.join(to);
-    if !source.exists() || target.exists() {
-        return Ok(());
-    }
-    fs::rename(&source, &target).map_err(|e| {
-        format!(
-            "迁移目录 '{}' 到 '{}' 失败：{}",
-            source.display(),
-            target.display(),
-            e
-        )
-    })
-}
-
 fn write_file_inner(path: std::path::PathBuf, contents: &str) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
@@ -631,6 +606,19 @@ fn write_file_inner(path: std::path::PathBuf, contents: &str) -> Result<(), Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn new_novel_has_current_format_and_future_format_blocks_initialization() {
+        let tmp = tempfile::tempdir().unwrap();
+        let book = create_project_impl("新书".into(), tmp.path().to_string_lossy().into()).unwrap();
+        let root = Path::new(&book.path);
+        assert_eq!(crate::project_migration::project_format(root).unwrap(), Some(1));
+        assert!(!crate::project_migration::inspect(root).unwrap().required);
+        fs::remove_file(root.join("schema.md")).unwrap();
+        fs::write(root.join(crate::project_migration::FORMAT_FILE), r#"{"version":2}"#).unwrap();
+        assert!(validate_wiki_project_root(root).unwrap_err().contains("请升级青幕"));
+        assert!(!root.join("schema.md").exists());
+    }
 
     /// 每个用例用独立临时目录，避免并行跑测试时互相看见对方建的同名文件夹。
     fn scratch(tag: &str) -> PathBuf {

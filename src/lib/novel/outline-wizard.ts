@@ -70,7 +70,7 @@ export interface OutlineWizardRequest {
   /** 用户粘贴/导入的原作素材。 */
   fanficSourceMaterial?: string
   /**
-   * 复用项目里已有的 `.novel/fanfic-canon.md`，不再重新编译。
+   * 复用项目里已有的 `.qmai/novel/fanfic-canon.md`，不再重新编译。
    *
    * 正典是持久化资产：第二次生成大纲时重复粘贴几十万字、再跑几十次 LLM
    * 编译同一份素材，既慢又浪费额度。勾选后直接用落盘正典。
@@ -436,7 +436,7 @@ export function buildFanficDemandSection(
             "",
             "### 原作正典",
             "",
-            "原作的既成事实已编译并保存在项目的 `.novel/fanfic-canon.md`，",
+            "原作的既成事实已编译并保存在项目的 `.qmai/novel/fanfic-canon.md`，",
             "本轮会由上下文包自动注入，无需再向用户索取。",
           ]
         : []

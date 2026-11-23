@@ -21,7 +21,7 @@ interface NovelProjectMeta {
   description: string
 }
 
-const NOVEL_META_DIR = ".novel"
+const NOVEL_META_DIR = ".qmai/novel"
 const NOVEL_META_FILE = "project-meta.json"
 
 export async function loadNovelProjectMeta(

@@ -194,7 +194,7 @@ describe("community summary incremental rebuild", () => {
     mockBuildWikiGraph.mockResolvedValue(graphWithCommunity(7, members))
     mockListDirectory.mockResolvedValue([{
       name: `${fingerprint}.json`,
-      path: `/project/.novel/community-summaries/${fingerprint}.json`,
+      path: `/project/.qmai/novel/community-summaries/${fingerprint}.json`,
       is_dir: false,
     }])
     mockReadFile.mockImplementation(async (path: string) => {
@@ -225,7 +225,7 @@ describe("community summary incremental rebuild", () => {
     mockBuildWikiGraph.mockResolvedValue(graphWithCommunity(99, members))
     mockListDirectory.mockResolvedValue([{
       name: "0.json",
-      path: "/project/.novel/community-summaries/0.json",
+      path: "/project/.qmai/novel/community-summaries/0.json",
       is_dir: false,
     }])
     mockReadFile.mockImplementation(async (path: string) => {
@@ -257,7 +257,7 @@ describe("community summary incremental rebuild", () => {
 
     expect(mockStreamChat).toHaveBeenCalledTimes(1)
     expect(mockWriteFile).toHaveBeenCalledWith(
-      `/project/.novel/community-summaries/${fingerprint}.json`,
+      `/project/.qmai/novel/community-summaries/${fingerprint}.json`,
       expect.stringContaining(fingerprint),
     )
     expect(mockEmbedPage).toHaveBeenCalledWith(

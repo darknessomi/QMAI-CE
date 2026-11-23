@@ -260,7 +260,7 @@ export function SnapshotViewer({ projectPath, chapterNumber, onClose }: Snapshot
                 type="button"
                 onClick={() => setShowHistory((value) => !value)}
                 disabled={saving || restoring}
-                title="查看保存快照前自动备份的历史版本，可恢复旧快照但不会自动同步记忆。"
+                title="查看历史版本。恢复正文快照后，将同步更新写作记忆与检索索引。"
                 className="rounded border border-border px-2 py-1 text-xs text-foreground hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
               >
                 历史版本
@@ -315,7 +315,7 @@ export function SnapshotViewer({ projectPath, chapterNumber, onClose }: Snapshot
           ) : (
             <>
               <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-200">
-                这些内容会加入小说记忆与后续上下文。AI 生成新章节时会依托这些摘要、人物状态、角色认知、伏笔和时间线进行续写。如果这里有错误，可能会影响后续剧情连贯性，请在保存前检查并修正。保存后会影响后续上下文中读取的快照内容，但不会自动重建实体页、角色认知、伏笔追踪等衍生记忆。
+                保存正文快照后，人物状态、角色认知、伏笔、时间线和检索索引会同步更新，后续写作会使用更新后的记忆。
               </div>
               {showHistory ? (
                 <div className="mb-4 rounded-md border border-border bg-muted/30 px-3 py-2">

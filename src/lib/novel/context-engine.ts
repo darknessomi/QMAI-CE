@@ -1,3 +1,4 @@
+import { buildMemoryProjection } from "./memory-rebuild"
 import {
   charsPerTokenForLanguage,
   resolveContextPackTokenBudget,
@@ -118,7 +119,7 @@ export interface ContextPack {
    * 同一部**外部原作**的既成事实（同人正典）。
    *
    * 与 `canonRules` 的区别：`canonRules` 是本项目自己确认的正史（`wiki/canon.md`），
-   * `sourceCanon` 来自 `.novel/fanfic-canon.md`，是用户导入的原作事实，按固定路径读取、
+   * `sourceCanon` 来自 `.qmai/novel/fanfic-canon.md`，是用户导入的原作事实，按固定路径读取、
    * 不经模糊检索。原创项目恒为空串。
    *
    * 可选：手工构造的旧上下文包没有这个字段，消费方一律按「无正典」处理。
@@ -243,18 +244,18 @@ async function buildContextPackFromRawData(
   )
   const retrievalCharacterStates = joinNonEmpty(
     visibleLookbackEntries
-      .filter((e) => e.characterStates)
+      .filter((e) => e.characterStates && e.characterStates !== "无明显变化")
       .map((e) => `第${e.chapterNumber}章：${e.characterStates}`),
     "\n",
   )
   const retrievalTimeline = joinNonEmpty(
     visibleLookbackEntries
-      .filter((e) => e.timelineEvents)
+      .filter((e) => e.timelineEvents && e.timelineEvents !== "无")
       .map((e) => `第${e.chapterNumber}章：${e.timelineEvents}`),
     "\n",
   )
   const retrievalForeshadowingSignals = visibleLookbackEntries
-    .filter((e) => e.foreshadowingChanges)
+    .filter((e) => e.foreshadowingChanges && e.foreshadowingChanges !== "无")
     .flatMap((e) => e.foreshadowingChanges.split("\n").filter(Boolean))
 
   // 合并快照数据和降级数据，优先使用 retrieval 索引
@@ -274,19 +275,9 @@ async function buildContextPackFromRawData(
     || rawData.fallbackPreviousEnding
   
   const snapshotCharacterStates = rawData.snapshots?.characterStates || ""
-  const characterStates = joinNonEmpty([
-    retrievalCharacterStates,
-    snapshotCharacterStates, 
-    rawData.fallbackCharacterStates
-  ], "\n\n")
-  
-  const snapshotTimeline = rawData.snapshots?.timeline || ""
-  const timeline = joinNonEmpty([
-    retrievalTimeline,
-    snapshotTimeline, 
-    rawData.fallbackTimeline
-  ], "\n\n")
-  
+  const characterStates = retrievalCharacterStates || snapshotCharacterStates || rawData.fallbackCharacterStates || ""
+  const timeline = retrievalTimeline || rawData.snapshots?.timeline || rawData.fallbackTimeline || ""
+
   const snapshotForeshadowingSignals = Array.isArray(rawData.snapshots?.foreshadowingSignals)
     ? rawData.snapshots.foreshadowingSignals
     : []
@@ -729,15 +720,16 @@ async function readSnapshotContext(
     .filter((snapshot) => !excludedSnapshotNumbers.has(snapshot.chapterNumber))
 
   const previousSnapshot = validLookback[0]
+    const official = buildMemoryProjection(validLookback).officialSnapshots
   const recentSummaries = validSummarySnapshots.map((snapshot) => `第${snapshot.chapterNumber}章：${snapshot.summary}`)
   const characterStates = joinNonEmpty(
-    validLookback
+    official
       .flatMap((snapshot) => snapshot.characterStateChanges.map((change) => `第${snapshot.chapterNumber}章：${change}`)),
     "\n",
   )
-  const foreshadowingSignals = validLookback.flatMap((snapshot) => snapshot.foreshadowingChanges)
+  const foreshadowingSignals = official.flatMap((snapshot) => snapshot.foreshadowingChanges)
   const timeline = joinNonEmpty(
-    validLookback
+    official
       .flatMap((snapshot) => snapshot.timelineEvents.map((event) => `第${snapshot.chapterNumber}章：${event}`)),
     "\n",
   )

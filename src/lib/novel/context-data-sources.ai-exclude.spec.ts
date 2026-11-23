@@ -19,7 +19,7 @@ import { searchWiki } from "@/lib/search"
 import { getAllDataSources } from "./context-data-sources"
 
 const PROJECT = "C:/book"
-const SNAPSHOTS_DIR = `${PROJECT}/.novel/snapshots`
+const SNAPSHOTS_DIR = `${PROJECT}/.qmai/novel/snapshots`
 
 function snapshotJson(chapterNumber: number, summary: string) {
   return JSON.stringify({

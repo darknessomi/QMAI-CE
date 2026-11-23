@@ -174,10 +174,9 @@ describe("bulk outline ingest", () => {
     expect(result).toMatchObject({ total: 2, succeeded: 2, failed: 0 })
     expect(mocks.syncSnapshotToMemoryMock).toHaveBeenCalledTimes(2)
     expect(mocks.syncSnapshotToMemoryMock.mock.calls[0]?.[2]).toEqual({
-      deferStructuredMemoryExport: true,
       deferDerivedRebuild: true,
     })
-    expect(mocks.finalizeProjectMemoryRebuildMock).toHaveBeenCalledTimes(1)
+    expect(mocks.finalizeProjectMemoryRebuildMock).not.toHaveBeenCalled()
     expect(mocks.refreshProjectStateMock).toHaveBeenCalledTimes(1)
   })
 

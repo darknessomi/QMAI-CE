@@ -40,9 +40,9 @@ beforeEach(() => {
 })
 
 describe("writingStatsPath", () => {
-  it("落在项目根的 .novel 下，并容忍多余斜杠", () => {
-    expect(writingStatsPath("E:\\Novel\\")).toBe("E:/Novel/.novel/writing-stats.json")
-    expect(writingStatsPath("/home/a/b")).toBe("/home/a/b/.novel/writing-stats.json")
+  it("落在项目根的 .qmai/novel 下，并容忍多余斜杠", () => {
+    expect(writingStatsPath("E:\\Novel\\")).toBe("E:/Novel/.qmai/novel/writing-stats.json")
+    expect(writingStatsPath("/home/a/b")).toBe("/home/a/b/.qmai/novel/writing-stats.json")
   })
 })
 
@@ -151,9 +151,9 @@ describe("loadWritingStats / saveWritingStats", () => {
     mockedCreateDirectory.mockResolvedValue(undefined)
     mockedWriteFileAtomic.mockResolvedValue(undefined)
     await saveWritingStats("/proj/", emptyWritingStatsFile())
-    expect(mockedCreateDirectory).toHaveBeenCalledWith("/proj/.novel")
+    expect(mockedCreateDirectory).toHaveBeenCalledWith("/proj/.qmai/novel")
     expect(mockedWriteFileAtomic).toHaveBeenCalledWith(
-      "/proj/.novel/writing-stats.json",
+      "/proj/.qmai/novel/writing-stats.json",
       expect.stringContaining('"version": 1'),
     )
   })

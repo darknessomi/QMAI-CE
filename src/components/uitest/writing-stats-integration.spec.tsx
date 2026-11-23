@@ -41,7 +41,7 @@ vi.mock("@/commands/fs", async (importOriginal) => ({
   /*
    * `createDirectory` 必须换掉。
    *
-   * 写作统计落盘前会先建 `<project>/.novel/`。这里若沿用真实实现，
+   * 写作统计落盘前会先建 `<project>/.qmai/novel/`。这里若沿用真实实现，
    * 它会去调 Tauri 的 fs 插件并在 jsdom 里抛错，而 `flush()` 的 catch 是
    * **故意静默**的（统计写盘失败不该打扰用户），于是表现为「测试里一次盘都没写」，
    * 却看不到任何错误。第一版就是这么被误导的。
@@ -102,7 +102,7 @@ async function backspace(times: number) {
 
 const stats = () => useWritingStatsStore.getState()
 
-const statsFilePath = `${project.path}/.novel/writing-stats.json`
+const statsFilePath = `${project.path}/.qmai/novel/writing-stats.json`
 
 /**
  * 取最近一次写作统计落盘。
@@ -341,7 +341,7 @@ describe("落盘与恢复", () => {
     await mount()
     await type("他推开门。")
     await act(async () => { await stats().flush() })
-    // 统计确实落在了约定的位置（.novel/writing-stats.json）
+    // 统计确实落在了约定的位置（.qmai/novel/writing-stats.json）
     expect(lastStatsWrite().path).toBe(statsFilePath)
 
     // 真实场景里章节正文也会被保存（1s 防抖），所以磁盘上的正文必须与

@@ -102,7 +102,7 @@ export default defineConfig({
         "**/samples/plugins/**",
         "**/dist/**",
         "**/.vite/**",
-        "**/.novel/**",
+        "**/.qmai/**",
         "**/chapters/**",
         "**/wiki/**",
         "**/target/**",

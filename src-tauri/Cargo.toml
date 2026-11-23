@@ -84,6 +84,7 @@ rand = "0.8"
 md-5 = "0.10"
 notify = "8"
 walkdir = "2"
+fs4 = "0.8"
 tauri-plugin-single-instance = "2.5.5"
 tauri-plugin-notification = "2.8.0"
 keepawake = "0.6.1"
@@ -97,6 +98,9 @@ indexmap = { version = "1", features = ["std"] }
 # 版本已在 `Cargo.lock` 里（tauri 生态的传递依赖），显式声明不引入新的下载。
 semver = "1"
 tempfile = "3"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6.5"
@@ -125,8 +129,10 @@ objc2-foundation = { version = "0.3.2", default-features = false, features = ["s
 # 选 `windows-sys` 而不是 `windows`：只需要几个函数，不需要 COM 包装。
 # 它是 `windows` 的同源传递依赖，版本保持一致，不会多下第二份。
 [target.'cfg(windows)'.dependencies]
+dirs = "6"
 windows-sys = { version = "0.61", features = [
   "Win32_Foundation",
+  "Win32_System_Console",
   "Win32_System_Registry",
   "Win32_UI_Shell",
   "Win32_UI_WindowsAndMessaging",

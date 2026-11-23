@@ -146,10 +146,8 @@ describe("RetrievalStore", () => {
       summary: "新的摘要内容",
     })
 
-    await store.updateChapterEntry(3, newSnapshot, {
-      filePath: "ch-003.md",
-      sourceHash: "hash-new",
-    })
+    snapshots[2] = newSnapshot
+    await store.buildFromSnapshots(snapshots, (s) => `ch-${s.chapterNumber}.md`, () => "hash-new")
 
     const entry = await store.getEntry(3)
     expect(entry).not.toBeNull()
@@ -157,7 +155,7 @@ describe("RetrievalStore", () => {
     expect(entry!.sourceHash).toBe("hash-new")
   })
 
-  it("adds new chapter via updateChapterEntry", async () => {
+  it("adds a new chapter when rebuilding", async () => {
     const snapshots = [createMockSnapshot({ chapterNumber: 1 })]
     await store.buildFromSnapshots(
       snapshots,
@@ -166,10 +164,7 @@ describe("RetrievalStore", () => {
     )
 
     const newSnapshot = createMockSnapshot({ chapterNumber: 100, chapterTitle: "第100章" })
-    await store.updateChapterEntry(100, newSnapshot, {
-      filePath: "ch-100.md",
-      sourceHash: "hash-100",
-    })
+    await store.buildFromSnapshots([...snapshots, newSnapshot], (s) => `ch-${s.chapterNumber}.md`, () => "hash-100")
 
     const entry = await store.getEntry(100)
     expect(entry).not.toBeNull()
@@ -210,7 +205,7 @@ describe("RetrievalStore", () => {
     const snapshots = [
       createMockSnapshot({
         chapterNumber: 1,
-        foreshadowingChanges: ["新埋伏笔：伏笔A", "新埋伏笔：伏笔B"],
+        foreshadowingChanges: ["新增伏笔：伏笔A", "新增伏笔：伏笔B"],
       }),
       createMockSnapshot({
         chapterNumber: 2,
@@ -225,7 +220,8 @@ describe("RetrievalStore", () => {
     )
 
     const inverted = await store.getInvertedIndex()
-    expect(inverted.foreshadowing).toBeDefined()
+    expect(inverted.foreshadowing["伏笔A"]).toEqual([1, 2])
+    expect(inverted.foreshadowing["伏笔B"]).toEqual([1])
   })
 
   it("caches results after first load", async () => {

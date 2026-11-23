@@ -57,7 +57,7 @@ const SOURCE_TIE_PRIORITY: Record<NovelSearchResult["type"], number> = {
 export function isAuthoritativeGenerationPath(path: string): boolean {
   return /\/wiki\/(entities|concepts|memory|chapters)\//.test(path)
     || /\/wiki\/canon\.md$/.test(path)
-    || /\/\.novel\/snapshots\//.test(path)
+    || /\/\.qmai\/novel\/snapshots\//.test(path)
 }
 
 export function isHistoricalProjectionSnippet(path: string, snippet: string): boolean {
@@ -331,7 +331,7 @@ async function runRecentChapterSearch(
         const paddedNum = String(num).padStart(3, "0")
         items.push({
           type: "recent_chapter",
-          path: `${pp}/.novel/snapshots/${paddedNum}.snapshot.json`,
+          path: `${pp}/.qmai/novel/snapshots/${paddedNum}.snapshot.json`,
           title: `第${num}章`,
           snippet: snap.summary || snap.endingHook || "",
           relevance: 1,

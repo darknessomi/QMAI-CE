@@ -22,7 +22,7 @@ export function buildChapterEditorHeader(
      * ⚠️ 两者是**不同的概念**，不能合并：
      *   · `chapter_status: final` 由 `handleSaveAsFinal` 写入，只表示"已标记为正式章节"；
      *     它按用户先前的要求**不**顺带提取记忆，所以「正式但无快照」是可达状态；
-     *   · 快照（`.novel/snapshots/NNN.snapshot.json`）才是侧栏绿点的依据。
+     *   · 快照（`.qmai/novel/snapshots/NNN.snapshot.json`）才是侧栏绿点的依据。
      *
      * 之所以做成可选参数而不是把 `status` 直接改成读快照：本函数的其它调用方
      * （以及既有的状态测试）问的是"这章的定稿状态是什么"，改掉全局语义会答非所问。

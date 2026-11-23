@@ -32,7 +32,7 @@ export function MemoryMaintenanceReminder() {
     let timer: ReturnType<typeof setTimeout>
     const schedule = () => { const revision = ++generation; clearTimeout(timer); timer = setTimeout(() => { void check(revision) }, 1500) }
     const unsubscribe = subscribeProjectFileMutations(({ path }) => {
-      if (path.startsWith(captured.path + "/") && /\/\.novel\/(?:cognition-state|character-states|foreshadowing-tracker|timeline)\.json$/.test(path)) schedule()
+      if (path.startsWith(captured.path + "/") && /\/\.qmai\/novel\/(?:cognition-state|character-states|foreshadowing-tracker|timeline)\.json$/.test(path)) schedule()
     })
     schedule()
     return () => { cancelled = true; clearTimeout(timer); unsubscribe() }

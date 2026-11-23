@@ -1,3 +1,5 @@
+import { isActiveForeshadowingStatus } from "./foreshadowing-normalize"
+import { buildMemoryProjection } from "./memory-rebuild"
 /**
  * 具体数据源实现
  * 将原有的数据获取函数重构为数据源对象
@@ -17,8 +19,11 @@ import { buildWritingStyleContext } from "./writing-style-store"
 import { buildSectionBriefing } from "./section-briefing"
 import { loadFanficCanonBody } from "./fanfic-canon"
 import type { DataSource, ContextLoadContext } from "./context-data-source"
-import { RetrievalStore, type RetrievalEntry } from "./retrieval"
-import { writeFileAtomic, fileExists, listDirectory, createDirectory } from "@/commands/fs"
+import type { RetrievalEntry } from "./retrieval"
+import { createRetrievalStore } from "./refresh-memory"
+import { loadCharacterStates } from "./character-state"
+import { loadForeshadowingTracker } from "./foreshadowing-tracker"
+import { loadTimeline } from "./timeline"
 import type { DataSourceCategory } from "./classification"
 
 // 导入现有的辅助函数
@@ -171,15 +176,16 @@ const snapshotDataSource: DataSource<{
       .filter((snapshot) => !excludedNumbers.has(snapshot.chapterNumber))
 
     const previousSnapshot = validLookback[0]
+    const official = buildMemoryProjection(validLookback).officialSnapshots
     const recentSummaries = validSummarySnapshots.map((snapshot) => `第${snapshot.chapterNumber}章：${snapshot.summary}`)
     const characterStates = joinNonEmpty(
-      validLookback
+      official
         .flatMap((snapshot) => snapshot.characterStateChanges.map((change) => `第${snapshot.chapterNumber}章：${change}`)),
       "\n",
     )
-    const foreshadowingSignals = validLookback.flatMap((snapshot) => snapshot.foreshadowingChanges)
+    const foreshadowingSignals = official.flatMap((snapshot) => snapshot.foreshadowingChanges)
     const timeline = joinNonEmpty(
-      validLookback
+      official
         .flatMap((snapshot) => snapshot.timelineEvents.map((event) => `第${snapshot.chapterNumber}章：${event}`)),
       "\n",
     )
@@ -278,54 +284,43 @@ const fallbackPreviousEndingDataSource: DataSource<string> = {
 /**
  * 降级：角色状态数据源
  */
+async function visibleMemoryRows<T>(
+  context: ContextLoadContext, rows: T[], sourceChapters: (row: T) => number[],
+): Promise<T[]> {
+  const cutoff = context.chapterNumber ?? Infinity
+  const eligible = rows.filter((row) => sourceChapters(row).every((n) => n >= 0 && n < cutoff)).slice(-12)
+  const excluded = await listAiExcludedChapterNumbers(context.projectPath, eligible.flatMap(sourceChapters))
+  return eligible.filter((row) => !sourceChapters(row).some((n) => excluded.has(n)))
+}
+
 const fallbackCharacterStatesDataSource: DataSource<string> = {
   name: "fallbackCharacterStates",
   priority: 7,
-  async load(context: ContextLoadContext): Promise<string> {
-    try {
-      const results = await searchWiki(context.projectPath, "type:entity character")
-      if (results.length > 0) {
-        const contents = await Promise.all(results.slice(0, 5).map(r => readFile(r.path).catch(() => "")))
-        return contents.filter(Boolean).join("\n---\n").slice(0, 3000)
-      }
-    } catch {}
-    return ""
+  async load(context) {
+    const state = await loadCharacterStates(context.projectPath)
+    const rows = await visibleMemoryRows(context, state.characters, (p) => [p.lastUpdatedChapter])
+    return rows.map((p) => `${p.characterName}：${p.status}`).join("\n")
   },
 }
 
-/**
- * 降级：伏笔状态数据源
- */
 const fallbackForeshadowingStatesDataSource: DataSource<string> = {
   name: "fallbackForeshadowingStates",
   priority: 8,
-  async load(context: ContextLoadContext): Promise<string> {
-    try {
-      const results = await searchWiki(context.projectPath, "伏笔 foreshadowing")
-      if (results.length > 0) {
-        const contents = await Promise.all(results.slice(0, 3).map(r => readFile(r.path).catch(() => "")))
-        return contents.filter(Boolean).join("\n---\n").slice(0, 2000)
-      }
-    } catch {}
-    return ""
+  async load(context) {
+    const store = await loadForeshadowingTracker(context.projectPath)
+    const active = store.items.filter((f) => isActiveForeshadowingStatus(f.status))
+    const rows = await visibleMemoryRows(context, active, (f) => [f.plantedChapter, ...f.advancedChapters])
+    return rows.map((f) => `${f.id} ${f.name}：${f.description}`).join("\n")
   },
 }
 
-/**
- * 降级：时间线数据源
- */
 const fallbackTimelineDataSource: DataSource<string> = {
   name: "fallbackTimeline",
   priority: 9,
-  async load(context: ContextLoadContext): Promise<string> {
-    try {
-      const results = await searchWiki(context.projectPath, "timeline 时间线")
-      if (results.length > 0) {
-        const content = await readFile(results[0].path)
-        return content.slice(0, 2000)
-      }
-    } catch {}
-    return ""
+  async load(context) {
+    const timeline = await loadTimeline(context.projectPath)
+    const rows = await visibleMemoryRows(context, timeline.entries, (e) => [e.chapterNumber])
+    return rows.map((e) => `第${e.chapterNumber}章：${e.event}`).join("\n")
   },
 }
 
@@ -368,7 +363,7 @@ const canonRulesDataSource: DataSource<string> = {
 /**
  * 同人原作正典数据源
  *
- * 与 `canonRulesDataSource` 的本质区别：**按固定路径读取** `.novel/fanfic-canon.md`，
+ * 与 `canonRulesDataSource` 的本质区别：**按固定路径读取** `.qmai/novel/fanfic-canon.md`，
  * 不做模糊检索。同人正典一旦被检索漏掉，模型就会凭空编造原作事实——
  * 这正是「同人写得像原创」的直接原因。
  *
@@ -514,7 +509,7 @@ const retrievalDataSource: DataSource<{ entries: RetrievalEntry[] }> = {
   name: "retrieval",
   priority: 3,
   async load(context: ContextLoadContext) {
-    const store = createRetrievalStoreForDataSource(context.projectPath)
+    const store = createRetrievalStore(context.projectPath)
     const hasIndex = await store.hasIndex()
 
     if (!hasIndex) {
@@ -530,21 +525,6 @@ const retrievalDataSource: DataSource<{ entries: RetrievalEntry[] }> = {
       return { entries: [] }
     }
   },
-}
-
-function createRetrievalStoreForDataSource(projectPath: string): RetrievalStore {
-  const fsAdapter = {
-    readFile,
-    writeFile: writeFileAtomic,
-    fileExists,
-    listDirectory: async (path: string): Promise<string[]> => {
-      const nodes = await listDirectory(path)
-      return nodes.map((n: any) => n.name)
-    },
-    createDirectory,
-    joinPath: (...parts: string[]) => parts.join("/"),
-  }
-  return new RetrievalStore(projectPath, fsAdapter as any)
 }
 
 /**

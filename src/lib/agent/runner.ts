@@ -7,13 +7,6 @@ import { toOpenAITools } from "./tools-schema"
 import type { ToolRegistry } from "./registry"
 import type { AgentConfig, AgentMessage, AgentRunCallbacks, AgentRunRecord, ToolCall, ToolCallDelta } from "./types"
 import { DEFAULT_MAX_ROUNDS } from "./types"
-import type { TaskBreakpoint } from "./task-breakpoint"
-import {
-  clearTaskBreakpoint,
-  createTaskBreakpoint,
-  saveTaskBreakpoint,
-  updateBreakpointStage,
-} from "./task-breakpoint"
 import { getEffectiveMaxContextSize, type ChatMessage } from "../llm-providers"
 import { isReasoningDisabled, isReasoningOnlyResponseError, withReasoningDisabled } from "../reasoning-retry"
 import { addLlmUsage, mergeLlmUsageSnapshot, type LlmUsage } from "../llm-usage"
@@ -99,7 +92,6 @@ export class AgentRunner {
     const workingMessages = [...messages]
     let finalText = ""
     const maxRounds = config.maxRounds || DEFAULT_MAX_ROUNDS
-    const projectPath = config.projectPath
     // 任务契约写的是"初始任务目标"，必须取会话里**第一条** user 消息。
     // 取最后一条（= 本轮输入）会让 system 块每轮都变，而它位于全部历史之前，
     // 一变则其后历史全部失去前缀缓存（真机实测：改一行头部当次命中归零）。
@@ -131,31 +123,6 @@ export class AgentRunner {
       content: taskContract,
     })
     const evidenceLedger = new ToolEvidenceLedger(config.toolResultContextLimit ?? DEFAULT_TOOL_RESULT_CONTEXT_LIMIT)
-    let taskBreakpoint: TaskBreakpoint | null = projectPath
-      ? createTaskBreakpoint({
-          taskGoal,
-          currentStage: "agent_round_1",
-        })
-      : null
-
-    const persistTaskBreakpoint = async () => {
-      if (!projectPath || !taskBreakpoint) return
-      try {
-        await saveTaskBreakpoint(projectPath, taskBreakpoint)
-      } catch {
-        // 断点保存失败不应中断当前 AI 会话
-      }
-    }
-
-    const clearPersistedBreakpoint = async () => {
-      if (!projectPath) return
-      try {
-        await clearTaskBreakpoint(projectPath)
-      } catch {
-        // clearTaskBreakpoint 内部已吞掉错误，这里保持双保险
-      }
-    }
-
     const refreshRequiredToolDiagnostics = () => {
       const diagnostics = record.requiredToolDiagnostics
       if (!diagnostics) return
@@ -200,7 +167,6 @@ export class AgentRunner {
           diagnostics.fallbackError = fallback.error.message
         }
         refreshRequiredToolDiagnostics()
-        await clearPersistedBreakpoint()
         callbacks.onError(fallback.error)
         return "error"
       }
@@ -211,15 +177,10 @@ export class AgentRunner {
       if (fallback.finalContent) {
         finalText = fallback.finalContent
         record.finalText = finalText
-        await clearPersistedBreakpoint()
         callbacks.onDone()
         return "success"
       }
       return missingRequiredTools().length === 0 ? "success" : "unavailable"
-    }
-
-    if (taskBreakpoint) {
-      await persistTaskBreakpoint()
     }
 
     if (config.forceRequiredToolsImmediately && requiredTools.length > 0) {
@@ -477,7 +438,6 @@ export class AgentRunner {
           })
           const isLastRound = round >= maxRounds - 1
           if (isLastRound) {
-            await clearPersistedBreakpoint()
             callbacks.onError(new RequiredToolsNotCalledError(missingRequired))
             return record
           }
@@ -488,7 +448,6 @@ export class AgentRunner {
         finalText = roundHookText ?? roundText
         record.finalText = finalText
         if (finalText) callbacks.onText(finalText)
-        await clearPersistedBreakpoint()
         callbacks.onDone()
         return record
       }
@@ -515,19 +474,6 @@ export class AgentRunner {
       for (const tc of toolCalls) {
         const toolName = tc.function.name
 
-        const saveToolProgress = async () => {
-          if (!taskBreakpoint) return
-          const usedTools = taskBreakpoint.usedTools.includes(toolName)
-            ? taskBreakpoint.usedTools
-            : [...taskBreakpoint.usedTools, toolName]
-          taskBreakpoint = updateBreakpointStage(
-            { ...taskBreakpoint, usedTools },
-            `agent_round_${round + 1}`,
-            `tool:${toolName}`,
-          )
-          await persistTaskBreakpoint()
-        }
-
         let params: Record<string, unknown> = {}
         let argumentError = ""
         try {
@@ -553,7 +499,6 @@ export class AgentRunner {
               signal,
             )
         record.toolCalls.push(executed.record)
-        await saveToolProgress()
         const registeredTool = registry.get(toolName)
         if (isRequiredToolExecutionFulfilled(registeredTool, executed)) {
           satisfiedRequiredTools.add(toolName)
@@ -578,7 +523,6 @@ export class AgentRunner {
       if (deliveredFinalContent) {
         finalText = deliveredFinalContent
         record.finalText = finalText
-        await clearPersistedBreakpoint()
         callbacks.onDone()
         return record
       }
@@ -609,7 +553,6 @@ export class AgentRunner {
     if (missingAtLimit.length > 0) {
       const fallbackOutcome = await attemptRequiredToolFallback()
       if (fallbackOutcome === "success" || fallbackOutcome === "error") return record
-      await clearPersistedBreakpoint()
       callbacks.onError(new RequiredToolsNotCalledError(missingAtLimit))
       return record
     }

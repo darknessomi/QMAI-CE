@@ -79,7 +79,7 @@ description: Use when designing protagonists, heroines, villains, supporting rol
 ### 不属于小传的三类内容
 
 - **出场记录**：章节记忆在每章入库时自动维护，档案里再排一张静态表必然过期，没有正文时更只能编「计划出场」。
-- **当前状态**（位置、伤病、体力、资源、任务）：由 `.novel/character-states.json` 每章更新，档案里再写一份就是两个基准。
+- **当前状态**（位置、伤病、体力、资源、任务）：由 `.qmai/novel/character-states.json` 每章更新，档案里再写一份就是两个基准。
 - **写作使用规则**：那是给模型的执行约束，不是设定内容，用户读它拿不到新信息。
 
 ## 结构化与保存

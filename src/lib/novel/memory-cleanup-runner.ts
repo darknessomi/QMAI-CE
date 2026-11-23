@@ -11,11 +11,8 @@ import { chapterSnapshotNumbersFromFileNames } from "./chapter-memory-dot"
 import { chapterSnapshotJsonPath, createRetrievalStore, loadSnapshot, rebuildDerivedMemoryFromSnapshots, replaceSnapshotForMemoryCleanup, type ChapterSnapshot } from "./chapter-ingest"
 import { buildChapterIngestOutput } from "./chapter-ingest-output"
 import { memoryProjectionPaths, rebuildMemoryEntityProjections } from "./graph-adapter"
-import { loadCharacterStates } from "./character-state"
 import { loadForeshadowingTracker } from "./foreshadowing-tracker"
 import { normalizeForeshadowingName } from "./foreshadowing-normalize"
-import { loadTimeline } from "./timeline"
-import { readContextMd, writeCharacterStateMd, writeContextMd, writeForeshadowingMd, writeTimelineMd } from "./tracking-files"
 import { filterRemovedMemories, loadMemoryCleanupPolicy, saveMemoryCleanupPolicy, memoryPolicyPath, memoryRemovalKey, withMemoryWriteLock, MEMORY_FIELDS, type MemoryCleanupPolicy, type MemoryField } from "./memory-cleanup-policy"
 import { collectMemoryRecords, snapshotsInCleanupScope, MEMORY_CLEANUP_SYSTEM, parseMemoryCleanupIssues, type MemoryCleanupIssue, type MemoryCleanupRecord, type MemoryCleanupScan, type MemoryCleanupScope } from "./memory-cleanup"
 import { memoryAppearanceSubject, planMemoryCleanupRules, type MemoryCleanupRuleOptions, type MemoryCleanupRulePlan } from "./memory-cleanup-rules"
@@ -42,7 +39,7 @@ function memoryCleanupBatchSubject(record: MemoryCleanupRecord): string {
 }
 
 async function readSnapshots(projectPath: string): Promise<ChapterSnapshot[]> {
-  const dir = `${normalizePath(projectPath)}/.novel/snapshots`
+  const dir = `${normalizePath(projectPath)}/.qmai/novel/snapshots`
   if (!await fileExists(dir)) return []
   const numbers = chapterSnapshotNumbersFromFileNames((await listDirectory(dir)).filter((f) => !f.is_dir).map((f) => f.name))
   const result: ChapterSnapshot[] = []
@@ -200,30 +197,30 @@ interface CleanupBackup { version: 1; files: BackupFile[]; createdAt: number }
 function walk(nodes: FileNode[]): string[] { return nodes.flatMap((node) => node.is_dir ? walk(node.children ?? []) : [node.path]) }
 async function optionalTree(path: string): Promise<string[]> { return await fileExists(path) ? walk(await listDirectory(path)) : [] }
 const allowedBackupPath = (relative: string) => !relative.split("/").includes("..") && !relative.includes("\\") && [
-  ".novel/", ".qmai/persona-skills/", "wiki/memory/", "wiki/tracking/", "wiki/entities/", "retrieval/",
+  ".qmai/novel/", ".qmai/persona-skills/", "wiki/memory/", "wiki/entities/", ".qmai/retrieval/",
 ].some((prefix) => relative.startsWith(prefix))
 
-async function captureBackup(projectPath: string, changed: ChapterSnapshot[], entityPaths: string[]): Promise<{ dir: string; backup: CleanupBackup }> {
+async function captureBackup(projectPath: string, changed: ChapterSnapshot[], entityPaths: string[], snapshots: ChapterSnapshot[]): Promise<{ dir: string; backup: CleanupBackup }> {
   const pp = normalizePath(projectPath)
   const paths = new Set<string>([
     memoryPolicyPath(pp),
-    ...["cognition-state", "character-states", "foreshadowing-tracker", "timeline"].map((n) => `${pp}/.novel/${n}.json`),
+    ...["cognition-state", "character-states", "foreshadowing-tracker", "timeline"].map((n) => `${pp}/.qmai/novel/${n}.json`),
     ...["chapter-snapshots", "character-cognition", "character-states", "foreshadowing-tracker", "timeline", "canon-facts", "conflicts"].map((n) => `${pp}/wiki/memory/${n}.md`),
-    ...["角色状态", "伏笔", "时间线", "上下文"].map((n) => `${pp}/wiki/tracking/${n}.md`),
+    `${pp}/wiki/memory/writing-progress.md`,
     ...entityPaths,
   ])
   for (const snapshot of changed) {
     const json = chapterSnapshotJsonPath(pp, snapshot.chapterNumber)
     paths.add(json); paths.add(json.replace(/\.json$/, ".md"))
-    const prefix = `${pp}/.novel/chapter-ingest-output/${String(snapshot.chapterNumber).padStart(3, "0")}`
+    const prefix = `${pp}/.qmai/novel/chapter-ingest-output/${String(snapshot.chapterNumber).padStart(3, "0")}`
     paths.add(`${prefix}.output.json`); paths.add(`${prefix}.wiki-patch.json`)
-    if (snapshot.chapterNumber > 0) {
-      const retrieval = createRetrievalStore(pp)
-      paths.add(retrieval.indexPath)
-      paths.add(retrieval.getVolumePath(retrieval.chapterToVolumeName(snapshot.chapterNumber)))
-    }
   }
-  for (const path of [...await optionalTree(`${pp}/retrieval`), ...await optionalTree(`${pp}/.novel/community-summaries`)]) paths.add(path)
+  const retrieval = createRetrievalStore(pp)
+  paths.add(retrieval.indexPath)
+  for (const snapshot of snapshots) {
+    if (snapshot.chapterNumber > 0) paths.add(retrieval.getVolumePath(retrieval.chapterToVolumeName(snapshot.chapterNumber)))
+  }
+  for (const path of [...await optionalTree(`${pp}/.qmai/retrieval`), ...await optionalTree(`${pp}/.qmai/novel/community-summaries`)]) paths.add(path)
   const persona = await loadPersonaSkillIndexStrict(pp)
   if (persona) {
     paths.add(personaSkillIndexPath(pp))
@@ -248,20 +245,6 @@ async function restoreFiles(projectPath: string, backup: CleanupBackup): Promise
     const path = `${normalizePath(projectPath)}/${file.path}`
     if (file.before === null) { if (await fileExists(path)) await deleteFile(path) }
     else { await createDirectory(path.slice(0, path.lastIndexOf("/"))); await writeFileAtomic(path, file.before) }
-  }
-}
-
-async function syncTracking(projectPath: string): Promise<void> {
-  const [characters, foreshadowing, timeline, progress] = await Promise.all([
-    loadCharacterStates(projectPath), loadForeshadowingTracker(projectPath), loadTimeline(projectPath), readContextMd(projectPath),
-  ])
-  await writeCharacterStateMd(projectPath, characters)
-  await writeForeshadowingMd(projectPath, foreshadowing.items, foreshadowing.items.filter((f) => f.status === "resolved" && f.resolvedChapter != null)
-    .map((f) => ({ id: f.id, resolvedInChapter: f.resolvedChapter!, resolution: `伏笔「${f.name}」在第${f.resolvedChapter}章回收` })))
-  await writeTimelineMd(projectPath, timeline.entries)
-  if (progress) {
-    const active = foreshadowing.items.filter((f) => f.status !== "resolved" && f.status !== "abandoned")
-    await writeContextMd(projectPath, { ...progress, activeForeshadowingCount: active.length, keyPendingForeshadowing: active.slice(0, 5).map((f) => f.name) })
   }
 }
 
@@ -374,9 +357,9 @@ export async function applyMemoryCleanup(projectPath: string, scan: MemoryCleanu
     })
     const entityPaths = memoryProjectionPaths(projectPath, changedPatches)
     report(onLog, `正在备份 ${changed.length} 章来源`)
-    const { dir, backup } = await captureBackup(projectPath, changed, entityPaths)
+    const { dir, backup } = await captureBackup(projectPath, changed, entityPaths, snapshots)
     report(onLog, `已备份至 ${dir}`)
-    const communities = backup.files.filter((f) => f.path.startsWith(".novel/community-summaries/")).map((f) => `${normalizePath(projectPath)}/${f.path}`)
+    const communities = backup.files.filter((f) => f.path.startsWith(".qmai/novel/community-summaries/")).map((f) => `${normalizePath(projectPath)}/${f.path}`)
     try {
       await saveMemoryCleanupPolicy(projectPath, nextPolicy)
       const rewritten = next.filter((s) => changedNumbers.has(s.chapterNumber))
@@ -389,13 +372,6 @@ export async function applyMemoryCleanup(projectPath: string, scan: MemoryCleanu
       const patches = committed.filter((s) => s.chapterNumber > 0).map((s) => buildChapterIngestOutput(s).wikiUpdatePatch)
       report(onLog, "正在重建派生记忆")
       await rebuildDerivedMemoryFromSnapshots(projectPath, undefined, { fields: [...changedFields] })
-      await syncTracking(projectPath)
-      const retrieval = createRetrievalStore(projectPath)
-      const retrievalSnapshots = committed.filter((s) => s.chapterNumber > 0 && changedNumbers.has(s.chapterNumber))
-      for (let index = 0; index < retrievalSnapshots.length; index++) {
-        if (index % 20 === 0) report(onLog, `正在同步检索 ${index + 1}/${retrievalSnapshots.length}`)
-        await retrieval.updateChapterEntry(retrievalSnapshots[index].chapterNumber, retrievalSnapshots[index])
-      }
       report(onLog, "正在同步人物页和人设事实")
       await rebuildMemoryEntityProjections(projectPath, patches, entityPaths, changed, committed)
       await rebuildPersonaFacts(projectPath, committed, changedNumbers, changedFields)
@@ -413,7 +389,7 @@ export async function applyMemoryCleanup(projectPath: string, scan: MemoryCleanu
       if (backup.files.length) report(onLog, `正在核对改动 ${backup.files.length}/${backup.files.length}`)
       // Include newly created retrieval files in rollback/undo as absent originals.
       const known = new Set(backup.files.map((f) => f.path))
-      for (const path of await optionalTree(`${normalizePath(projectPath)}/retrieval`)) {
+      for (const path of await optionalTree(`${normalizePath(projectPath)}/.qmai/retrieval`)) {
         const relative = normalizePath(path).slice(normalizePath(projectPath).length + 1)
         if (!known.has(relative)) { backup.files.push({ path: relative, before: null, after: fingerprintText(JSON.stringify(await readFile(path))) }); mutatedPaths.push(path) }
       }
@@ -498,7 +474,7 @@ export async function undoLastMemoryCleanup(projectPath: string, onLog?: Log): P
     await restoreFiles(projectPath, backup)
     const paths = backup.files.map((f) => `${normalizePath(projectPath)}/${f.path}`)
     let indexError: unknown = null
-    try { await invalidateVectors(projectPath, paths, paths.filter((path) => path.includes("/.novel/community-summaries/")), onLog) }
+    try { await invalidateVectors(projectPath, paths, paths.filter((path) => path.includes("/.qmai/novel/community-summaries/")), onLog) }
     catch (error) { indexError = error }
     await deleteFile(lastPath(projectPath))
     clearGraphCache(); useWikiStore.getState().bumpDataVersion()

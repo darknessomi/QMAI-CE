@@ -95,23 +95,11 @@ export function parseForeshadowingChange(raw: string): ParsedForeshadowingChange
  * Match an existing foreshadowing item by normalized name.
  * Exact match first; then prefix match when both names are ≥6 chars.
  */
-export function findForeshadowingByNormalizedName<T extends { name: string }>(
-  items: readonly T[],
-  queryName: string,
-): T | undefined {
-  const needle = queryName.trim()
-  if (!needle) return undefined
-
-  const exact = items.find((f) => f.name === needle)
-  if (exact) return exact
-
-  if (needle.length < 6) return undefined
-
-  return items.find((f) => {
-    const existing = f.name.trim()
-    if (existing.length < 6) return false
-    return existing.startsWith(needle) || needle.startsWith(existing)
-  })
+export function matchForeshadowingNames<T extends { name: string }>(items: readonly T[], name: string): T[] {
+  const exact = items.find((f) => f.name === name)
+  if (exact) return [exact]
+  if (name.length < 6) return []
+  return items.filter((f) => f.name.length >= 6 && (f.name.startsWith(name) || name.startsWith(f.name)))
 }
 
 /** Active = not resolved and not abandoned. */
