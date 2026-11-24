@@ -37,6 +37,7 @@ import { useWikiStore } from "@/stores/wiki-store"
 interface PersonaTreeSectionProps {
   /** 数据版本号：外部（建档 / 删除 / 学习）发生后 +1，用来触发重读。 */
   refreshKey?: number
+  searchQuery?: string
 }
 
 type MenuState =
@@ -44,7 +45,7 @@ type MenuState =
   | { kind: "active"; id: string; name: string; pinned: boolean; x: number; y: number }
   | null
 
-export function PersonaTreeSection({ refreshKey = 0 }: PersonaTreeSectionProps) {
+export function PersonaTreeSection({ refreshKey = 0, searchQuery = "" }: PersonaTreeSectionProps) {
   const projectPath = useWikiStore((s) => s.project?.path)
   const personaOutlinePane = useWikiStore((s) => s.personaOutlinePane)
   const setPersonaOutlinePane = useWikiStore((s) => s.setPersonaOutlinePane)
@@ -54,9 +55,9 @@ export function PersonaTreeSection({ refreshKey = 0 }: PersonaTreeSectionProps) 
 
   const [skills, setSkills] = useState<PersonaSkillMeta[]>([])
   const [candidates, setCandidates] = useState<PersonaSkillSighting[]>([])
-  const [open, setOpen] = useState(true)
-  const [activeOpen, setActiveOpen] = useState(true)
-  const [candidatesOpen, setCandidatesOpen] = useState(false)
+  const [folderExpanded, setOpen] = useState(true)
+  const [activeExpanded, setActiveOpen] = useState(false)
+  const [candidatesExpanded, setCandidatesOpen] = useState(false)
   const [menu, setMenu] = useState<MenuState>(null)
   const [busy, setBusy] = useState(false)
 
@@ -199,8 +200,21 @@ export function PersonaTreeSection({ refreshKey = 0 }: PersonaTreeSectionProps) 
     }
   }
 
-  const total = skills.length + candidates.length
+  const keyword = searchQuery.trim().toLowerCase()
+  const searching = Boolean(keyword)
+  const matchesName = (person: PersonaSkillMeta | PersonaSkillSighting) =>
+    person.characterName.toLowerCase().includes(keyword) || person.aliases.some(alias => alias.toLowerCase().includes(keyword))
+  const visibleSkills = searching ? skills.filter(matchesName) : skills
+  const visibleCandidates = searching ? candidates.filter(matchesName) : candidates
+  const total = visibleSkills.length + visibleCandidates.length
+  const open = searching || folderExpanded
+  const activeOpen = searching || activeExpanded
+  const candidatesOpen = searching || candidatesExpanded
   const currentId = personaOutlinePane?.mode === "persona" ? personaOutlinePane.id : null
+
+  if (searching && total === 0) {
+    return <p role="status" className="px-2 py-4 text-center text-xs text-muted-foreground">没有找到匹配的人物</p>
+  }
 
   return (
     <div data-testid="persona-tree-section" className="ui-test-ptree">
@@ -210,6 +224,7 @@ export function PersonaTreeSection({ refreshKey = 0 }: PersonaTreeSectionProps) 
         type="button"
         className="ui-test-ptree-row is-folder"
         aria-expanded={open}
+        disabled={searching}
         data-testid="persona-tree-folder"
         title="人物小传（固定文件夹，不可删除）"
         onClick={() => setOpen((value) => !value)}
@@ -229,6 +244,8 @@ export function PersonaTreeSection({ refreshKey = 0 }: PersonaTreeSectionProps) 
             type="button"
             className="ui-test-ptree-row is-group"
             aria-expanded={activeOpen}
+            disabled={searching}
+            hidden={searching && visibleSkills.length === 0}
             data-testid="persona-tree-active-toggle"
             onClick={() => setActiveOpen((value) => !value)}
           >
@@ -237,11 +254,11 @@ export function PersonaTreeSection({ refreshKey = 0 }: PersonaTreeSectionProps) 
             </span>
             <User className="ui-test-ptree-ico" aria-hidden="true" />
             <span className="ui-test-ptree-name">活跃角色</span>
-            <span className="ui-test-ptree-count">{skills.length}</span>
+            <span className="ui-test-ptree-count">{visibleSkills.length}</span>
           </button>
 
           {activeOpen
-            ? skills.map((meta) => (
+            ? visibleSkills.map((meta) => (
                 <button
                   key={meta.id}
                   type="button"
@@ -290,6 +307,8 @@ export function PersonaTreeSection({ refreshKey = 0 }: PersonaTreeSectionProps) 
             type="button"
             className="ui-test-ptree-row is-group"
             aria-expanded={candidatesOpen}
+            disabled={searching}
+            hidden={searching && visibleCandidates.length === 0}
             data-testid="persona-tree-candidates-toggle"
             onClick={() => setCandidatesOpen((value) => !value)}
           >
@@ -298,11 +317,11 @@ export function PersonaTreeSection({ refreshKey = 0 }: PersonaTreeSectionProps) 
             </span>
             <Users className="ui-test-ptree-ico" aria-hidden="true" />
             <span className="ui-test-ptree-name">候选角色</span>
-            <span className="ui-test-ptree-count">{candidates.length}</span>
+            <span className="ui-test-ptree-count">{visibleCandidates.length}</span>
           </button>
 
           {candidatesOpen
-            ? candidates.map((sighting) => (
+            ? visibleCandidates.map((sighting) => (
                 <button
                   key={sighting.characterName}
                   type="button"

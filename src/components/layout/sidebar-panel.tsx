@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react"
+import { Tabs } from "@base-ui/react/tabs"
+import { Search } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { UiTestDirectoryHeader } from "@/components/uitest/ui-test-directory"
 import { UiTestOutlineTools } from "@/components/uitest/ui-test-outline-tools"
@@ -152,10 +154,15 @@ export function SidebarPanel({ onUiTestCloseDirectory, onUiTestRegisterCancel }:
   const enqueueOutlineReferenceTokens = useOutlineChatStore((s) => s.enqueueReferenceTokens)
   const setOutlineChatOpen = useOutlineGenerationStore((s) => s.setPanelOpen)
   const [mode, setMode] = useState<"knowledge" | "files">("knowledge")
+  const [outlineTab, setOutlineTab] = useState<"outline" | "personas">("outline")
   const [refreshKey, setRefreshKey] = useState(0)
   const [uiTestQuery, setUiTestQuery] = useState("")
+  const [personaQuery, setPersonaQuery] = useState("")
   const [chapterTotalWords, setChapterTotalWords] = useState<number | null>(null)
-  useEffect(() => setUiTestQuery(""), [activeView])
+  useEffect(() => {
+    setUiTestQuery("")
+    setPersonaQuery("")
+  }, [activeView, project?.path])
   const [pendingCreate, setPendingCreate] = useState<KnowledgeCreateRequest | null>(null)
   const [inputTitle, setInputTitle] = useState("")
   const [creating, setCreating] = useState(false)
@@ -210,6 +217,8 @@ export function SidebarPanel({ onUiTestCloseDirectory, onUiTestRegisterCancel }:
   }, [activeView, selectedFile])
 
   const isChapter = mode === "knowledge"
+  const searchingPersonas = outlineTab === "personas"
+  const searchLabel = searchingPersonas ? "搜索人物姓名或别名" : "搜索大纲"
 
   /*
    * 桌面文件直接拖进列表就能导入。
@@ -221,7 +230,7 @@ export function SidebarPanel({ onUiTestCloseDirectory, onUiTestRegisterCancel }:
    * 这里只负责把落进来的路径接到与菜单导入同一段的导入流程上。
    */
   const { containerRef: dropContainerRef, isDraggingOver } = useListFileDrop({
-    enabled: Boolean(project) && !chapterImporting && !outlineImporting,
+    enabled: Boolean(project) && (isChapter || outlineTab === "outline") && !chapterImporting && !outlineImporting,
     kind: isChapter ? "chapter" : "outline",
     onDropPaths: (paths) => {
       if (isChapter) {
@@ -705,6 +714,7 @@ export function SidebarPanel({ onUiTestCloseDirectory, onUiTestRegisterCancel }:
       useWikiStore.getState().setPersonaSkillCreateRequested(true)
       return
     }
+    if (request.kind === "outline" || request.kind === "folder") setOutlineTab("outline")
     setPendingCreate(request)
     setInputTitle("")
   }
@@ -771,7 +781,10 @@ export function SidebarPanel({ onUiTestCloseDirectory, onUiTestRegisterCancel }:
         busy={creating || outlineImporting || chapterImporting}
         onCreate={() => { setUiTestQuery(""); if (isChapter) void handleCreateNextChapter(); else beginCreate({ kind: "outline" }) }}
         onCreateContainer={() => beginCreate({ kind: isChapter ? "volume" : "folder" })}
-        onCreatePersona={isChapter ? undefined : () => useWikiStore.getState().setPersonaOutlinePane({ mode: "create" })}
+        onCreatePersona={isChapter ? undefined : () => {
+          setOutlineTab("personas")
+          useWikiStore.getState().setPersonaOutlinePane({ mode: "create" })
+        }}
         onImportFiles={() => { if (isChapter) void handleImportChapterFiles(); else void handleImportOutlineFiles() }}
         onImportFolder={() => { if (isChapter) void handleImportChapterFolder(); else void handleImportOutlineFolder() }}
         onOpenAssistant={() => { if (isChapter) setBulkChapterOpen((open) => !open); else setBulkOutlineOpen((open) => !open) }}
@@ -827,35 +840,62 @@ export function SidebarPanel({ onUiTestCloseDirectory, onUiTestRegisterCancel }:
 
       {!isChapter && bulkOutlineOpen && <div className="border-b px-3 py-2"><UiTestOutlineTools /></div>}
       {isChapter && bulkChapterOpen && <div className="border-b px-3 py-2"><UiTestOutlineTools kind="chapter" /></div>}
-      {!isChapter ? <PersonaTreeSection refreshKey={refreshKey} /> : null}
-      <div
-        ref={dropContainerRef}
-        data-ui-list-drop-target={isChapter ? "chapter" : "outline"}
-        className={`relative flex-1 overflow-hidden transition-colors ${isDraggingOver ? "ring-2 ring-inset ring-primary/60 bg-primary/5" : ""}`}
-      >
-        {/* 拖拽经过时才出现的一条提示：让用户知道"松手就导入到这里"。
-            不用整块遮罩，否则会挡住列表本身，用户看不到自己要放进哪。 */}
-        {isDraggingOver ? (
-          <div
-            className="pointer-events-none absolute inset-x-2 top-2 z-10 rounded border border-primary/40 bg-background/95 px-2 py-1 text-center text-[0.6875rem] text-primary shadow-sm"
-            data-ui-list-drop-hint="true"
-          >
-            松手即可导入到{isChapter ? "章节" : "大纲"}列表
-          </div>
-        ) : null}
-        <KnowledgeTree
-          searchQuery={uiTestQuery}
-          onSearchQueryChange={setUiTestQuery}
-          onChapterTotalWordsChange={isChapter ? setChapterTotalWords : undefined}
-          filterType={isChapter ? "chapter" : "outline"}
-          refreshKey={refreshKey}
-          pendingPages={pendingPages.filter((page) => page.type === (isChapter ? "chapter" : "outline"))}
-          onRemovePendingPage={handleRemovePendingPage}
-          onRequestCreate={beginCreate}
-          onSendToChat={isChapter ? handleSendChapterToChat : undefined}
-          onSendToOutline={!isChapter ? handleSendOutlineToOutlineChat : undefined}
-        />
-      </div>
+      <Tabs.Root value={isChapter ? "outline" : outlineTab} onValueChange={setOutlineTab} data-ui-outline-directory={isChapter ? undefined : true} className="flex min-h-0 flex-1 flex-col">
+        {!isChapter && (
+          <>
+            <Tabs.List activateOnFocus aria-label="大纲侧栏" className="ui-test-directory-tabs">
+              <Tabs.Tab value="outline">大纲</Tabs.Tab>
+              <Tabs.Tab value="personas">人物小传</Tabs.Tab>
+            </Tabs.List>
+            <label className="ui-test-directory-search">
+              <Search aria-hidden="true" />
+              <input
+                type="search"
+                aria-label={searchLabel}
+                placeholder={searchLabel}
+                value={searchingPersonas ? personaQuery : uiTestQuery}
+                onChange={event => (searchingPersonas ? setPersonaQuery : setUiTestQuery)(event.target.value)}
+              />
+            </label>
+          </>
+        )}
+        <Tabs.Panel
+          value="outline"
+          keepMounted
+          {...(isChapter && { role: "group", tabIndex: -1 })}
+          ref={dropContainerRef}
+          data-ui-list-drop-target={isChapter ? "chapter" : "outline"}
+          className={`relative min-h-0 flex-1 overflow-hidden transition-colors ${isDraggingOver ? "ring-2 ring-inset ring-primary/60 bg-primary/5" : ""}`}
+        >
+          {/* 拖拽经过时才出现的一条提示：让用户知道"松手就导入到这里"。
+              不用整块遮罩，否则会挡住列表本身，用户看不到自己要放进哪。 */}
+          {isDraggingOver ? (
+            <div
+              className="pointer-events-none absolute inset-x-2 top-2 z-10 rounded border border-primary/40 bg-background/95 px-2 py-1 text-center text-[0.6875rem] text-primary shadow-sm"
+              data-ui-list-drop-hint="true"
+            >
+              松手即可导入到{isChapter ? "章节" : "大纲"}列表
+            </div>
+          ) : null}
+          <KnowledgeTree
+            searchQuery={uiTestQuery.trim()}
+            onSearchQueryChange={setUiTestQuery}
+            onChapterTotalWordsChange={isChapter ? setChapterTotalWords : undefined}
+            filterType={isChapter ? "chapter" : "outline"}
+            refreshKey={refreshKey}
+            pendingPages={pendingPages.filter((page) => page.type === (isChapter ? "chapter" : "outline"))}
+            onRemovePendingPage={handleRemovePendingPage}
+            onRequestCreate={beginCreate}
+            onSendToChat={isChapter ? handleSendChapterToChat : undefined}
+            onSendToOutline={!isChapter ? handleSendOutlineToOutlineChat : undefined}
+          />
+        </Tabs.Panel>
+        {!isChapter && (
+          <Tabs.Panel value="personas" keepMounted className="flex min-h-0 flex-1 flex-col">
+            <PersonaTreeSection refreshKey={refreshKey} searchQuery={personaQuery} />
+          </Tabs.Panel>
+        )}
+      </Tabs.Root>
       <Dialog
         open={Boolean(memoryDecisionRequest)}
         onOpenChange={(open) => {

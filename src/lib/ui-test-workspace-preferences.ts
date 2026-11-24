@@ -9,6 +9,7 @@ export interface UiTestWorkspacePreference {
   version: 1
   aiWidth?: number
   chapterListWidth?: number
+  outlineListWidth?: number
   directory?: Partial<Record<View, boolean>>
   files?: Partial<Record<View, string | null>>
   lastView?: "sources" | "wiki" | "soul"

@@ -47,14 +47,14 @@ beforeEach(() => {
   indexMock.mockResolvedValue({
     version: 1,
     skills: [
-      { id: "杨寒", characterName: "杨寒", roleType: "主角", status: "active", appearanceCount: 18, pinned: true, aliases: [], tier: "major" },
+      { id: "杨寒", characterName: "杨寒", roleType: "主角", status: "active", appearanceCount: 18, pinned: true, aliases: ["Han"], tier: "major" },
       { id: "杨津艺", characterName: "杨津艺", roleType: "次要", status: "dormant", appearanceCount: 1, pinned: false, aliases: [], tier: "minor", autoUpdate: false },
     ],
   })
   sightingsMock.mockResolvedValue({
     version: 1,
     sightings: [
-      { characterName: "地下铁门守卫", aliases: [], roleType: "", appearanceCount: 1, firstChapter: 5, lastChapter: 5, chapters: [5] },
+      { characterName: "地下铁门守卫", aliases: ["老韩"], roleType: "", appearanceCount: 1, firstChapter: 5, lastChapter: 5, chapters: [5] },
     ],
   })
 })
@@ -64,11 +64,33 @@ afterEach(async () => {
   host.remove()
 })
 
-async function render() {
-  await act(async () => root.render(<PersonaTreeSection />))
+async function render(searchQuery = "") {
+  await act(async () => root.render(<PersonaTreeSection searchQuery={searchQuery} />))
+}
+
+async function openActiveGroup() {
+  await act(async () => host.querySelector<HTMLElement>('[data-testid="persona-tree-active-toggle"]')!.click())
 }
 
 describe("PersonaTreeSection（大纲第一栏的人物小传）", () => {
+  it("按姓名和别名查找两组人物，清空后恢复原来的折叠状态", async () => {
+    await render()
+    await openActiveGroup()
+    const rowNames = () => [...host.querySelectorAll(".is-leaf .ui-test-ptree-name")].map(row => row.textContent)
+    await render("寒")
+    expect(rowNames()).toEqual(["杨寒"])
+    await render("  hAN ")
+    expect(rowNames()).toEqual(["杨寒"])
+    await render("老韩")
+    expect(rowNames()).toEqual(["地下铁门守卫"])
+    await act(async () => host.querySelector<HTMLButtonElement>(".is-leaf")!.click())
+    expect(storeState.setPersonaOutlinePane).toHaveBeenCalledWith({ mode: "candidate", name: "地下铁门守卫" })
+    await render("无人匹配")
+    expect(host.querySelector('[role="status"]')?.textContent).toBe("没有找到匹配的人物")
+    await render("")
+    expect(rowNames()).toEqual(["杨寒", "杨津艺"])
+  })
+
   it("固定文件夹「人物小传」带锁定图标与总数，活跃/候选都在里面", async () => {
     await render()
     const section = host.querySelector('[data-testid="persona-tree-section"]')!
@@ -82,6 +104,7 @@ describe("PersonaTreeSection（大纲第一栏的人物小传）", () => {
 
   it("角色节点按索引渲染，潜伏角色带灰点、冻结角色带「冻」标记", async () => {
     await render()
+    await openActiveGroup()
     expect(host.querySelector('[data-testid="persona-tree-item-杨寒"]')).not.toBeNull()
     const dormant = host.querySelector('[data-testid="persona-tree-item-杨津艺"]')!
     expect(dormant.textContent).toContain("杨津艺")
@@ -90,6 +113,7 @@ describe("PersonaTreeSection（大纲第一栏的人物小传）", () => {
 
   it("点角色只切中栏内容，不跳整页视图", async () => {
     await render()
+    await openActiveGroup()
     await act(async () =>
       host.querySelector<HTMLElement>('[data-testid="persona-tree-item-杨寒"]')!.click(),
     )
@@ -118,6 +142,7 @@ describe("PersonaTreeSection（大纲第一栏的人物小传）", () => {
 
   it("右键菜单不会被自己的全局监听关掉（曾经右键完全没反应）", async () => {
     await render()
+    await openActiveGroup()
     const row = host.querySelector<HTMLElement>('[data-testid="persona-tree-item-杨寒"]')!
     await act(async () => {
       row.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 10, clientY: 20 }))
@@ -131,6 +156,7 @@ describe("PersonaTreeSection（大纲第一栏的人物小传）", () => {
 
   it("点菜单外部会收起菜单，点菜单内部不会", async () => {
     await render()
+    await openActiveGroup()
     const row = host.querySelector<HTMLElement>('[data-testid="persona-tree-item-杨寒"]')!
     await act(async () => {
       row.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 10, clientY: 20 }))
@@ -150,6 +176,7 @@ describe("PersonaTreeSection（大纲第一栏的人物小传）", () => {
 
   it("活跃角色右键出菜单：标记重要 / 打开 / 删除", async () => {
     await render()
+    await openActiveGroup()
     const row = host.querySelector<HTMLElement>('[data-testid="persona-tree-item-杨寒"]')!
     await act(async () => {
       row.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 10, clientY: 20 }))
@@ -173,6 +200,9 @@ describe("PersonaTreeSection（大纲第一栏的人物小传）", () => {
   it("点「活跃角色」整行切换展开/折叠", async () => {
     await render()
     const toggle = host.querySelector<HTMLElement>('[data-testid="persona-tree-active-toggle"]')!
+    expect(toggle.getAttribute("aria-expanded")).toBe("false")
+    expect(host.querySelector('[data-testid="persona-tree-item-杨寒"]')).toBeNull()
+    await openActiveGroup()
     expect(toggle.getAttribute("aria-expanded")).toBe("true")
     expect(host.querySelector('[data-testid="persona-tree-item-杨寒"]')).not.toBeNull()
     await act(async () => toggle.click())

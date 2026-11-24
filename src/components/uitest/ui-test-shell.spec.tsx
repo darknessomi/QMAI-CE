@@ -304,11 +304,15 @@ describe("独立UI测试版外壳", () => {
     expect(expanded.getAttribute("aria-label")).toBe("收起目录")
     expect(expanded.classList.contains("is-directory-collapsed")).toBe(false)
   })
-  it("章节列表可双向拖拽，限制宽度并按小说恢复", async () => {
-    useWikiStore.setState({ activeView: "wiki" })
+  it.each([
+    { view: "wiki", list: "章节", other: "大纲" },
+    { view: "sources", list: "大纲", other: "章节" },
+  ] as const)("「$list」列表可双向拖拽，限制宽度并独立恢复", async ({ view, list, other }) => {
+    useWikiStore.setState({ activeView: view })
     await render()
     const directory = host.querySelector<HTMLElement>("#ui-test-directory")!
-    const handle = host.querySelector<HTMLElement>('[aria-label="调整章节列表宽度"]')!
+    const handleSelector = `[role="separator"][aria-label="调整${list}列表宽度"]`
+    const handle = host.querySelector<HTMLElement>(handleSelector)!
     expect(handle.previousElementSibling).toBe(directory)
     expect(directory.style.width).toBe("220px")
 
@@ -339,16 +343,21 @@ describe("独立UI测试版外壳", () => {
     expect(host.contains(handle)).toBe(false)
     await click("展开目录")
     expect(directory.style.width).toBe("270px")
-    await click("大纲")
-    expect(host.querySelector('[aria-label="调整章节列表宽度"]')).toBeNull()
-    expect(directory.style.width).toBe("")
-    await click("章节")
+    await click(other)
+    expect(host.querySelector(handleSelector)).toBeNull()
+    expect(directory.style.width).toBe("220px")
+    const otherHandle = host.querySelector<HTMLElement>(`[aria-label="调整${other}列表宽度"]`)!
+    await act(async () => { otherHandle.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true })) })
+    expect(directory.style.width).toBe("236px")
+    await click(list)
     expect(directory.style.width).toBe("270px")
 
     await act(async () => root.unmount())
     root = createRoot(host)
     await render()
     expect(host.querySelector<HTMLElement>("#ui-test-directory")?.style.width).toBe("270px")
+    await click(other)
+    expect(host.querySelector<HTMLElement>("#ui-test-directory")?.style.width).toBe("236px")
   })
   it("无书时主工作区入口禁用，不留下看似有效却无效的按钮", async () => {
     await render(false)

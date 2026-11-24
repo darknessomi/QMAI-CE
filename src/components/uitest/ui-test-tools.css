@@ -2665,31 +2665,24 @@
   height: 12px;
 }
 
-/* ===== 大纲第一栏：人物小传区段 =====
-   度量对齐文件树（ui-test.css 的 [data-ui-tree-row]）：
-   字号 0.875rem / 图标 15px / 行高 34px / 圆角 8px / 左右 10px / 间距 8px。
-   之前这套值偏小，渲染出来像另一个控件（用户实测：大小不一样）。 */
+/* 大纲侧栏的人物目录与文件目录共用行高和外边距。 */
 .ui-test-root .ui-test-ptree {
-  /* 候选角色展开后可能有几十条：区块本身必须能滚，
-     否则它把下方的文件树顶出侧栏，滚轮也就没有可以滚的东西（用户实测）。 */
-  flex: 0 1 auto;
+  flex: 1;
   min-height: 0;
-  max-height: 46vh;
   overflow-y: auto;
   overscroll-behavior: contain;
-  scrollbar-gutter: stable;
-  padding: 6px 8px 10px;
-  border-bottom: 1px solid var(--ui-line);
+  scrollbar-width: thin;
+  padding: 0 var(--directory-inset) 12px;
 }
 
 .ui-test-root .ui-test-ptree-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   width: 100%;
-  min-height: 34px;
-  margin: 2px 0;
-  padding-inline: 10px;
+  min-height: var(--directory-row-height);
+  margin: 1px 0;
+  padding: 3px 8px 3px 10px;
   border: 0;
   border-radius: 8px;
   background: transparent;
@@ -2701,13 +2694,13 @@
   cursor: pointer;
 }
 
-.ui-test-root .ui-test-ptree-row:hover {
-  background: color-mix(in srgb, var(--ui-soft) 62%, transparent);
+.ui-test-root .ui-test-ptree-row:hover:not(:disabled) {
+  background: var(--ui-soft);
 }
 
 .ui-test-root .ui-test-ptree-row.is-on {
-  background: var(--ui-paper);
-  box-shadow: 0 1px 2px rgba(23, 35, 29, .06);
+  background: var(--ui-selected);
+  color: var(--ui-accent);
   font-weight: 500;
 }
 
@@ -2720,21 +2713,22 @@
   color: var(--ui-muted);
 }
 
-/* 层级缩进：分组 16px，叶子 30px（在 10px 基础上叠加） */
+.ui-test-root .ui-test-ptree-children {
+  background: linear-gradient(var(--ui-line), var(--ui-line)) 16px center / 1px calc(100% - 10px) no-repeat;
+}
 .ui-test-root .ui-test-ptree-children > .ui-test-ptree-row.is-group {
-  padding-inline-start: 16px;
+  padding-inline-start: 26px;
 }
 
 .ui-test-root .ui-test-ptree-row.is-leaf {
-  padding-inline-start: 30px;
-  min-height: 32px;
+  padding-inline-start: 52px;
 }
 
 .ui-test-root .ui-test-ptree-toggle {
   display: grid;
   place-items: center;
   flex-shrink: 0;
-  width: 15px;
+  width: 12px;
   height: 15px;
   padding: 0;
   border: 0;
@@ -2744,8 +2738,8 @@
 }
 
 .ui-test-root .ui-test-ptree-toggle svg {
-  width: 15px;
-  height: 15px;
+  width: 12px;
+  height: 12px;
 }
 
 .ui-test-root .ui-test-ptree-ico {

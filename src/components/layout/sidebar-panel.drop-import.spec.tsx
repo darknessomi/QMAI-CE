@@ -53,6 +53,7 @@ vi.mock("@/commands/fs", () => ({
 
 import { SidebarPanel } from "./sidebar-panel"
 import { useWikiStore } from "@/stores/wiki-store"
+import { changeInput } from "@/components/uitest/models/model-test-utils"
 
 ;(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -143,11 +144,75 @@ describe("桌面文件拖进列表导入", () => {
   it("章节列表挂上了投放目标标记", async () => {
     await mount("chapter")
     expect(dropTarget()?.getAttribute("data-ui-list-drop-target")).toBe("chapter")
+    expect(container.querySelector('[aria-label="大纲侧栏"]')).toBeNull()
   })
 
   it("大纲列表挂上了投放目标标记", async () => {
     await mount("outline")
     expect(dropTarget()?.getAttribute("data-ui-list-drop-target")).toBe("outline")
+  })
+
+  it("输入关键词直接找到折叠目录里的大纲，两页搜索词独立", async () => {
+    await mount("outline")
+    const outlines = `${PROJECT}/wiki/outlines`
+    const folder = `${outlines}/设定`
+    await act(async () => useWikiStore.setState({ fileTree: [{
+      name: "outlines", path: outlines, is_dir: true, children: [{
+        name: "设定", path: folder, is_dir: true, children: ["世界", "人物关系"].map(title => ({
+          name: `${title}.md`, path: `${folder}/${title}.md`, is_dir: false,
+        })),
+      }],
+    }] }))
+    const [outline, personas] = container.querySelectorAll<HTMLButtonElement>('[aria-label="大纲侧栏"] [role="tab"]')
+    const files = () => [...container.querySelectorAll("[data-page-path]")].map(row => row.getAttribute("data-page-path"))
+    await changeInput(container, "搜索大纲", "世界")
+    expect(files()).toEqual([`${folder}/世界.md`])
+    await act(async () => personas.click())
+    expect(container.querySelector<HTMLInputElement>("input[type=search]")?.value).toBe("")
+    await changeInput(container, "搜索人物姓名或别名", "老韩")
+    expect(container.textContent).toContain("没有找到匹配的人物")
+    await act(async () => outline.click())
+    expect(container.querySelector<HTMLInputElement>("input[type=search]")?.value).toBe("世界")
+    await changeInput(container, "搜索大纲", " ")
+    expect(files()).toEqual([])
+    expect(container.querySelector('[data-ui-tree-row="folder"] button')?.getAttribute("aria-expanded")).toBe("false")
+  })
+
+  it("大纲和人物小传共用侧栏，切换时保留手动展开的目录，人物页不接收大纲投放", async () => {
+    await mount("outline")
+    const outlines = `${PROJECT}/wiki/outlines`
+    const folder = `${outlines}/设定`
+    const file = `${folder}/世界.md`
+    await act(async () => useWikiStore.setState({ fileTree: [
+      { name: "outlines", path: outlines, is_dir: true, children: [
+        { name: "设定", path: folder, is_dir: true, children: [
+          { name: "世界.md", path: file, is_dir: false },
+        ] },
+      ] },
+    ] }))
+
+    const tabs = [...container.querySelectorAll<HTMLButtonElement>('[aria-label="大纲侧栏"] [role="tab"]')]
+    expect(tabs.map(tab => tab.textContent)).toEqual(["大纲", "人物小传"])
+    const visiblePanel = () => container.querySelector<HTMLElement>('[role="tabpanel"]:not([hidden])')!
+    const folderButton = () => visiblePanel().querySelector<HTMLButtonElement>('[data-ui-tree-row="folder"] button')!
+    expect(tabs[0].getAttribute("aria-selected")).toBe("true")
+    expect(folderButton().getAttribute("aria-expanded")).toBe("false")
+    expect(visiblePanel().querySelector("[data-page-path]")).toBeNull()
+    await act(async () => folderButton().click())
+    expect(visiblePanel().querySelector("[data-page-path]")?.getAttribute("data-page-path")).toBe(file)
+
+    await act(async () => tabs[1].click())
+    await vi.waitFor(() => expect(dropTarget()?.hidden).toBe(true))
+    expect(visiblePanel().querySelector('[data-testid="persona-tree-section"]')).not.toBeNull()
+    expect(visiblePanel().querySelector('[data-page-path]')).toBeNull()
+    emit({ type: "drop", paths: ["E:/桌面/主线.md"], position: INSIDE })
+    await flush()
+    expect(document.querySelector('[role="dialog"]')).toBeNull()
+
+    await act(async () => tabs[0].click())
+    await vi.waitFor(() => expect(container.querySelectorAll('[role="tabpanel"]:not([hidden])')).toHaveLength(1))
+    expect(folderButton().getAttribute("aria-expanded")).toBe("true")
+    expect(visiblePanel().querySelector('[data-testid="persona-tree-section"]')).toBeNull()
   })
 
   /**

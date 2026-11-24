@@ -1479,10 +1479,6 @@ export function KnowledgeTree({
     }
   }, [project?.id, renamingPath, setSelectedFile])
 
-  const toggleFolder = useCallback((folderPath: string) => {
-    setCollapsedFolders((previous) => ({ ...previous, [folderPath]: !previous[folderPath] }))
-  }, [])
-
   const openCreateMenu = useCallback((event: React.MouseEvent, parentDir?: string, targetFolderName?: string) => {
     event.preventDefault()
     event.stopPropagation()
@@ -1620,7 +1616,6 @@ export function KnowledgeTree({
 
   const visibleSectionNodes = useMemo(() => filterUiTestDirectory(sectionNodes, searchQuery, new Map(Array.from(pageInfoByPath, ([path, page]) => [path, page.title]))), [sectionNodes, searchQuery, pageInfoByPath])
 
-  const rootLabel = filterType === "chapter" ? t("sidebar.knowledge") : t("sidebar.files")
   const emptyLabel = filterType === "chapter"
     ? t("knowledgeTree.emptyFiltered", { label: t("trash.kindChapter") })
     : t("knowledgeTree.emptyFiltered", { label: t("trash.kindOutline") })
@@ -1637,7 +1632,7 @@ export function KnowledgeTree({
     return sortFileNodes(nodes, pageInfoByPath, filterType).flatMap((node) => {
       const normalizedPath = normalizePath(node.path)
       if (node.is_dir) {
-        const isCollapsed = searchQuery ? false : collapsedFolders[normalizedPath] ?? false
+        const isCollapsed = !searchQuery && (collapsedFolders[normalizedPath] ?? filterType === "outline")
         const isRenamingFolder = renamingFolderPath === normalizedPath
         const isOutlineDropTarget = outlineDropFolderPath === normalizedPath
         const folderRow = (
@@ -1652,8 +1647,11 @@ export function KnowledgeTree({
             >
               <button
                 type="button"
+                aria-expanded={!isCollapsed}
                 onClick={() => {
-                  if (!isRenamingFolder) toggleFolder(normalizedPath)
+                  if (!isRenamingFolder && !searchQuery) {
+                    setCollapsedFolders(previous => ({ ...previous, [normalizedPath]: !isCollapsed }))
+                  }
                 }}
                 disabled={isRenamingFolder}
                 className="flex flex-1 items-center gap-1.5 text-left"
@@ -1925,7 +1923,6 @@ export function KnowledgeTree({
     renamingFolderBusy,
     outlineDropFolderPath,
     openCreateMenu,
-    toggleFolder,
     submitRenamePage,
     cancelRenamePage,
     submitRenameFolder,
@@ -1986,9 +1983,11 @@ export function KnowledgeTree({
         onContextMenu={handleBlankContextMenu}
         onPointerMove={handleContainerPointerMove}
       >
-        <div className={`mb-2 flex items-center justify-between gap-2 px-2 text-xs font-semibold uppercase text-muted-foreground ui-test-tree-root-label`}>
-          <span>{rootLabel}</span>
-        </div>
+        {filterType === "chapter" && (
+          <div className="mb-2 flex items-center justify-between gap-2 px-2 text-xs font-semibold uppercase text-muted-foreground ui-test-tree-root-label">
+            <span>{t("sidebar.knowledge")}</span>
+          </div>
+        )}
         {filterType === "chapter" && chapterBatchMode && selectableChapterPaths.length > 0 && (
           <div className="mb-2 flex items-center gap-2 px-2 text-xs">
             <button
