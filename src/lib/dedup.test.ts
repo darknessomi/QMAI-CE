@@ -421,6 +421,28 @@ describe("rewriteIndexMd", () => {
 // ──────────────────────────────────────────────────────────────────
 
 describe("mergeDuplicateGroup", () => {
+  const modelChoice = {
+    group: ["数字简称", "书中正式名称"].map((slug) => ({ slug, path: `wiki/entities/${slug}.md`, content: PAGE(`title: ${slug}`, `关于${slug}的资料`) })),
+    canonicalSlug: null,
+    otherWikiPages: [{ path: "wiki/chapters/一.md", content: "参考[[数字简称]]" }],
+  }
+
+  it("按模型选择的第二个条目保存并改写引用，同一次模型调用完成正文", async () => {
+    const llm = vi.fn().mockResolvedValue("书中正式名称\r\n" + PAGE("title: 书中正式名称", "合并后的资料"))
+    const result = await mergeDuplicateGroup(modelChoice, llm)
+    expect(llm).toHaveBeenCalledTimes(1)
+    expect(llm.mock.calls[0][1]).toContain("关于书中正式名称的资料")
+    expect(result.canonicalPath).toBe(modelChoice.group[1].path)
+    expect(result.canonicalContent).toMatch(/^---/)
+    expect(result.pagesToDelete).toEqual([modelChoice.group[0].path])
+    expect(result.rewrites[0].newContent).toBe("参考[[书中正式名称]]")
+  })
+
+  it.each(["组外条目\n", ""])("拒绝缺失或组外的模型选择 %j", async (prefix) => {
+    await expect(mergeDuplicateGroup(modelChoice, vi.fn().mockResolvedValue(prefix + PAGE("title: 新名字", "正文"))))
+      .rejects.toThrow("组内有效的主条目")
+  })
+
   it("throws when canonicalSlug isn't in the group", async () => {
     await expect(
       mergeDuplicateGroup(

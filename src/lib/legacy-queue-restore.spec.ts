@@ -21,6 +21,7 @@ vi.mock("@/commands/fs", () => ({
     if (!disk.has(path)) throw Error("ENOENT")
     return disk.get(path)
   },
+  writeFileAtomic: async (path: string, content: string) => { disk.set(path, content) },
   writeFile: async (path: string, content: string) => { disk.set(path, content) },
   fileExists: async (path: string) => path.endsWith("/lancedb") ? indexed.value : disk.has(path),
 }))
@@ -102,7 +103,7 @@ it("hydrates newly created interrupted tasks after switching away and back, keep
   await flushMicrotasks(25)
   expect(embedding).toHaveBeenCalledTimes(1)
   chat.mockImplementationOnce(() => new Promise(() => {}))
-  await enqueueMerge("A", { ...merge.group, slugs: ["c", "d"] }, "c")
+  const newId = await enqueueMerge("A", { ...merge.group, slugs: ["c", "d"] }, "c")
   await flushMicrotasks(10)
   expect(chat).toHaveBeenCalledTimes(1)
   await closeProject()
@@ -110,6 +111,10 @@ it("hydrates newly created interrupted tasks after switching away and back, keep
   expect(getQueue()).toHaveLength(0)
   await closeProject()
   await openProject("A")
+  await flushMicrotasks(30)
+  expect(chat).toHaveBeenCalledTimes(1)
+  expect(getQueue().map(t => t.status)).toEqual(["awaiting_resume", "awaiting_resume"])
+  await retryTask(newId)
   await flushMicrotasks(30)
   expect(chat).toHaveBeenCalledTimes(2)
   expect(getQueue().map(t => [t.id, t.status])).toEqual([[merge.id, "awaiting_resume"]])

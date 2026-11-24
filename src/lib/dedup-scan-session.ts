@@ -8,7 +8,7 @@
  */
 type DedupScanSessionApi = {
   /** Remove a candidate group from the live scan list + persist cache. */
-  removeGroup: (slugs: readonly string[]) => void
+  removeGroup: (projectId: string, slugs: readonly string[]) => void
 }
 
 let sessionApi: DedupScanSessionApi | null = null
@@ -21,10 +21,11 @@ export function registerDedupScanSessionApi(
 
 /** Best-effort live UI update. No-op when Maintenance section is unmounted. */
 export function removeMergedDedupGroupFromSession(
+  projectId: string,
   slugs: readonly string[],
 ): void {
   try {
-    sessionApi?.removeGroup(slugs)
+    sessionApi?.removeGroup(projectId, slugs)
   } catch (err) {
     console.error("[Dedup Scan Session] removeGroup failed:", err)
   }

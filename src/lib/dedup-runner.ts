@@ -10,16 +10,19 @@ import { normalizePath } from "@/lib/path-utils"
 import { useWikiStore, type EmbeddingConfig, type LlmConfig } from "@/stores/wiki-store"
 import type { FileNode } from "@/types/wiki"
 import {
+  DedupRollbackError,
   detectDuplicateGroups,
   extractEntitySummary,
+  finalizeDuplicateMerge,
   mergeDuplicateGroup,
   type DedupLlmCall,
   type DuplicateGroup,
   type EntitySummary,
   type MergeResult,
 } from "./dedup"
-import { buildDetectionBatches, checkDedupSignal } from "./dedup-candidates"
+import { buildDetectionBatches, checkDedupSignal, waitForDedupResult } from "./dedup-candidates"
 import { loadNotDuplicates } from "./dedup-storage"
+import { advanceBatchDrafts, getBatchMergeDraft, type DedupMergeBatch } from "./dedup-merge-batch"
 
 const WIKI_READ_CONCURRENCY = 12
 const WIKI_WRITE_CONCURRENCY = 12
@@ -32,8 +35,9 @@ export type DedupScanStage = "loading" | "detecting"
 type DedupLogFn = (message: string) => void
 
 interface ExecuteMergeOptions {
+  batch?: DedupMergeBatch
   signal?: AbortSignal
-  onProgress?: (stage: DedupMergeStage) => void
+  onProgress?: (stage: DedupMergeStage, requestGroups?: number) => void
   onLog?: DedupLogFn
 }
 
@@ -119,25 +123,25 @@ async function runWithConcurrency<T>(
  * the dedup module expects. Same pattern page-merge uses — keeps
  * the algorithm modules free of any LlmConfig knowledge.
  */
-function buildDedupLlmCall(llmConfig: LlmConfig, maxTokens: number): DedupLlmCall {
+function buildDedupLlmCall(llmConfig: LlmConfig, maxTokens: number, intactInputWindowTokens?: number): DedupLlmCall {
   return async (systemPrompt, userMessage, signal) => {
     let result = ""
     let streamError: Error | null = null
-    checkDedupSignal(signal)
-    await streamChat(
+    await waitForDedupResult(() => streamChat(
       llmConfig,
       [
         { role: "system", content: systemPrompt },
         { role: "user", content: userMessage },
       ],
       {
-        onToken: (token) => { result += token },
+        onToken: (token) => { if (!signal?.aborted) result += token },
         onDone: () => {},
         onError: (error) => { streamError = error },
       },
       signal,
       { temperature: 0.1, max_tokens: maxTokens, reasoning: { mode: "off" }, skipUserMemory: true },
-    )
+      { intactInputWindowTokens },
+    ), signal)
     checkDedupSignal(signal)
     if (streamError) throw streamError
     return result
@@ -210,12 +214,14 @@ export async function loadAllEntitySummaries(
 export async function loadAllWikiPages(
   projectPath: string,
   requireReadable = false,
+  signal?: AbortSignal,
 ): Promise<{ path: string; content: string }[]> {
   const pp = normalizePath(projectPath)
   const tree = await listDirectory(pp)
   const nodes = [...walkMd(tree, "wiki")]
 
   return mapWithConcurrency(nodes, WIKI_READ_CONCURRENCY, async (node) => {
+    checkDedupSignal(signal)
     try {
       const content = await readFile(node.path)
       return { path: toWikiRelative(pp, node.path), content }
@@ -277,17 +283,26 @@ export async function runDuplicateDetection(
 }
 
 /** Resolve only entity/concept documents. The saved group format identifies members by slug. */
-export function resolveDedupPages<T extends { path: string }>(pages: T[], slugs: string[]): (T & { slug: string })[] {
-  if (slugs.length < 2 || new Set(slugs).size !== slugs.length) throw new Error("候选组缺少两个不同的条目")
-  return slugs.map((slug) => {
-    const matches = pages.filter((page) =>
-      /^(wiki|QM)\/(entities|concepts)\//.test(page.path) && page.path.split("/").pop() === slug + ".md",
-    )
-    if (matches.length !== 1) throw new Error(matches.length
-      ? `实体或概念目录中有多份同名条目「${slug}」，无法确定合并对象`
-      : `未找到实体或概念条目「${slug}」，请重新扫描`)
-    return { ...matches[0], slug }
-  })
+function indexDedupPages<T extends { path: string }>(pages: T[]) {
+  const byName = new Map<string, T | null>()
+  for (const page of pages) {
+    if (!/^(wiki|QM)\/(entities|concepts)\//.test(page.path)) continue
+    const name = page.path.split("/").pop()!
+    byName.set(name, byName.has(name) ? null : page)
+  }
+  return (slugs: string[]) => {
+    if (slugs.length < 2 || new Set(slugs).size !== slugs.length) throw new Error("候选组缺少两个不同的条目")
+    return slugs.map((slug) => {
+      const page = byName.get(slug + ".md")
+      if (page === null) throw new Error(`实体或概念目录中有多份同名条目「${slug}」，无法确定合并对象`)
+      if (!page) throw new Error(`未找到实体或概念条目「${slug}」，请重新扫描`)
+      return { ...page, slug }
+    })
+  }
+}
+
+export function resolveDedupPages<T extends { path: string }>(pages: T[], slugs: string[]) {
+  return indexDedupPages(pages)(slugs)
 }
 
 /**
@@ -306,7 +321,7 @@ export function resolveDedupPages<T extends { path: string }>(pages: T[], slugs:
 export async function executeMerge(
   projectPath: string,
   group: DuplicateGroup,
-  canonicalSlug: string,
+  canonicalSlug: string | null,
   llmConfig: LlmConfig,
   options: ExecuteMergeOptions = {},
 ): Promise<MergeResult> {
@@ -314,33 +329,40 @@ export async function executeMerge(
   const { signal, onProgress, onLog: log } = options
 
   log?.(
-    `开始合并 ${group.slugs.join(", ")} → ${canonicalSlug}，模型：${describeLlm(llmConfig)}`,
+    `开始合并 ${group.slugs.join(", ")} → ${canonicalSlug ?? "由模型选择主条目"}，模型：${describeLlm(llmConfig)}`,
   )
 
   // 1. Resolve each group slug to its actual on-disk path + content
   onProgress?.("loading")
   log?.("正在读取 wiki 页面…")
-  const allPages = await loadAllWikiPages(pp, true)
+  const allPages = await waitForDedupResult(() => loadAllWikiPages(pp, true, signal), signal)
   log?.(`已读取 ${allPages.length} 个 wiki 页面`)
-  const groupPages = resolveDedupPages(allPages, group.slugs)
+  const resolve = indexDedupPages(allPages)
+  const groupPages = resolve(group.slugs)
   checkDedupSignal(signal)
 
   const groupPaths = new Set(groupPages.map((p) => p.path))
   const otherPages = allPages.filter((page) => !groupPaths.has(page.path))
 
-  const llm = buildDedupLlmCall(llmConfig, 16_384)
-  onProgress?.("merging")
-  log?.("正在调用模型合并正文…")
-  const result = await mergeDuplicateGroup(
-    {
-      group: groupPages,
-      canonicalSlug,
-      otherWikiPages: otherPages,
-    },
-    llm,
-    { signal },
-  )
-  log?.("模型正文合并完成")
+  const req = { group: groupPages, canonicalSlug, otherWikiPages: otherPages }
+  let result: MergeResult
+  if (options.batch && canonicalSlug === null) {
+    const config: LlmConfig = { ...llmConfig, reasoning: { mode: "off" } }
+    const draft = await getBatchMergeDraft(
+      options.batch, groupPages, resolve, config,
+      (system, user, maxTokens, window, groupCount) => {
+        onProgress?.("merging", groupCount)
+        return buildDedupLlmCall(config, maxTokens, window)(system, user, signal)
+      },
+      log,
+    )
+    result = finalizeDuplicateMerge(req, draft.canonicalSlug, draft.content)
+  } else {
+    onProgress?.("merging", 1)
+    log?.("正在调用模型合并正文…")
+    result = await mergeDuplicateGroup(req, buildDedupLlmCall(llmConfig, 16_384), { signal })
+  }
+  log?.(`模型正文合并完成，保留主条目：${result.canonicalPath}`)
 
   checkDedupSignal(signal)
   onProgress?.("writing")
@@ -350,8 +372,9 @@ export async function executeMerge(
   //    through, the user has the pre-merge state intact in
   //    .qmai/page-history/.
   const stamp = new Date().toISOString().replace(/[:.]/g, "-")
-  const backupDir = `${pp}/.qmai/page-history/dedup-${stamp}`
+  const backupDir = `${pp}/.qmai/page-history/dedup-${stamp}-${crypto.randomUUID()}`
   await runWithConcurrency(result.backup, WIKI_WRITE_CONCURRENCY, async (b) => {
+    checkDedupSignal(signal)
     if (await readFile(`${pp}/${b.path}`) !== b.content) {
       throw new Error(`模型生成期间文件已变更，请重新扫描后再合并：${b.path}`)
     }
@@ -372,15 +395,18 @@ export async function executeMerge(
     await runWithConcurrency(writes, WIKI_WRITE_CONCURRENCY, async ({ path, newContent }) => {
       checkDedupSignal(signal)
       await verifyOriginal(path)
+      checkDedupSignal(signal)
       await writeFileAtomic(`${pp}/${path}`, newContent)
       applied.set(path, newContent)
     })
     await runWithConcurrency(result.pagesToDelete, WIKI_WRITE_CONCURRENCY, async (path) => {
       checkDedupSignal(signal)
       await verifyOriginal(path)
+      checkDedupSignal(signal)
       await deleteFile(`${pp}/${path}`)
       applied.set(path, null)
     })
+    checkDedupSignal(signal)
     log?.(`已写入主条目，更新 ${result.rewrites.length} 个引用文件，移除 ${result.pagesToDelete.length} 个已合并页面`)
   } catch (error) {
     // 仅撤回本次成功写入且仍匹配的状态，保留随后发生的外部编辑。
@@ -391,11 +417,12 @@ export async function executeMerge(
         if (current === value) await writeFileAtomic(absPath, originals.get(path)!)
       })
     } catch {
-      throw new Error(`合并中断，有文件未能恢复，原文件备份位于 ${backupDir}`)
+      throw new DedupRollbackError(`合并中断，有文件未能恢复，原文件备份位于 ${backupDir}`)
     }
     throw error
   }
 
+  if (options.batch) advanceBatchDrafts(options.batch, result, allPages.map((page) => page.path))
   log?.("合并完成")
   return result
 }

@@ -31,7 +31,7 @@ import {
   estimateRequestScaffoldTokens,
   trimChatMessagesToTokenBudget,
 } from "./chat-request-budget"
-import { RESPONSE_RESERVE_FRAC, planLlmRequestBudget } from "./context-budget"
+import { LlmContextBudgetError, RESPONSE_RESERVE_FRAC, planLlmRequestBudget } from "./context-budget"
 import { mergeLlmUsageSnapshot, type LlmUsage } from "./llm-usage"
 import {
   hasUnreplayableToolAssistantReasoning,
@@ -470,6 +470,8 @@ function notifyLlmUsageHooks(usage: LlmUsage | undefined, config: LlmConfig): vo
  * 因为 `stripWireAgnosticOverrides` 会把不认识的字段原样塞进请求体，那会让上游 400）。
  */
 export interface StreamChatOptions {
+  /** Require the complete input within this total token budget. The caller handles re-batching. */
+  intactInputWindowTokens?: number
   /**
    * 是否允许 `afterLlmResponse` 插件钩子改写本次回复的最终文本（经 `onDone(finalText)` 交付）。
    *
@@ -582,6 +584,12 @@ async function streamChatHeld(
     thinkingFloorTokens,
   })
   let effectiveOutputTokens = runtimeBudget.outputTokens
+  const intactWindow = options?.intactInputWindowTokens
+  if (intactWindow !== undefined && estimateChatMessagesTokens(preparedMessages) + toolScaffoldTokens + effectiveOutputTokens >
+    Math.min(intactWindow, runtimeBudget.windowTokens)) {
+    callbacks.onError(new LlmContextBudgetError())
+    return
+  }
   // HTTP providers always receive the planned max_tokens so every vendor
   // follows the same window-fraction rule. Local CLI transports have no
   // equivalent flag and warn in DEV when the field is present.
@@ -951,6 +959,10 @@ async function streamChatHeld(
       }
       const inputLimit = parseInputLengthLimit(errorDetail)
       if (inputLimit) {
+        if (intactWindow !== undefined) {
+          onError(new LlmContextBudgetError(inputLengthLimitMessage(inputLimit)))
+          return
+        }
         const currentInputTokens = estimateChatMessagesTokens(budgetedMessages)
         // The provider reports the overshoot in characters; we trim in tokens.
         // Applying the ratio across units is a heuristic, not an exact

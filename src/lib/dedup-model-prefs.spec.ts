@@ -1,16 +1,17 @@
 import { beforeEach, expect, test, vi } from "vitest"
+import { createDeferred, waitFor } from "@/test-helpers/deferred"
 
 vi.mock("@/commands/fs", () => ({
   readFile: vi.fn(),
-  writeFile: vi.fn(),
+  writeFileAtomic: vi.fn(),
   fileExists: vi.fn(),
 }))
 
-import { readFile, writeFile, fileExists } from "@/commands/fs"
+import { readFile, writeFileAtomic, fileExists } from "@/commands/fs"
 import { loadDedupModelPrefs, saveDedupModelPrefs } from "./dedup-model-prefs"
 
 const mockedReadFile = vi.mocked(readFile)
-const mockedWriteFile = vi.mocked(writeFile)
+const mockedWriteFile = vi.mocked(writeFileAtomic)
 const mockedFileExists = vi.mocked(fileExists)
 
 beforeEach(() => {
@@ -40,4 +41,22 @@ test("loadDedupModelPrefs accepts legacy modelId as detect", async () => {
     detectModelId: "legacy/detect-only",
     mergeModelId: undefined,
   })
+})
+
+test("快速切换模型后重新打开项目会读到最后一次选择", async () => {
+  const firstWrite = createDeferred()
+  let saved = ""
+  mockedFileExists.mockResolvedValue(true)
+  mockedReadFile.mockImplementation(async () => saved)
+  mockedWriteFile.mockImplementationOnce(async (_path, value) => {
+    await firstWrite.promise
+    saved = value
+  }).mockImplementationOnce(async (_path, value) => { saved = value })
+  const first = saveDedupModelPrefs("/project", { mergeModelId: "合并甲" })
+  await waitFor(() => mockedWriteFile.mock.calls.length === 1)
+  const last = saveDedupModelPrefs("/project", { mergeModelId: "合并乙" })
+  const reopened = loadDedupModelPrefs("/project")
+  firstWrite.resolve()
+  await Promise.all([first, last])
+  expect((await reopened)?.mergeModelId).toBe("合并乙")
 })

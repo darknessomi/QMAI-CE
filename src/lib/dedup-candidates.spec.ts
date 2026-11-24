@@ -163,6 +163,19 @@ test("measures candidate recall, prompt estimates and request counts on the same
   if (process.env.QMAI_DEDUP_BENCH) console.log(JSON.stringify(metrics))
 })
 
+test("批量任务收到组外主条目时不写入或删除任何项目文件", async () => {
+  const paths = ["wiki/entities/甲.md", "wiki/entities/乙.md"]
+  vi.mocked(listDirectory).mockResolvedValue(paths.map(path => ({ name: path.split("/").pop()!, is_dir: false, path: "/book/" + path })))
+  for (const path of paths) memory.set("/book/" + path, "---\ntype: entity\n---\n原文")
+  vi.mocked(streamChat).mockImplementation(async (_config, _messages, callbacks) => {
+    callbacks.onToken("组外名字\n---\ntitle: 组外名字\n---\n正文")
+    callbacks.onDone()
+  })
+  await expect(executeMerge("/book", { slugs: ["甲", "乙"], confidence: "high", reason: "" }, null, llm)).rejects.toThrow("组内有效的主条目")
+  expect(writeFileAtomic).not.toHaveBeenCalled()
+  expect(deleteFile).not.toHaveBeenCalled()
+})
+
 test("merge failures restore the source pages, backlinks and index before the queue may retry", async () => {
   const paths = ["wiki/entities/a.md", "wiki/entities/b.md", "wiki/entities/c.md", "wiki/index.md"]
   const original = [

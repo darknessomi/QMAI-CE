@@ -46,6 +46,19 @@ describe("streamChat usage", () => {
     mocks.streamClaudeCodeCli.mockReset()
   })
 
+  it("整批完整输入超出调用方窗口时交回拆批，接口限长时不裁剪原文重发", async () => {
+    const callbacks = { onToken: vi.fn(), onDone: vi.fn(), onError: vi.fn() }
+    const messages: ChatMessage[] = [{ role: "user", content: "文".repeat(1500) }]
+    await streamChat(config, messages, callbacks, undefined, { max_tokens: 1000 }, { intactInputWindowTokens: 2000 })
+    expect(callbacks.onError).toHaveBeenCalledWith(expect.objectContaining({ name: "LlmContextBudgetError" }))
+    expect(mocks.fetch).not.toHaveBeenCalled()
+    callbacks.onError.mockClear()
+    mocks.fetch.mockResolvedValueOnce(new Response("input length 1500 exceeds maximum length 1200", { status: 400 }))
+    await streamChat(config, messages, callbacks, undefined, { max_tokens: 1000 }, { intactInputWindowTokens: 50_000 })
+    expect(mocks.fetch).toHaveBeenCalledTimes(1)
+    expect(callbacks.onError).toHaveBeenCalledWith(expect.objectContaining({ name: "LlmContextBudgetError" }))
+  })
+
   it("requests and emits OpenAI stream usage once", async () => {
     const encoder = new TextEncoder()
     const body = new ReadableStream<Uint8Array>({

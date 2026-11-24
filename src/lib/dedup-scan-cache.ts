@@ -4,7 +4,7 @@
  */
 import { readFile, writeFile, fileExists } from "@/commands/fs"
 import { normalizePath } from "@/lib/path-utils"
-import type { DuplicateGroup } from "@/lib/dedup"
+import { normalizeGroupKey as groupKey, type DuplicateGroup } from "@/lib/dedup"
 
 const FILE_NAME = ".qmai/dedup-scan-cache.json"
 
@@ -110,10 +110,6 @@ export async function saveDedupScanCache(
   cache: DedupScanCache,
 ): Promise<void> {
   await writeFile(cacheFilePath(projectPath), JSON.stringify(cache, null, 2))
-}
-
-function groupKey(slugs: readonly string[]): string {
-  return [...slugs].map((s) => s.toLowerCase()).sort().join(",")
 }
 
 /**

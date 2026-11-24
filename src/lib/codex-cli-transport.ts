@@ -131,6 +131,7 @@ export async function streamCodexCli(
   let threadId = ""
   let turnId = ""
   let finished = false
+  let interruptRequested = false
   let emittedText = false
   const agentMessagePhases = new Map<string, string | null>()
   let unregister = () => {}
@@ -143,21 +144,23 @@ export async function streamCodexCli(
   const timeoutMinutes = resolveCodexCliTimeoutMinutes(config.codexCliTimeoutMinutes)
   const serviceTier = codexAppServerServiceTier(config.codexSpeedMode)
   const timeoutMs = timeoutMinutes * 60_000
-  const timeout = setTimeout(() => {
-    if (!finished) {
-      if (threadId && turnId) void client.interrupt(threadId, turnId)
-      fail(new Error(`Codex app-server 超时（${timeoutMinutes} 分钟）`))
-    }
-  }, timeoutMs)
-
   const fail = (error: Error) => {
     if (finished) return
     finished = true
     rejectTurn(error)
   }
 
-  try {
+  const interrupt = (error: Error) => {
+    if (finished) return
+    interruptRequested = true
+    if (turnId) void client.interrupt(threadId, turnId)
+    fail(error)
+  }
+  const abort = () => interrupt(new Error("操作已取消"))
+  const timeout = setTimeout(() => interrupt(new Error(`Codex app-server 超时（${timeoutMinutes} 分钟）`)), timeoutMs)
+  const startTurn = async () => {
     await client.ensureStarted()
+    if (finished) return
     const systemPrompt = messages
       .filter((message) => message.role === "system")
       .map((message) => contentText(message.content))
@@ -173,16 +176,17 @@ export async function streamCodexCli(
       config: restrictedCodexConfig(),
       ...(serviceTier ? { serviceTier } : {}),
     })
+    if (finished) return
     if (started.instructionSources?.length) {
       throw new Error(`QMAI 禁止 Codex 加载本机或项目规则：${started.instructionSources.join(", ")}`)
     }
     threadId = started.thread.id
     unregister = client.registerThread(threadId, {
       onEnvelope: (envelope) => {
+        if (finished) return
         const boundaryError = codexNativeBoundaryError(envelope)
         if (boundaryError) {
-          fail(boundaryError)
-          if (turnId) void client.interrupt(threadId, turnId)
+          interrupt(boundaryError)
           return
         }
         if (envelope.method === "item/started") {
@@ -245,22 +249,18 @@ export async function streamCodexCli(
       ...(serviceTier ? { serviceTier } : {}),
     })
     turnId = turn.turn.id
-    if (finished) void client.interrupt(threadId, turnId)
-    const abort = () => {
-      if (turnId) void client.interrupt(threadId, turnId)
-      fail(new Error("操作已取消"))
-    }
+    if (interruptRequested) void client.interrupt(threadId, turnId)
+  }
+  try {
     signal?.addEventListener("abort", abort, { once: true })
     if (signal?.aborted) abort()
-    try {
-      await turnDone
-    } finally {
-      signal?.removeEventListener("abort", abort)
-    }
+    else void startTurn().catch(fail)
+    await turnDone
     callbacks.onDone()
   } catch (error) {
     callbacks.onError(error instanceof Error ? error : new Error(String(error)))
   } finally {
+    signal?.removeEventListener("abort", abort)
     clearTimeout(timeout)
     unregister()
   }

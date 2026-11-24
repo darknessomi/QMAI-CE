@@ -60,13 +60,14 @@ export interface DuplicateGroup {
   confidence: "high" | "medium" | "low"
 }
 
-interface MergeRequest {
+/** A cancelled merge needs manual recovery from its file backup. */
+export class DedupRollbackError extends Error {}
+
+export interface MergeRequest {
   /** Pages in the duplicate group, with their full content loaded. */
   group: { slug: string; path: string; content: string }[]
-  /** Slug to keep. Must be one of group[].slug. The other pages
-   *  are deleted; their wikilinks/related entries get rewritten
-   *  to point here. */
-  canonicalSlug: string
+  /** An existing slug to keep, or null for the model to choose from these pages. */
+  canonicalSlug: string | null
   /** Every other .md under the project's wiki/ tree. Used to
    *  rewrite cross-references when the merge replaces multiple
    *  pages with one. */
@@ -308,20 +309,16 @@ function extractFirstJsonObject(text: string): string | null {
   return null
 }
 
-/** Canonical key for a group — lowercased, sorted, comma-joined. */
-function normalizeGroupKey(slugs: string[]): string {
-  return [...slugs].map((s) => s.toLowerCase()).sort().join(",")
+/** Stable identity for the same slug set, including slugs containing commas. */
+export function normalizeGroupKey(slugs: readonly string[]): string {
+  return JSON.stringify(slugs.map((s) => s.toLowerCase()).sort())
 }
 
 // ──────────────────────────────────────────────────────────────────
 // Stage 3: merge a confirmed duplicate group
 // ──────────────────────────────────────────────────────────────────
 
-const MERGER_SYSTEM_PROMPT = `你是一个维基维护助手。你将收到几个描述同一实体或概念但名称不同的维基页面。请将它们合并为一个连贯的维基页面。
-
-输出完整的合并文件（frontmatter + 正文）。你回复的第一个字符必须是 "-"（"---" 的开头）。不要输出前言或文件之外的任何解释。
-
-规则：
+export const MERGER_RULES = `规则：
 - 保留每个输入页面中所有不同的事实性陈述。
 - 消除冗余（不要在多个章节中重复相同的内容）。
 - 重新组织章节结构，使其对统一后的主题具有逻辑性，而不是简单拼接输入内容。
@@ -349,8 +346,7 @@ export async function mergeDuplicateGroup(
   llmCall: DedupLlmCall,
   options: { signal?: AbortSignal; today?: () => string } = {},
 ): Promise<MergeResult> {
-  const canonical = req.group.find((p) => p.slug === req.canonicalSlug)
-  if (!canonical) {
+  if (req.canonicalSlug !== null && !req.group.some((p) => p.slug === req.canonicalSlug)) {
     throw new Error(
       `canonicalSlug "${req.canonicalSlug}" is not in the group: ${req.group.map((p) => p.slug).join(", ")}`,
     )
@@ -360,8 +356,24 @@ export async function mergeDuplicateGroup(
   }
 
   // 1. LLM body merge
-  const userMessage = buildMergerUserMessage(req.group)
-  const llmOutput = await llmCall(MERGER_SYSTEM_PROMPT, userMessage, options.signal)
+  const modelChooses = req.canonicalSlug === null
+  const instructions = modelChooses
+    ? "请根据各页正文、标题及别名，选择最准确、符合书中惯用称呼的现有 slug 作为主条目。候选顺序不代表优先级。标题与正文使用所选条目的正式称呼。第一行只输出所选 slug 原文，从第二行的 --- 开始输出合并文件（frontmatter 和正文）。"
+    : `作者指定保留的主条目 slug 为 ${JSON.stringify(req.canonicalSlug)}。直接输出合并文件（frontmatter 和正文），以 --- 开头。`
+  const userMessage = req.group.map((page) => `候选 slug：${JSON.stringify(page.slug)}\n\n${page.content}`).join("\n\n")
+  const response = await llmCall(`你是一个维基维护助手。请把同一实体或概念的页面合并为一个连贯的维基页面。\n\n${MERGER_RULES}\n\n${instructions}`, userMessage, options.signal)
+  const choiceLine = modelChooses ? /^([^\r\n]+)\r?\n/.exec(response) : null
+  const slug = choiceLine ? choiceLine[1].trim() : req.canonicalSlug
+  const content = choiceLine ? response.slice(choiceLine[0].length).trimStart() : response
+  return finalizeDuplicateMerge(req, slug, content, options.today)
+}
+
+/** Apply a validated model choice to the current wiki, including all reference rewrites. */
+export function finalizeDuplicateMerge(req: MergeRequest, slug: string | null, llmOutput: string, today = defaultToday): MergeResult {
+  const canonical = req.group.find((page) => page.slug === slug)
+  if (!canonical) {
+    throw new Error("合并模型未选出组内有效的主条目，原文件已保留")
+  }
 
   const parsed = parseFrontmatter(llmOutput)
   if (!parsed.frontmatter || !parsed.body.trim()) {
@@ -377,15 +389,14 @@ export async function mergeDuplicateGroup(
   }
 
   // 3. Stamp updated to today and force a sensible title.
-  const today = (options.today ?? defaultToday)()
-  merged = setFrontmatterScalar(merged, "updated", today)
+  merged = setFrontmatterScalar(merged, "updated", today())
   // If LLM output's frontmatter parses cleanly we leave its title;
   // if not, the application layer doesn't try to manufacture one.
 
   // 4. Cross-reference rewrites: every other wiki page that mentions
   //    a non-canonical slug needs its wikilinks / related entries
   //    rewritten to the canonical.
-  const removedPaths = req.group.filter(page => page.slug !== req.canonicalSlug).map(page => page.path)
+  const removedPaths = req.group.filter(page => page !== canonical).map(page => page.path)
   const redirect = createMergeRedirect(removedPaths, canonical.path, [...req.group, ...req.otherWikiPages].map(p => p.path))
   merged = rewritePageLinks(merged, redirect, inheritedRelated(req.group))
   const rewrites: MergeResult["rewrites"] = []
@@ -408,39 +419,13 @@ export async function mergeDuplicateGroup(
     if (orig) backup.push({ path: orig.path, content: orig.content })
   }
 
-  // 6. Pages to delete: every group member except the canonical.
-  const pagesToDelete = req.group
-    .filter((p) => p.slug !== req.canonicalSlug)
-    .map((p) => p.path)
-
   return {
     canonicalContent: merged,
     canonicalPath: canonical.path,
     rewrites,
-    pagesToDelete,
+    pagesToDelete: removedPaths,
     backup,
   }
-}
-
-function buildMergerUserMessage(
-  group: { slug: string; content: string }[],
-): string {
-  const sections = group.map((p, i) => {
-    return [
-      `## Page ${i + 1} (slug: ${p.slug})`,
-      "",
-      p.content,
-      "",
-    ].join("\n")
-  })
-  return [
-    `These ${group.length} wiki pages have been confirmed by the user to describe the same topic.`,
-    `Merge them into a single coherent page (the canonical slug will be "${group[0].slug}" or whichever the caller chose).`,
-    "",
-    sections.join("\n---\n\n"),
-    "",
-    "Now output the merged file. First character must be `-`.",
-  ].join("\n")
 }
 
 function escapeRegex(s: string): string {

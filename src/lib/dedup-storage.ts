@@ -13,6 +13,7 @@
  */
 import { readFile, writeFile, fileExists } from "@/commands/fs"
 import { normalizePath } from "@/lib/path-utils"
+import { normalizeGroupKey as canonicalKey } from "./dedup"
 
 const FILE_NAME = ".qmai/dedup-not-duplicates.json"
 
@@ -61,8 +62,4 @@ export async function addNotDuplicate(
   }
   list.push([...slugs].sort())
   await saveNotDuplicates(projectPath, list)
-}
-
-function canonicalKey(slugs: string[]): string {
-  return [...slugs].map((s) => s.toLowerCase()).sort().join(",")
 }

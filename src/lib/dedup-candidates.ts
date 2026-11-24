@@ -11,7 +11,23 @@ const SIMILARITY_THRESHOLD = 0.68
 export const DETECTOR_BATCH_SIZE = 80
 
 export function checkDedupSignal(signal?: AbortSignal) {
-  if (signal?.aborted) throw new Error("查重扫描已取消")
+  if (signal?.aborted) throw new Error("操作已取消")
+}
+
+/** Release read-only work on cancel even when the transport hasn't acknowledged the abort. */
+export async function waitForDedupResult<T>(start: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+  checkDedupSignal(signal)
+  if (!signal) return start()
+  let abort!: () => void
+  const cancelled = new Promise<never>((_, reject) => {
+    abort = () => reject(new Error("操作已取消"))
+    signal.addEventListener("abort", abort, { once: true })
+  })
+  try {
+    return await Promise.race([start(), cancelled])
+  } finally {
+    signal.removeEventListener("abort", abort)
+  }
 }
 
 type Pair = readonly [number, number]
@@ -48,13 +64,7 @@ function normalizedVector(raw: number[] | null): Float32Array | null {
 
 // fetchEmbeddings 由多个功能共享。取消等待时，已发出的 HTTP 请求由共享客户端收尾。
 function fetchScanEmbeddings(texts: string[], config: EmbeddingConfig, signal?: AbortSignal) {
-  checkDedupSignal(signal)
-  if (!signal) return fetchEmbeddings(texts, config)
-  return new Promise<(number[] | null)[]>((resolve, reject) => {
-    const abort = () => reject(new Error("查重扫描已取消"))
-    signal.addEventListener("abort", abort, { once: true })
-    fetchEmbeddings(texts, config).then(resolve, reject).finally(() => signal.removeEventListener("abort", abort))
-  })
+  return waitForDedupResult(() => fetchEmbeddings(texts, config), signal)
 }
 
 async function summaryVectors(

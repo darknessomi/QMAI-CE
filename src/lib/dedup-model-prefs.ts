@@ -3,8 +3,9 @@
  * Kept separate from the scan-result cache so model choices survive
  * even when there is no completed scan yet.
  */
-import { readFile, writeFile, fileExists } from "@/commands/fs"
+import { readFile, writeFileAtomic, fileExists } from "@/commands/fs"
 import { normalizePath } from "@/lib/path-utils"
+import { withProjectLock } from "./project-mutex"
 
 const FILE_NAME = ".qmai/dedup-models.json"
 
@@ -37,16 +38,14 @@ export async function loadDedupModelPrefs(
   projectPath: string,
 ): Promise<DedupModelPrefs | null> {
   const filePath = prefsFilePath(projectPath)
-  try {
-    if (!(await fileExists(filePath))) return null
-  } catch {
-    return null
-  }
-  try {
-    return parsePrefs(JSON.parse(await readFile(filePath)))
-  } catch {
-    return null
-  }
+  return withProjectLock(filePath, async () => {
+    try {
+      if (!(await fileExists(filePath))) return null
+      return parsePrefs(JSON.parse(await readFile(filePath)))
+    } catch {
+      return null
+    }
+  })
 }
 
 export async function saveDedupModelPrefs(
@@ -57,5 +56,6 @@ export async function saveDedupModelPrefs(
     detectModelId: prefs.detectModelId?.trim() || undefined,
     mergeModelId: prefs.mergeModelId?.trim() || undefined,
   }
-  await writeFile(prefsFilePath(projectPath), JSON.stringify(payload, null, 2))
+  const path = prefsFilePath(projectPath)
+  await withProjectLock(path, () => writeFileAtomic(path, JSON.stringify(payload, null, 2)))
 }

@@ -8,14 +8,14 @@
  *     half the rewrites silently disappear.
  *   - LLM calls take seconds; the user wants to queue several merges
  *     and walk away. The queue must survive app close so an
- *     interrupted merge resumes on next launch.
+ *     interrupted merge can be continued explicitly on next launch.
  *
  * Mirrors `ingest-queue.ts` almost line-for-line: same lifecycle
  * (pause / restore on project switch), same persistence file shape,
  * same retry-up-to-3 policy, same registry-based path resolution so
  * a relocated project still finds its tasks.
  */
-import { readFile, writeFile } from "@/commands/fs"
+import { readFile, writeFileAtomic } from "@/commands/fs"
 import { useWikiStore } from "@/stores/wiki-store"
 import { normalizePath } from "@/lib/path-utils"
 import { getProjectPathById } from "@/lib/project-identity"
@@ -24,7 +24,9 @@ import { resolveDefaultModel, resolveModelConfig } from "@/lib/novel/model-resol
 import { removeGroupFromDedupScanCache } from "@/lib/dedup-scan-cache"
 import { removeMergedDedupGroupFromSession } from "@/lib/dedup-scan-session"
 import { executeMerge, type DedupMergeStage } from "@/lib/dedup-runner"
-import type { DuplicateGroup } from "@/lib/dedup"
+import type { DedupMergeBatch, PreparedMerge } from "./dedup-merge-batch"
+import { DedupRollbackError, normalizeGroupKey as groupKey, type DuplicateGroup } from "@/lib/dedup"
+import { withProjectLock } from "@/lib/project-mutex"
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -32,9 +34,9 @@ export interface DedupTask {
   id: string
   projectId: string
   group: DuplicateGroup
-  canonicalSlug: string
+  canonicalSlug: string | null
   modelId?: string
-  /** 新版创建或由作者明确继续的任务，可在下次启动时恢复。 */
+  /** 旧版队列字段。重新打开项目时，未完成的合并统一等待手动继续。 */
   autoResume?: true
   status: "pending" | "processing" | "done" | "failed" | "awaiting_resume"
   addedAt: number
@@ -44,6 +46,10 @@ export interface DedupTask {
 
 // ── State ─────────────────────────────────────────────────────────────────
 
+const emptyCounts = { merged: 0, skipped: 0, cancelled: 0 }
+type StoredTask = DedupTask & { progressCounts?: typeof emptyCounts }
+let counts = emptyCounts
+let committedTask: DedupTask | null = null
 let queue: DedupTask[] = []
 let processing = false
 let restoring: Promise<void> | undefined
@@ -51,8 +57,17 @@ let bindingVersion = 0
 let currentProjectId = ""
 let currentProjectPath = ""
 let currentAbortController: AbortController | null = null
-let currentMergeProgress: { taskId: string; stage: DedupMergeStage } | null = null
+let inFlightMerge: ReturnType<typeof executeMerge> | null = null
+interface MergeProgress {
+  taskId: string
+  stage: DedupMergeStage
+  requestGroups?: number
+  requestedAt?: number
+}
+let currentMergeProgress: MergeProgress | null = null
 let currentMergeLogs: string[] = []
+let batchDrafts = new Map<string, PreparedMerge>()
+let draftModel = ""
 
 type MergeCompleteListener = (task: DedupTask) => void
 const mergeCompleteListeners = new Set<MergeCompleteListener>()
@@ -80,21 +95,33 @@ function queueFilePath(projectPath: string): string {
 }
 
 async function saveQueue(projectPath: string): Promise<void> {
+  const path = queueFilePath(projectPath)
+  const previousQueue = queue
+  const previousCounts = counts
   try {
-    const toSave = queue.filter((t) => t.status !== "done")
-    await writeFile(queueFilePath(projectPath), JSON.stringify(toSave, null, 2))
-  } catch {
-    // non-critical
+    await withProjectLock(path, () => currentProjectPath === projectPath ? writeQueue(path, queue) : writeQueue(path, previousQueue, previousCounts))
+  } catch (error) {
+    console.error("[Dedup Queue] 保存任务状态失败", error)
   }
+}
+
+function writeQueue(path: string, tasks: readonly DedupTask[], snapshot = counts): Promise<void> {
+  // Keep the legacy array format. One checkpoint travels with the first remaining task.
+  const saved: StoredTask[] = tasks.filter((task) => task.status !== "done")
+  if (saved.length && (snapshot.merged || snapshot.skipped || snapshot.cancelled)) {
+    saved[0] = { ...saved[0], progressCounts: snapshot }
+  }
+  return writeFileAtomic(path, JSON.stringify(saved, null, 2))
 }
 
 async function loadQueue(
   projectPath: string,
   projectId: string,
-): Promise<DedupTask[]> {
+): Promise<StoredTask[]> {
   try {
-    const raw = await readFile(queueFilePath(projectPath))
-    const tasks = JSON.parse(raw) as DedupTask[]
+    const path = queueFilePath(projectPath)
+    const raw = await withProjectLock(path, () => readFile(path))
+    const tasks = JSON.parse(raw) as StoredTask[]
     return tasks.map((t) => ({
       ...t,
       projectId: t.projectId ?? projectId,
@@ -107,129 +134,151 @@ async function loadQueue(
 // ── Queue Operations ──────────────────────────────────────────────────────
 
 function generateId(): string {
-  return `dedup-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  return `dedup-${crypto.randomUUID()}`
 }
 
-/**
- * Stable key for matching a queued task to a UI card. Order-independent
- * lowercase join — same shape used by dedup-storage's canonical key.
- */
-export function groupKey(slugs: readonly string[]): string {
-  return [...slugs].map((s) => s.toLowerCase()).sort().join(",")
-}
+export { groupKey }
 
-/**
- * Add a merge to the queue. The project MUST be the currently-active
- * project. Returns the new task's id. Idempotent on the same group:
- * if there's already a pending/processing/failed task for the same
- * slug-set, the existing id is returned instead of a duplicate.
- */
-export async function enqueueMerge(
-  projectId: string,
-  group: DuplicateGroup,
-  canonicalSlug: string,
-  modelId?: string,
-): Promise<string> {
-  const active = useWikiStore.getState().project
-  if (!active || active.id !== projectId) {
-    throw new Error(
-      `enqueueMerge: project ${projectId} is not the active project (current: ${active?.id || "<none>"})`,
-    )
+type MergeChoice = Pick<DedupTask, "group" | "canonicalSlug">
+
+function holdUnfinishedMerges(tasks: DedupTask[]) {
+  for (const task of tasks) {
+    if (task.status === "pending" || task.status === "processing") task.status = "awaiting_resume"
   }
-
-  await ensureQueueActive(active.id, active.path)
-
-  if (!currentProjectId || currentProjectId !== projectId) {
-    throw new Error(
-      `enqueueMerge: failed to activate dedup queue for project ${projectId}`,
-    )
-  }
-
-  const key = groupKey(group.slugs)
-  const existing = queue.find(
-    (t) =>
-      t.projectId === projectId &&
-      t.status !== "done" &&
-      groupKey(t.group.slugs) === key,
-  )
-  if (existing) return existing.id
-
-  const task: DedupTask = {
-    id: generateId(),
-    projectId,
-    group,
-    canonicalSlug,
-    modelId: modelId?.trim() || undefined,
-    autoResume: true,
-    status: "pending",
-    addedAt: Date.now(),
-    error: null,
-    retryCount: 0,
-  }
-
-  queue.push(task)
-  await saveQueue(currentProjectPath)
-  processNext(currentProjectId)
-  return task.id
 }
 
-/**
- * Reset a failed task back to pending so it gets another shot. Clears
- * the error and resets retryCount so the user gets the full 3
- * attempts again.
- */
-export async function retryTask(taskId: string): Promise<void> {
-  let task = queue.find((t) => t.id === taskId)
-  if (!task) return
-  const projectId = task.projectId
-
+/** One durable admission per batch. The worker sees new tasks only after the write succeeds. */
+async function enqueueMerges(projectId: string, choices: readonly MergeChoice[], modelId?: string) {
   const active = useWikiStore.getState().project
-  if (!active || active.id !== projectId) return
+  if (active?.id !== projectId) throw new Error("当前项目已切换，请重新选择候选组")
+  await ensureQueueActive(projectId, active.path)
 
-  await ensureQueueActive(active.id, active.path)
-
-  task = queue.find((t) => t.id === taskId)
-  if (!task || task.projectId !== currentProjectId) return
-
-  if (task.status !== "awaiting_resume" && task.status !== "failed") return
-  task.autoResume = true
-  task.status = "pending"
-  task.error = null
-  task.retryCount = 0
-  await saveQueue(currentProjectPath)
-  processNext(currentProjectId)
-}
-
-/**
- * Cancel/delete a task. If it's currently running, abort the LLM call
- * first — the merge writes will be left where they were when the
- * abort fired. Backup snapshots already on disk are kept either way.
- */
-export async function cancelTask(taskId: string): Promise<void> {
-  let task = queue.find((t) => t.id === taskId)
-  if (!task) return
-  const projectId = task.projectId
-
-  const active = useWikiStore.getState().project
-  if (!active || active.id !== projectId) return
-
-  await ensureQueueActive(active.id, active.path)
-
-  task = queue.find((t) => t.id === taskId)
-  if (!task || task.projectId !== currentProjectId) return
-
-  if (task.status === "processing") {
-    if (currentAbortController) {
-      currentAbortController.abort()
-      currentAbortController = null
+  const projectPath = normalizePath(active.path)
+  const path = queueFilePath(projectPath)
+  const result = await withProjectLock(path, async () => {
+    if (currentProjectId !== projectId || currentProjectPath !== projectPath || useWikiStore.getState().project?.id !== projectId) {
+      throw new Error("当前项目已切换，请重新选择候选组")
     }
-    processing = false
-    currentMergeProgress = null
-  }
+    const version = bindingVersion
+    const idsByGroup = new Map(queue.filter((task) => task.status !== "done").map((task) => [groupKey(task.group.slugs), task.id]))
+    const added: DedupTask[] = []
+    const ids = choices.map(({ group, canonicalSlug }) => {
+      const key = groupKey(group.slugs)
+      const existing = idsByGroup.get(key)
+      if (existing) return existing
+      const task: DedupTask = {
+        id: generateId(), projectId, group, canonicalSlug, modelId: modelId?.trim() || undefined,
+        status: "pending", addedAt: Date.now(), error: null, retryCount: 0,
+      }
+      idsByGroup.set(key, task.id)
+      added.push(task)
+      return task.id
+    })
+    if (added.length) {
+      const startsNewRun = queue.length === 0
+      await writeQueue(path, [...queue, ...added], startsNewRun ? emptyCounts : counts)
+      if (version === bindingVersion) {
+        if (startsNewRun) counts = emptyCounts
+        queue.push(...added)
+      }
+    }
+    return { ids, added: added.length }
+  })
+  if (result.added) void processNext(projectId)
+  return result
+}
 
-  queue = queue.filter((t) => t.id !== taskId)
-  await saveQueue(currentProjectPath)
-  processNext(currentProjectId)
+export async function enqueueMerge(projectId: string, group: DuplicateGroup, canonicalSlug: string, modelId?: string): Promise<string> {
+  const { ids } = await enqueueMerges(projectId, [{ group, canonicalSlug }], modelId)
+  return ids[0]
+}
+
+export async function enqueueMergeBatch(projectId: string, groups: readonly DuplicateGroup[], modelId?: string): Promise<number> {
+  const choices = groups.map((group) => ({ group, canonicalSlug: null }))
+  return (await enqueueMerges(projectId, choices, modelId)).added
+}
+
+/** Persist each user action once, even when it affects hundreds of groups. */
+async function changeMergeTasks(projectId: string, action: "resume" | "cancel", taskId?: string, modelId?: string): Promise<void> {
+  const active = useWikiStore.getState().project
+  if (active?.id !== projectId) return
+  await ensureQueueActive(projectId, active.path)
+  const version = bindingVersion
+  const path = queueFilePath(active.path)
+  const change = await withProjectLock(path, async () => {
+    if (version !== bindingVersion || currentProjectId !== projectId || useWikiStore.getState().project?.id !== projectId) return
+    const selected = new Set(queue.filter((task) => {
+      if (task.projectId !== projectId || (taskId !== undefined && task.id !== taskId)) return false
+      if (action === "cancel") return task !== committedTask
+      return task.status === "awaiting_resume" || (taskId !== undefined && task.status === "failed")
+    }))
+    if (!selected.size) return
+
+    const resumed = { status: "pending" as const, retryCount: 0, error: null, modelId: modelId?.trim() || undefined }
+    const updated = action === "cancel"
+      ? queue.filter((task) => !selected.has(task))
+      : queue.map((task) => selected.has(task) ? { ...task, ...resumed } : task)
+    await writeQueue(path, updated, action === "cancel" ? { ...counts, cancelled: counts.cancelled + selected.size } : counts)
+    if (version !== bindingVersion) return
+    if (action === "resume") {
+      for (const task of selected) {
+        Object.assign(task, resumed)
+        batchDrafts.delete(task.id)
+      }
+      return { cancelledWorker: false, draining: null }
+    }
+    const removed = new Set(queue.filter(task => selected.has(task) && task !== committedTask))
+    const cancelledWorker = [...removed].some(task => task.status === "processing")
+    const draining = cancelledWorker ? inFlightMerge : null
+    counts = { ...counts, cancelled: counts.cancelled + removed.size }
+    queue = queue.filter((task) => !removed.has(task))
+    for (const task of removed) batchDrafts.delete(task.id)
+    if (cancelledWorker) {
+      currentAbortController?.abort()
+      currentAbortController = null
+      currentMergeProgress = null
+    }
+    if (taskId === undefined) currentMergeLogs = []
+    return { cancelledWorker, draining }
+  })
+  if (!change) return
+  // A cancelled write can still be rolling back. Keep the worker slot until it settles.
+  let rollbackError: DedupRollbackError | undefined
+  if (change.draining) {
+    try { await change.draining } catch (error) {
+      if (error instanceof DedupRollbackError) rollbackError = error
+    }
+  }
+  if (version !== bindingVersion || currentProjectId !== projectId) return
+  if (change.cancelledWorker) processing = false
+  if (rollbackError) {
+    holdUnfinishedMerges(queue)
+    await saveQueue(active.path)
+    throw rollbackError
+  }
+  void processNext(projectId)
+}
+
+export function resumePausedMerges(projectId: string, modelId?: string): Promise<void> {
+  return changeMergeTasks(projectId, "resume", undefined, modelId)
+}
+
+export function cancelAllMerges(projectId: string): Promise<void> {
+  return changeMergeTasks(projectId, "cancel")
+}
+
+export async function retryTask(taskId: string, modelId?: string): Promise<void> {
+  const task = queue.find((t) => t.id === taskId)
+  if (task) await changeMergeTasks(task.projectId, "resume", taskId, modelId)
+}
+
+export async function cancelTask(taskId: string): Promise<void> {
+  const task = queue.find((t) => t.id === taskId)
+  if (task) await changeMergeTasks(task.projectId, "cancel", taskId)
+}
+
+export function getMergeCounts(projectId?: string) {
+  return currentProjectId === projectId ? counts : emptyCounts
 }
 
 export function getQueue(): readonly DedupTask[] {
@@ -237,7 +286,7 @@ export function getQueue(): readonly DedupTask[] {
 }
 
 /** In-memory merge stage for the currently processing task (not persisted). */
-export function getMergeProgress(): { taskId: string; stage: DedupMergeStage } | null {
+export function getMergeProgress() {
   return currentMergeProgress
 }
 
@@ -248,8 +297,7 @@ export function getMergeLogs(): readonly string[] {
 
 /**
  * Project-switch handshake: flush the active project's queue to disk
- * (reverting any in-flight task to pending so it gets re-tried on
- * resume), then clear in-memory state.
+ * (holding unfinished tasks for manual resume), then clear in-memory state.
  */
 export async function pauseQueue(): Promise<void> {
   const version = bindingVersion
@@ -257,6 +305,7 @@ export async function pauseQueue(): Promise<void> {
   if (version !== bindingVersion || !currentProjectId || !currentProjectPath) return
 
   const pausedProjectPath = currentProjectPath
+  const writing = currentMergeProgress?.stage === "writing" ? inFlightMerge : null
 
   if (currentAbortController) {
     currentAbortController.abort()
@@ -266,18 +315,17 @@ export async function pauseQueue(): Promise<void> {
   currentMergeProgress = null
   currentMergeLogs = []
 
-  for (const task of queue) {
-    if (task.status === "processing") {
-      task.status = "pending"
-    }
-  }
+  holdUnfinishedMerges(queue)
 
+  if (writing) await Promise.allSettled([writing])
+  if (version !== bindingVersion) return
   await saveQueue(pausedProjectPath)
   if (version !== bindingVersion) return
 
   queue = []
   currentProjectId = ""
   currentProjectPath = ""
+  batchDrafts.clear()
 }
 
 /**
@@ -294,9 +342,7 @@ export async function ensureQueueActive(
 }
 
 /**
- * Load a project's queue from disk and resume processing. Tasks left
- * in "processing" by an abrupt exit get reverted to "pending" so they
- * pick up on next process tick.
+ * Load the queue without starting model work, including after an abrupt exit.
  */
 export async function restoreQueue(
   projectId: string,
@@ -312,10 +358,16 @@ export async function restoreQueue(
 async function loadProjectQueue(projectId: string, pp: string, version: number): Promise<void> {
   currentAbortController?.abort()
   queue = []
+  counts = emptyCounts
+  committedTask = null
   processing = false
   currentAbortController = null
   currentProjectId = projectId
   currentProjectPath = pp
+  inFlightMerge = null
+  currentMergeProgress = null
+  currentMergeLogs = []
+  batchDrafts = new Map()
 
   const saved = await loadQueue(pp, projectId)
   if (version !== bindingVersion || saved.length === 0) return
@@ -327,28 +379,17 @@ async function loadProjectQueue(projectId: string, pp: string, version: number):
     )
   }
 
-  let restored = 0
-  for (const task of mine) {
-    if (!task.autoResume && (task.status === "pending" || task.status === "processing")) {
-      task.status = "awaiting_resume"
-    } else if (task.status === "processing") {
-      task.status = "pending"
-      restored++
-    }
+  const savedCounts = mine[0]?.progressCounts
+  if (savedCounts && [savedCounts.merged, savedCounts.skipped, savedCounts.cancelled].every(n => Number.isSafeInteger(n) && n >= 0)) {
+    counts = savedCounts
   }
-
+  for (const task of mine) {
+    delete task.progressCounts
+    delete task.autoResume
+  }
+  holdUnfinishedMerges(mine)
   queue = mine
   await saveQueue(pp)
-  if (version !== bindingVersion) return
-
-  const pending = queue.filter((t) => t.status === "pending").length
-  const failed = queue.filter((t) => t.status === "failed").length
-  if (pending > 0 || restored > 0) {
-    console.log(
-      `[Dedup Queue] Restored: ${pending} pending, ${failed} failed, ${restored} resumed from interrupted`,
-    )
-    processNext(projectId)
-  }
 }
 
 // ── Processing ────────────────────────────────────────────────────────────
@@ -364,6 +405,7 @@ async function processNext(projectId: string): Promise<void> {
   )
   if (!next) return
 
+  const version = bindingVersion
   const registryPath = await getProjectPathById(projectId)
   const pp = registryPath ? normalizePath(registryPath) : ""
   if (currentProjectId !== projectId || processing || !queue.includes(next) || next.status !== "pending") return
@@ -389,6 +431,7 @@ async function processNext(projectId: string): Promise<void> {
   if (!hasUsableLlm(llmConfig, state.providerConfigs)) {
     next.status = "failed"
     next.error = "LLM 未配置，请在设置中配置大模型提供方"
+    holdUnfinishedMerges(queue)
     processing = false
     currentMergeProgress = null
     currentMergeLogs = [
@@ -399,33 +442,65 @@ async function processNext(projectId: string): Promise<void> {
   }
 
   console.log(
-    `[Dedup Queue] Processing: merge ${next.group.slugs.join(",")} → ${next.canonicalSlug}`,
+    `[Dedup Queue] Processing: merge ${next.group.slugs.join(",")} → ${next.canonicalSlug ?? "由模型选择主条目"}`,
   )
 
-  currentAbortController = new AbortController()
+  const controller = new AbortController()
+  currentAbortController = controller
   currentMergeProgress = { taskId: next.id, stage: "loading" }
   currentMergeLogs = []
 
   const appendMergeLog = (message: string) => {
+    if (version !== bindingVersion || controller.signal.aborted) return
     const stamp = new Date().toLocaleTimeString()
     currentMergeLogs = [...currentMergeLogs, `${stamp}  ${message}`]
     console.log(`[Dedup Queue] ${message}`)
   }
 
-    appendMergeLog(
+  appendMergeLog(
     next.modelId?.trim()
       ? `合并模型 id：${next.modelId.trim()}`
       : "任务未指定合并 modelId，回退默认模型",
   )
 
+  const model = JSON.stringify([next.modelId, llmConfig.provider, llmConfig.model, llmConfig.customEndpoint, llmConfig.ollamaUrl])
+  if (model !== draftModel) {
+    draftModel = model
+    batchDrafts = new Map()
+  }
+  const batch: DedupMergeBatch | undefined = next.canonicalSlug === null ? {
+    current: next,
+    drafts: batchDrafts,
+    isPending: (id) => queue.some((task) => task.id === id),
+    following: function* () {
+      // Retry an invalid/truncated reply with this group alone. Valid sibling
+      // drafts can still be consumed when those tasks reach the front.
+      if (next.retryCount) return
+      for (const task of queue) {
+        if (task.status !== "pending") continue
+        if (task.projectId !== projectId || task.modelId !== next.modelId || task.canonicalSlug !== null) break
+        yield task
+      }
+    },
+  } : undefined
+
   try {
-    await executeMerge(pp, next.group, next.canonicalSlug, llmConfig, {
-      signal: currentAbortController.signal,
-      onProgress: (stage) => {
-        currentMergeProgress = { taskId: next.id, stage }
+    const running = executeMerge(pp, next.group, next.canonicalSlug, llmConfig, {
+      batch,
+      signal: controller.signal,
+      onProgress: (stage, requestGroups) => {
+        if (version !== bindingVersion || controller.signal.aborted) return
+        currentMergeProgress = { taskId: next.id, stage, requestGroups, requestedAt: stage === "merging" ? Date.now() : undefined }
       },
       onLog: appendMergeLog,
     })
+    inFlightMerge = running
+    try {
+      await running
+      if (version === bindingVersion) committedTask = next
+    } finally {
+      if (inFlightMerge === running) inFlightMerge = null
+    }
 
     // Merge already wrote to disk. Always drop the candidate group from
     // scan cache + live UI session — even if the active project changed
@@ -433,17 +508,23 @@ async function processNext(projectId: string): Promise<void> {
     await removeGroupFromDedupScanCache(pp, next.group.slugs).catch((err) => {
       console.error("[Dedup Queue] failed to update scan cache after merge:", err)
     })
-    if (currentProjectId !== projectId || !queue.includes(next) || next.status !== "processing") return
-    removeMergedDedupGroupFromSession(next.group.slugs)
+    if (version !== bindingVersion || currentProjectId !== projectId) return
+    const completing = queue.includes(next) && next.status === "processing"
+    if (completing) {
+      counts = { ...counts, merged: counts.merged + 1 }
+      queue = queue.filter((task) => task !== next)
+    }
+    committedTask = null
+    removeMergedDedupGroupFromSession(projectId, next.group.slugs)
+    useWikiStore.getState().bumpDataVersion()
+    if (!completing) return
 
     currentAbortController = null
     currentMergeProgress = null
     // Keep logs until the next task starts so the UI can show completion briefly.
     const completedTask = { ...next }
-    queue = queue.filter((t) => t.id !== next.id)
     await saveQueue(pp)
-    // Tell the rest of the app the wiki tree changed.
-    useWikiStore.getState().bumpDataVersion()
+    if (version !== bindingVersion) return
 
     console.log(`[Dedup Queue] Done: ${next.group.slugs.join(",")}`)
     notifyMergeComplete(completedTask)
@@ -457,14 +538,18 @@ async function processNext(projectId: string): Promise<void> {
     // Stale candidate after a prior successful merge (UI/list not cleared):
     // drop it so the user cannot keep retrying a deleted page.
     const missingPage =
-      /not found on disk|ENOENT|No such file|文件不存在|was the page deleted/i.test(
+      /not found on disk|ENOENT|No such file|文件不存在|未找到实体或概念条目|was the page deleted/i.test(
         message,
       )
     if (missingPage) {
+      batch?.drafts.delete(next.id)
       await removeGroupFromDedupScanCache(pp, next.group.slugs).catch(() => {})
-      removeMergedDedupGroupFromSession(next.group.slugs)
+      if (currentProjectId !== projectId || !queue.includes(next) || next.status !== "processing") return
+      counts = { ...counts, skipped: counts.skipped + 1 }
       queue = queue.filter((t) => t.id !== next.id)
+      removeMergedDedupGroupFromSession(projectId, next.group.slugs)
       await saveQueue(pp)
+      if (version !== bindingVersion) return
       appendMergeLog("候选页面已不存在，已从列表移除")
       processing = false
       processNext(projectId)
@@ -475,6 +560,7 @@ async function processNext(projectId: string): Promise<void> {
     next.error = message
 
     if (next.retryCount >= MAX_RETRIES) {
+      batch?.drafts.delete(next.id)
       next.status = "failed"
       console.log(
         `[Dedup Queue] Failed (${next.retryCount}x): ${next.group.slugs.join(",")} — ${message}`,
@@ -488,6 +574,7 @@ async function processNext(projectId: string): Promise<void> {
     await saveQueue(pp)
   }
 
+  if (version !== bindingVersion) return
   processing = false
   processNext(projectId)
 }

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { LlmConfig } from "@/stores/wiki-store"
+import { createDeferred, waitFor, flushMicrotasks } from "@/test-helpers/deferred"
 
 const clientMock = vi.hoisted(() => ({
   call: vi.fn(),
@@ -170,6 +171,30 @@ describe("codex app-server transport", () => {
     const turnStart = clientMock.call.mock.calls.find(([method]) => method === "turn/start")
     expect(threadStart?.[1]).toEqual(expect.objectContaining({ serviceTier: "priority" }))
     expect(turnStart?.[1]).toEqual(expect.objectContaining({ serviceTier: "priority" }))
+  })
+
+  it.each(["thread/start", "turn/start"])("在 %s 等待期间取消，立即结束并中断迟到的模型请求", async (pendingMethod) => {
+    const controller = new AbortController()
+    const reply = createDeferred()
+    clientMock.call.mockImplementation(async (method: string) => {
+      if (method === pendingMethod) await reply.promise
+      return method === "thread/start" ? { thread: { id: "thread" } } : { turn: { id: "turn" } }
+    })
+    const callbacks = { onToken: vi.fn(), onDone: vi.fn(), onError: vi.fn() }
+    const request = streamCodexCli(config, [], callbacks, controller.signal)
+    await waitFor(() => clientMock.call.mock.calls.some(([method]) => method === pendingMethod))
+    controller.abort()
+    await request
+    expect(callbacks.onError).toHaveBeenCalledWith(expect.objectContaining({ message: "操作已取消" }))
+    expect(callbacks.onDone).not.toHaveBeenCalled()
+    reply.resolve()
+    await flushMicrotasks()
+    if (pendingMethod === "thread/start") {
+      expect(clientMock.call).toHaveBeenCalledTimes(1)
+    } else {
+      expect(clientMock.interrupt).toHaveBeenCalledExactlyOnceWith("thread", "turn")
+    }
+    expect(clientMock.handler).toBeNull()
   })
 
   it("fails closed when app-server reports inherited instruction sources", async () => {

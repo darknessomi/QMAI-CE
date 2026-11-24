@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import {
   Wrench,
@@ -39,10 +39,14 @@ import { registerDedupScanSessionApi } from "@/lib/dedup-scan-session"
 import { toast } from "@/lib/toast"
 import {
   enqueueMerge,
+  enqueueMergeBatch,
+  cancelAllMerges,
+  resumePausedMerges,
   cancelTask,
   retryTask,
   getQueue,
   getMergeProgress,
+  getMergeCounts,
   getMergeLogs,
   groupKey,
   ensureQueueActive,
@@ -58,35 +62,11 @@ import {
 } from "@/lib/foreshadowing-cleanup-queue"
 import type { DedupMergeStage } from "@/lib/dedup-runner"
 import type { WikiProject } from "@/types/wiki"
-import type { DuplicateGroup } from "@/lib/dedup"
+import { confidenceLabels, DedupReviewList, ReviewPageNav, useReviewPage } from "./dedup-review-list"
 import { MemoryCleanupTool } from "@/components/settings/sections/memory-cleanup-tool"
 import { ContextCacheMaintenance } from "@/components/settings/sections/context-cache-maintenance"
 
-function confidenceRank(confidence: DuplicateGroup["confidence"]): number {
-  switch (confidence) {
-    case "high":
-      return 0
-    case "medium":
-      return 1
-    case "low":
-      return 2
-  }
-}
-
-function sortGroupEntriesByConfidence(entries: GroupUiEntry[]): GroupUiEntry[] {
-  return [...entries].sort(
-    (a, b) =>
-      confidenceRank(a.group.confidence) - confidenceRank(b.group.confidence),
-  )
-}
-
-interface GroupUiEntry {
-  group: DuplicateGroup
-  canonicalSlug: string
-  /** Becomes true when the user marks the group as "not duplicates"
-   *  in this session — the card transitions to skipped state. */
-  skipped: boolean
-}
+type GroupUiEntry = DedupScanCacheEntry
 
 interface MaintenanceScanState {
   projectId: string | null
@@ -153,7 +133,7 @@ function toScanCache(
     coverage: state.coverage,
     modelId: detectModelId.trim() || undefined,
     mergeModelId: mergeModelId.trim() || undefined,
-    groups: state.groups as DedupScanCacheEntry[],
+    groups: state.groups,
   }
 }
 
@@ -167,13 +147,12 @@ function subscribeScanState(listener: (state: MaintenanceScanState) => void): ()
   return () => scanListeners.delete(listener)
 }
 
-/** Match a card to its task in the queue (if any) by slug-set. */
-function findTaskForGroup(
-  tasks: readonly DedupTask[],
-  slugs: readonly string[],
-): DedupTask | undefined {
-  const key = groupKey(slugs)
-  return tasks.find((t) => groupKey(t.group.slugs) === key)
+// Both queues mutate their tasks in place. Hold snapshots so an idle poll keeps
+// the same array, but status changes on the same task still trigger a render.
+function snapshotTasks<T extends { id: string; status: string; error: string | null }>(previous: readonly T[], current: readonly T[]): readonly T[] {
+  if (previous.length === current.length && current.every((task, i) =>
+    task.id === previous[i].id && task.status === previous[i].status && task.error === previous[i].error)) return previous
+  return current.map((task) => ({ ...task }))
 }
 
 export function MaintenanceSection() {
@@ -187,7 +166,8 @@ export function MaintenanceSection() {
 
   const [detectModelId, setDetectModelId] = useState("")
   const [mergeModelId, setMergeModelId] = useState("")
-  const [modelsHydrated, setModelsHydrated] = useState(false)
+  const [hydratedProject, setHydratedProject] = useState<typeof project>(null)
+  const modelsHydrated = !!project && hydratedProject?.id === project.id && hydratedProject.path === project.path
   const [isScanning, setIsScanning] = useState(false)
   const [scanStage, setScanStage] = useState<DedupScanStage | null>(null)
   const [scanLogs, setScanLogs] = useState<string[]>([])
@@ -199,11 +179,11 @@ export function MaintenanceSection() {
   useEffect(() => {
     if (!project) {
       setLocalScanState(null)
-      setModelsHydrated(false)
+      setHydratedProject(null)
       return
     }
     let cancelled = false
-    setModelsHydrated(false)
+    setHydratedProject(null)
     void (async () => {
       const [cached, prefs] = await Promise.all([
         loadDedupScanCache(project.path),
@@ -220,8 +200,8 @@ export function MaintenanceSection() {
         cached?.mergeModelId?.trim() ||
         ""
       // Prefer disk prefs on project open (overwrite empty / stale session).
-      if (detectFromDisk) setDetectModelId(detectFromDisk)
-      if (mergeFromDisk) setMergeModelId(mergeFromDisk)
+      setDetectModelId(detectFromDisk)
+      setMergeModelId(mergeFromDisk)
 
       // Only keep the in-memory session while a scan is actively running.
       // Otherwise prefer disk cache — it is updated by the merge queue even
@@ -231,7 +211,7 @@ export function MaintenanceSection() {
         sharedScanState.scanning
       ) {
         setLocalScanState({ ...sharedScanState })
-        setModelsHydrated(true)
+        setHydratedProject(project)
         return
       }
       if (!cached || cached.projectId !== project.id) {
@@ -243,7 +223,7 @@ export function MaintenanceSection() {
         } else {
           setLocalScanState(null)
         }
-        setModelsHydrated(true)
+        setHydratedProject(project)
         return
       }
       const hydrated: MaintenanceScanState = {
@@ -258,7 +238,7 @@ export function MaintenanceSection() {
       }
       replaceSharedScanState(hydrated)
       setLocalScanState(hydrated)
-      setModelsHydrated(true)
+      setHydratedProject(project)
     })()
     return () => {
       cancelled = true
@@ -317,23 +297,28 @@ export function MaintenanceSection() {
     return false
   }, [providerConfigs])
 
-  // Poll the queue at 1Hz so the UI reflects pending → processing →
-  // failed transitions and cross-window queue activity (e.g. a merge
-  // that completed while the user was on a different settings tab).
-  // Poll local queue state the same way other in-app queues do.
+  // Poll the local queues for status changes while this panel is mounted.
   const [tasks, setTasks] = useState<readonly DedupTask[]>([])
-  const [legacyCleanupTasks, setLegacyCleanupTasks] = useState<ForeshadowingCleanupTask[]>([])
-  const [mergeProgress, setMergeProgress] = useState<{
-    taskId: string
-    stage: DedupMergeStage
-  } | null>(null)
+  const [legacyCleanupTasks, setLegacyCleanupTasks] = useState<readonly ForeshadowingCleanupTask[]>([])
+  const [mergeProgress, setMergeProgress] = useState<ReturnType<typeof getMergeProgress>>(null)
+  const [mergeCounts, setMergeCounts] = useState(() => getMergeCounts(project?.id))
   const [mergeLogs, setMergeLogs] = useState<readonly string[]>([])
-  const [enqueueingKey, setEnqueueingKey] = useState<string | null>(null)
+  const [enqueueingKeys, setEnqueueingKeys] = useState<ReadonlySet<string> | null>(null)
+  const [queueAction, setQueueAction] = useState<"resume" | "cancel" | null>(null)
+  const submitting = useRef(false)
   const [mergeErrors, setMergeErrors] = useState<Record<string, string>>({})
+
+  const refreshTasks = useCallback(() => {
+    const projectId = useWikiStore.getState().project?.id
+    setMergeCounts(getMergeCounts(projectId))
+    const current = getQueue().filter((task) => task.projectId === projectId)
+    setTasks((previous) => snapshotTasks(previous, current))
+  }, [])
 
   useEffect(() => {
     if (!project) {
       setTasks([])
+      setMergeCounts(getMergeCounts())
       setLegacyCleanupTasks([])
       setMergeProgress(null)
       setMergeLogs([])
@@ -342,10 +327,11 @@ export function MaintenanceSection() {
     let cancelled = false
     const refresh = () => {
       if (cancelled) return
-      setTasks(getQueue().filter((task) => task.projectId === project.id))
-      setLegacyCleanupTasks(getForeshadowingCleanupQueue().filter((task) => task.projectId === project.id && task.legacyRecovery))
+      refreshTasks()
+      const legacy = getForeshadowingCleanupQueue().filter((task) => task.projectId === project.id && task.legacyRecovery)
+      setLegacyCleanupTasks((previous) => snapshotTasks(previous, legacy))
       setMergeProgress(getMergeProgress())
-      setMergeLogs([...getMergeLogs()])
+      setMergeLogs(getMergeLogs())
     }
     void Promise.all([
       ensureQueueActive(project.id, project.path),
@@ -356,7 +342,7 @@ export function MaintenanceSection() {
       cancelled = true
       clearInterval(id)
     }
-  }, [project?.id, project?.path])
+  }, [project?.id, project?.path, refreshTasks])
 
   const effectiveDetectConfig = useMemo(
     () =>
@@ -365,17 +351,15 @@ export function MaintenanceSection() {
         : resolveDefaultModel(llmConfig),
     [detectModelId, llmConfig, providerConfigs],
   )
+  const selectedMergeModelId = mergeModelId.trim() || detectModelId.trim() || undefined
   const effectiveMergeConfig = useMemo(
-    () =>
-      mergeModelId.trim()
-        ? resolveModelConfig(mergeModelId, llmConfig, providerConfigs)
-        : detectModelId.trim()
-          ? resolveModelConfig(detectModelId, llmConfig, providerConfigs)
-          : resolveDefaultModel(llmConfig),
-    [mergeModelId, detectModelId, llmConfig, providerConfigs],
+    () => selectedMergeModelId
+      ? resolveModelConfig(selectedMergeModelId, llmConfig, providerConfigs)
+      : resolveDefaultModel(llmConfig),
+    [selectedMergeModelId, llmConfig, providerConfigs],
   )
   const detectLlmReady = hasUsableLlm(effectiveDetectConfig, providerConfigs)
-  const mergeLlmReady = hasUsableLlm(effectiveMergeConfig, providerConfigs)
+  const mergeLlmReady = modelsHydrated && hasUsableLlm(effectiveMergeConfig, providerConfigs)
   const llmReady = detectLlmReady
   const projectReady = !!project
   const activeScanState = useMemo(() => {
@@ -415,24 +399,15 @@ export function MaintenanceSection() {
   )
 
   const removeMergedGroup = useCallback(
-    (slugs: readonly string[]) => {
+    (projectId: string, slugs: readonly string[]) => {
+      if (sharedScanState.projectId !== projectId) return
+      refreshTasks()
       const key = groupKey(slugs)
-      const active = useWikiStore.getState().project
-      // Drop by slug-set whenever present. Do not gate on belongs-check —
-      // that early-return left stale cards after merge (second merge 404s).
       const remaining = sharedScanState.groups.filter((g) => groupKey(g.group.slugs) !== key)
       if (remaining.length === sharedScanState.groups.length) return
-      applyScanState({
-        groups: remaining,
-        ...(active && !sharedScanState.projectId
-          ? {
-              projectId: active.id,
-              projectPath: normalizeProjectPath(active.path),
-            }
-          : {}),
-      })
+      applyScanState({ groups: remaining })
     },
-    [applyScanState],
+    [applyScanState, refreshTasks],
   )
 
   // Keep a live bridge so the merge queue can drop cards while this
@@ -447,9 +422,9 @@ export function MaintenanceSection() {
     return onDedupMergeComplete((task) => {
       if (task.projectId !== project.id) return
       // Session API already removes the group; refresh queue chips.
-      setTasks([...getQueue()])
+      refreshTasks()
     })
-  }, [project?.id])
+  }, [project?.id, refreshTasks])
 
   const handleScan = useCallback(async () => {
     if (!project) return
@@ -562,103 +537,130 @@ export function MaintenanceSection() {
   ])
 
   const handleCanonicalChange = useCallback(
-    (idx: number, slug: string) => {
-      const source =
-        localScanState && project && scanStateBelongsToProject(localScanState, project)
-          ? localScanState
-          : sharedScanState
-      const groups = source.groups.map((g, i) => (i === idx ? { ...g, canonicalSlug: slug } : g))
-      applyScanState({ groups })
+    (entry: GroupUiEntry, slug: string) => {
+      applyScanState({ groups: sharedScanState.groups.map((g) => g === entry ? { ...g, canonicalSlug: slug } : g) })
     },
-    [applyScanState, localScanState, project],
+    [applyScanState],
   )
 
-  const handleEnqueue = useCallback(
-    async (entry: GroupUiEntry) => {
-      if (!project) return
-      const key = groupKey(entry.group.slugs)
-      setEnqueueingKey(key)
-      setMergeErrors((prev) => {
-        if (!prev[key]) return prev
-        const next = { ...prev }
-        delete next[key]
-        return next
-      })
-      try {
-        const missing = await missingDedupSlugs(project.path, entry.group.slugs)
-        if (missing.length) {
-          removeMergedGroup(entry.group.slugs)
-          toast.error(t("settings.sections.maintenance.dedup.pagesMissing", {
-            defaultValue: "部分页面已不存在（可能已合并）：{{slugs}}。已从列表移除。",
-            slugs: missing.join(", "),
-          }))
-          return
-        }
-
-        if (!mergeLlmReady) {
-          const message = t("settings.sections.maintenance.dedup.selectMergeModel", {
-            defaultValue: "请先选择合并模型。",
-          })
-          setMergeErrors((prev) => ({ ...prev, [key]: message }))
-          toast.error(message)
-          return
-        }
-
-        const mergeIdForTask = mergeModelId.trim() || detectModelId.trim() || undefined
-        await enqueueMerge(
-          project.id,
-          entry.group,
-          entry.canonicalSlug,
-          mergeIdForTask,
+  const handleEnqueue = async (entries: GroupUiEntry[], batch: boolean) => {
+    if (!project || !entries.length || submitting.current) return
+    if (!mergeLlmReady) {
+      toast.error(t("settings.sections.maintenance.dedup.selectMergeModel", { defaultValue: "请先选择合并模型。" }))
+      return
+    }
+    const currentProject = () =>
+      useWikiStore.getState().project?.id === project.id && scanStateBelongsToProject(sharedScanState, project)
+    const keys = new Set(entries.map(({ group }) => groupKey(group.slugs)))
+    submitting.current = true
+    setEnqueueingKeys(keys)
+    try {
+      if (batch) {
+        const counts = { high: 0, medium: 0, low: 0 }
+        for (const { group } of entries) counts[group.confidence]++
+        const confirmed = await window.confirm(
+          `将合并选中的 ${entries.length} 组候选（高 ${counts.high}、中 ${counts.medium}、低 ${counts.low}）。\n` +
+          "模型会从每组现有条目中选择主条目，合并正文并更新引用。确认加入队列？",
         )
-        setTasks([...getQueue()])
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
-        console.error("[Maintenance] enqueue failed:", err)
-        setMergeErrors((prev) => ({ ...prev, [key]: message }))
-        toast.error(message)
-      } finally {
-        setEnqueueingKey(null)
+        if (!confirmed) return
       }
-    },
-    [project, mergeModelId, detectModelId, mergeLlmReady, removeMergedGroup, t],
-  )
+      if (!currentProject()) return
+      const slugs = [...new Set(entries.flatMap(({ group }) => group.slugs))]
+      const missing = new Set(await missingDedupSlugs(project.path, slugs))
+      if (!currentProject()) return
+      const current = new Set(sharedScanState.groups.filter((g) => !g.skipped).map((g) => g.group))
+      const ready: GroupUiEntry[] = []
+      const staleGroups = new Set<GroupUiEntry["group"]>()
+      for (const entry of entries) {
+        if (!current.has(entry.group)) continue
+        if (entry.group.slugs.some((slug) => missing.has(slug))) staleGroups.add(entry.group)
+        else ready.push(entry)
+      }
+      if (staleGroups.size) {
+        applyScanState({ groups: sharedScanState.groups.filter(({ group }) => !staleGroups.has(group)) })
+        toast.info(`${staleGroups.size} 组候选的页面已不存在，已从列表移除。`)
+      }
+      if (!ready.length) return
+      if (batch) {
+        const added = await enqueueMergeBatch(project.id, ready.map(({ group }) => group), selectedMergeModelId)
+        if (currentProject()) toast.success(`${added} 组已加入合并队列。`)
+      } else {
+        await enqueueMerge(project.id, ready[0].group, ready[0].canonicalSlug, selectedMergeModelId)
+      }
+      refreshTasks()
+      setMergeErrors((previous) => Object.fromEntries(Object.entries(previous).filter(([key]) => !keys.has(key))))
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      if (currentProject()) {
+        if (!batch) setMergeErrors((previous) => ({ ...previous, [groupKey(entries[0].group.slugs)]: message }))
+        toast.error(`加入合并队列失败：${message}`)
+      }
+    } finally {
+      submitting.current = false
+      setEnqueueingKeys(null)
+    }
+  }
 
   const handleCancel = useCallback(async (taskId: string) => {
-    await cancelTask(taskId)
-    setTasks([...getQueue()])
-  }, [])
+    try { await cancelTask(taskId) } catch (error) { toast.error(`取消合并失败：${String(error)}`) }
+    refreshTasks()
+  }, [refreshTasks])
 
   const handleRetry = useCallback(async (taskId: string) => {
-    await retryTask(taskId)
-    setTasks([...getQueue()])
-  }, [])
+    if (!mergeLlmReady) return
+    try { await retryTask(taskId, selectedMergeModelId) } catch (error) { toast.error(`继续合并失败：${String(error)}`) }
+    refreshTasks()
+  }, [refreshTasks, mergeLlmReady, selectedMergeModelId])
+
+  async function handleQueueAction(action: "resume" | "cancel") {
+    if (!project || submitting.current) return
+    submitting.current = true
+    setQueueAction(action)
+    try {
+      if (action === "cancel") await cancelAllMerges(project.id)
+      else await resumePausedMerges(project.id, selectedMergeModelId)
+    } catch (error) {
+      toast.error(`更新合并队列失败：${error instanceof Error ? error.message : String(error)}`)
+    } finally {
+      submitting.current = false
+      setQueueAction(null)
+      refreshTasks()
+      setMergeProgress(getMergeProgress())
+      setMergeLogs(getMergeLogs())
+    }
+  }
 
   const handleNotDuplicate = useCallback(
-    async (idx: number) => {
+    async (entry: GroupUiEntry) => {
       if (!project) return
-      const entry = groups[idx]
-      if (!entry) return
       try {
         await addNotDuplicate(project.path, entry.group.slugs)
-        const source =
-          localScanState && scanStateBelongsToProject(localScanState, project)
-            ? localScanState
-            : sharedScanState
-        applyScanState({
-          groups: source.groups.map((g, i) => (i === idx ? { ...g, skipped: true } : g)),
-        })
+        if (useWikiStore.getState().project?.id !== project.id || !scanStateBelongsToProject(sharedScanState, project)) return
+        applyScanState({ groups: sharedScanState.groups.map((g) => g.group === entry.group ? { ...g, skipped: true } : g) })
       } catch (err) {
-        console.error("[Maintenance] addNotDuplicate failed:", err)
+        toast.error(`标记失败：${err instanceof Error ? err.message : String(err)}`)
       }
     },
-    [project, groups, applyScanState, localScanState],
+    [project, applyScanState],
   )
 
-  const visibleGroups = useMemo(
-    () => sortGroupEntriesByConfidence(groups.filter((entry) => !entry.skipped)),
-    [groups],
-  )
+  const visibleGroups = useMemo(() => groups.filter((entry) => !entry.skipped), [groups])
+  const tasksByGroup = useMemo(() => new Map(tasks.map((task) => [groupKey(task.group.slugs), task])), [tasks])
+  const pausedCount = useMemo(() => tasks.filter((task) => task.status === "awaiting_resume").length, [tasks])
+  const failedCount = useMemo(() => tasks.filter(task => task.status === "failed").length, [tasks])
+  const activeTask = useMemo(() => tasks.find(task => task.status === "processing"), [tasks])
+  const stage = activeTask?.id === mergeProgress?.taskId ? mergeProgress?.stage : undefined
+  const total = tasks.length + mergeCounts.merged + mergeCounts.skipped + mergeCounts.cancelled
+  const percent = total ? Math.floor(mergeCounts.merged * 100 / total) : 0
+  const waiting = tasks.length - failedCount - pausedCount - Number(!!activeTask)
+  const stageText = queueAction === "cancel" ? "正在取消合并…"
+    : activeTask ? (stage === "merging" ? `等待模型回复（本次请求 ${mergeProgress?.requestGroups ?? 1} 组）`
+      : stage === "writing" ? "正在备份并写入文件" : "正在读取页面")
+    : waiting ? "等待开始下一组"
+    : pausedCount ? "等待手动继续"
+    : failedCount ? "等待重试失败组"
+    : mergeCounts.cancelled ? "本轮已结束" : "本轮处理完毕"
+  const controlsBusy = queueAction !== null || enqueueingKeys !== null
 
   // Pending position helper: "queued (N ahead)" — count pending tasks
   // before this one in arrival order.
@@ -804,7 +806,7 @@ export function MaintenanceSection() {
         <div className="flex flex-wrap items-center gap-2">
           <Button
             onClick={() => void handleScan()}
-            disabled={scanning || !projectReady || !hasAvailableModels || !llmReady}
+            disabled={scanning || controlsBusy || !projectReady || !hasAvailableModels || !llmReady}
           >
             {scanning ? (
               <>
@@ -899,8 +901,51 @@ export function MaintenanceSection() {
         )}
       </div>
 
+      {(total > 0 || queueAction) && (
+        <section aria-label="合并队列" className="space-y-2 rounded-lg border border-border/60 p-3">
+          <div className="flex min-h-8 flex-wrap items-center gap-2">
+            <h3 className="mr-auto text-sm font-semibold">本轮合并进度</h3>
+            {pausedCount > 0 && (
+              <Button size="sm" disabled={controlsBusy || !mergeLlmReady} onClick={() => void handleQueueAction("resume")}>
+                继续合并（{pausedCount} 组）
+              </Button>
+            )}
+            {tasks.length > 0 && (
+              <Button size="sm" variant="outline" disabled={controlsBusy} onClick={() => void handleQueueAction("cancel")}>
+                取消全部合并
+              </Button>
+            )}
+          </div>
+          <div className="flex justify-between gap-2 text-sm tabular-nums">
+            <span>已合并 {mergeCounts.merged} / {total} 组</span>
+            <span>{percent}%</span>
+          </div>
+          <progress aria-label="已合并组数" value={mergeCounts.merged} max={total || 1}
+            className="block h-2 w-full overflow-hidden rounded-full bg-muted accent-primary [&::-webkit-progress-bar]:bg-muted [&::-webkit-progress-value]:bg-primary" />
+          <div className="flex items-baseline justify-between gap-2 text-xs">
+            <span className="truncate" title={activeTask?.group.slugs.join("、")}>
+              {stageText}{activeTask && ` · ${activeTask.group.slugs.join("、")}`}
+            </span>
+            {stage === "merging" && mergeProgress?.requestedAt && (
+              <ModelWaitTime key={mergeProgress.requestedAt} since={mergeProgress.requestedAt} />
+            )}
+          </div>
+          <p className="text-xs tabular-nums text-muted-foreground">
+            {[
+              `排队 ${waiting} 组`,
+              pausedCount > 0 && `${pausedCount} 组已暂停`,
+              failedCount > 0 && `失败 ${failedCount} 组`,
+              mergeCounts.skipped > 0 && `已跳过 ${mergeCounts.skipped} 组`,
+              mergeCounts.cancelled > 0 && `已取消 ${mergeCounts.cancelled} 组`,
+            ].filter(Boolean).join(" · ")}
+          </p>
+        </section>
+      )}
+
       <QueueOrphanList
         tasks={tasks}
+        busy={controlsBusy}
+        mergeReady={mergeLlmReady}
         groups={groups}
         mergeProgress={mergeProgress}
         onCancel={(id) => void handleCancel(id)}
@@ -908,8 +953,9 @@ export function MaintenanceSection() {
         pendingPositionByTaskId={pendingPositionByTaskId}
       />
 
-      {mergeLogs.length > 0 && (
+      {(mergeLogs.length > 0 || tasks.some(task => task.status === "processing" || task.status === "pending")) && (
         <ProcessLogPanel
+          fixedHeight
           title={t("settings.sections.maintenance.dedup.mergeLogTitle", {
             defaultValue: "合并过程日志",
           })}
@@ -918,46 +964,64 @@ export function MaintenanceSection() {
         />
       )}
 
-      {visibleGroups.map((entry) => {
-        const entryKey = groupKey(entry.group.slugs)
-        const idx = groups.findIndex((g) => groupKey(g.group.slugs) === entryKey)
-        const task = findTaskForGroup(tasks, entry.group.slugs)
-        return (
-          <DuplicateGroupCard
-            key={entry.group.slugs.join(",")}
-            entry={entry}
-            task={task}
-            mergeProgress={mergeProgress}
-            enqueueing={enqueueingKey === entryKey}
-            mergeReady={mergeLlmReady}
-            mergeError={mergeErrors[entryKey] ?? null}
-            pendingPosition={
-              task && task.status === "pending"
-                ? pendingPositionByTaskId.get(task.id) ?? 0
-                : 0
-            }
-            onCanonicalChange={(slug) => handleCanonicalChange(idx, slug)}
-            onEnqueue={() => void handleEnqueue(entry)}
-            onCancel={() => task && void handleCancel(task.id)}
-            onRetry={() => task && void handleRetry(task.id)}
-            onNotDuplicate={() => void handleNotDuplicate(idx)}
-          />
-        )
-      })}
+      {visibleGroups.length > 0 && (
+        <DedupReviewList
+          key={project?.id}
+          entries={visibleGroups}
+          queued={tasksByGroup}
+          busy={controlsBusy}
+          mergeReady={mergeLlmReady}
+          onBatchMerge={(entries) => void handleEnqueue(entries, true)}
+          renderCard={(entry, key, checkbox) => {
+            const task = tasksByGroup.get(key)
+            return (
+              <DuplicateGroupCard
+                key={key}
+                entry={entry}
+                checkbox={checkbox}
+                task={task}
+                mergeProgress={mergeProgress}
+                enqueueing={enqueueingKeys?.has(key) ?? false}
+                busy={controlsBusy}
+                mergeReady={mergeLlmReady}
+                mergeError={mergeErrors[key] ?? null}
+                pendingPosition={task ? pendingPositionByTaskId.get(task.id) ?? 0 : 0}
+                onCanonicalChange={(slug) => handleCanonicalChange(entry, slug)}
+                onEnqueue={() => void handleEnqueue([entry], false)}
+                onCancel={() => task && void handleCancel(task.id)}
+                onRetry={() => task && void handleRetry(task.id)}
+                onNotDuplicate={() => void handleNotDuplicate(entry)}
+              />
+            )
+          }}
+        />
+      )}
     </div>
   )
 }
 
 // --- helpers ---------------------------------------------------------------
 
+function ModelWaitTime({ since }: { since: number }) {
+  const [now, setNow] = useState(Date.now)
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(timer)
+  }, [])
+  const seconds = Math.max(0, Math.floor((now - since) / 1000))
+  return <span className="shrink-0 tabular-nums text-muted-foreground">已等待 {Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, "0")}</span>
+}
+
 function ProcessLogPanel({
   title,
   lines,
   live,
+  fixedHeight,
 }: {
   title: string
   lines: readonly string[]
   live?: boolean
+  fixedHeight?: boolean
 }) {
   return (
     <div className="space-y-1.5 rounded border border-border/60 bg-background/80 px-2 py-1.5">
@@ -965,7 +1029,7 @@ function ProcessLogPanel({
         {live ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
         <span>{title}</span>
       </div>
-      <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded bg-muted/40 px-2 py-1.5 font-mono text-[0.6875rem] leading-relaxed text-foreground/90">
+      <pre className={`${fixedHeight ? "h-40" : "max-h-40"} overflow-auto whitespace-pre-wrap break-all rounded bg-muted/40 px-2 py-1.5 font-mono text-[0.6875rem] leading-relaxed text-foreground/90`}>
         {lines.length > 0
           ? lines.join("\n")
           : "…"}
@@ -975,6 +1039,8 @@ function ProcessLogPanel({
 }
 
 interface QueueOrphanListProps {
+  mergeReady: boolean
+  busy: boolean
   tasks: readonly DedupTask[]
   groups: GroupUiEntry[]
   mergeProgress: { taskId: string; stage: DedupMergeStage } | null
@@ -991,7 +1057,9 @@ interface QueueOrphanListProps {
  * invisible.
  */
 function QueueOrphanList({
+  mergeReady,
   tasks,
+  busy,
   groups,
   mergeProgress,
   onCancel,
@@ -999,8 +1067,9 @@ function QueueOrphanList({
   pendingPositionByTaskId,
 }: QueueOrphanListProps) {
   const { t } = useTranslation()
-  const groupKeys = new Set(groups.map((g) => groupKey(g.group.slugs)))
-  const orphans = tasks.filter((t) => !groupKeys.has(groupKey(t.group.slugs)))
+  const groupKeys = useMemo(() => new Set(groups.map((g) => groupKey(g.group.slugs))), [groups])
+  const orphans = useMemo(() => tasks.filter((t) => !groupKeys.has(groupKey(t.group.slugs))), [tasks, groupKeys])
+  const pagination = useReviewPage(orphans.length)
 
   if (orphans.length === 0) return null
 
@@ -1020,7 +1089,8 @@ function QueueOrphanList({
             "这里显示上一次扫描后仍未完成的任务。合并会逐个排队执行。",
         })}
       </p>
-      {orphans.map((task) => (
+      <ReviewPageNav {...pagination} />
+      {orphans.slice(pagination.start, pagination.end).map((task) => (
         <div
           key={task.id}
           className="flex flex-wrap items-center gap-2 rounded border border-border/40 bg-background px-3 py-2 text-xs"
@@ -1028,7 +1098,7 @@ function QueueOrphanList({
           <code className="font-mono">{task.group.slugs.join(" + ")}</code>
           <span className="text-muted-foreground">
             →{" "}
-            <code className="font-mono">{task.canonicalSlug}</code>
+            <code className="font-mono">{task.canonicalSlug ?? "由模型选择主条目"}</code>
           </span>
           <span className="ml-auto inline-flex items-center gap-1">
             <TaskStatusChip
@@ -1042,6 +1112,7 @@ function QueueOrphanList({
               <Button
                 size="sm"
                 variant="ghost"
+                disabled={busy || !mergeReady}
                 onClick={() => onRetry(task.id)}
               >
                 <RotateCcw className="h-3.5 w-3.5" />
@@ -1050,7 +1121,7 @@ function QueueOrphanList({
                 })}
               </Button>
             )}
-            <Button size="sm" variant="ghost" onClick={() => onCancel(task.id)}>
+            <Button size="sm" variant="ghost" disabled={busy} onClick={() => onCancel(task.id)}>
               <Trash2 className="h-3.5 w-3.5" />
               {t("settings.sections.maintenance.dedup.delete", {
                 defaultValue: "删除",
@@ -1111,7 +1182,7 @@ function TaskStatusChip({ task, pendingPosition, mergeStage }: ChipProps) {
     )
   }
   if (task.status === "awaiting_resume") {
-    return <span className="text-xs text-muted-foreground">旧版任务，等待手动继续</span>
+    return <span className="text-xs text-muted-foreground">已暂停，等待继续</span>
   }
   if (task.status === "pending") {
     if (pendingPosition === 0) {
@@ -1147,6 +1218,8 @@ function TaskStatusChip({ task, pendingPosition, mergeStage }: ChipProps) {
 }
 
 interface CardProps {
+  checkbox: ReactNode
+  busy: boolean
   entry: GroupUiEntry
   task: DedupTask | undefined
   mergeProgress: { taskId: string; stage: DedupMergeStage } | null
@@ -1162,6 +1235,8 @@ interface CardProps {
 }
 
 function DuplicateGroupCard({
+  checkbox,
+  busy,
   entry,
   task,
   mergeProgress,
@@ -1197,8 +1272,9 @@ function DuplicateGroupCard({
       }`}
     >
       <div className="flex items-center gap-2">
+        {checkbox}
         <span className={`rounded px-1.5 py-0.5 text-[0.625rem] font-semibold uppercase ${confidenceClass}`}>
-          {group.confidence}
+          {confidenceLabels[group.confidence]}
         </span>
         <span className="text-xs text-muted-foreground">
           {t("settings.sections.maintenance.dedup.candidates", {
@@ -1232,9 +1308,7 @@ function DuplicateGroupCard({
         <>
           <div className="space-y-1.5">
             <Label className="text-xs">
-              {t("settings.sections.maintenance.dedup.canonicalLabel", {
-                defaultValue: "保留以下 slug 作为主条目：",
-              })}
+              {task?.canonicalSlug === null ? "模型将从以下条目中选择主条目" : "单组合并时保留的主条目"}
             </Label>
             {group.slugs.map((slug) => (
               <label
@@ -1243,10 +1317,10 @@ function DuplicateGroupCard({
               >
                 <input
                   type="radio"
-                  name={`canonical-${group.slugs.join(",")}`}
-                  checked={canonicalSlug === slug}
+                  name={`canonical-${groupKey(group.slugs)}`}
+                  checked={task ? task.canonicalSlug === slug : canonicalSlug === slug}
                   onChange={() => onCanonicalChange(slug)}
-                  disabled={inFlight || awaitingResume}
+                  disabled={busy || !!task}
                 />
                 <code className="font-mono text-xs">{slug}</code>
               </label>
@@ -1256,7 +1330,7 @@ function DuplicateGroupCard({
           <div className="flex flex-wrap gap-2">
             {!task && (
               <>
-                <Button size="sm" onClick={onEnqueue} disabled={enqueueing || !mergeReady}>
+                <Button size="sm" onClick={onEnqueue} disabled={busy || !mergeReady}>
                   {enqueueing ? (
                     <>
                       <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -1271,7 +1345,7 @@ function DuplicateGroupCard({
                     })
                   )}
                 </Button>
-                <Button size="sm" variant="ghost" onClick={onNotDuplicate} disabled={enqueueing}>
+                <Button size="sm" variant="ghost" onClick={onNotDuplicate} disabled={busy}>
                   {t("settings.sections.maintenance.dedup.notDuplicates", {
                     defaultValue: "不是重复",
                   })}
@@ -1279,7 +1353,7 @@ function DuplicateGroupCard({
               </>
             )}
             {inFlight && (
-              <Button size="sm" variant="ghost" onClick={onCancel}>
+              <Button size="sm" variant="ghost" disabled={busy} onClick={onCancel}>
                 <Trash2 className="h-3.5 w-3.5" />
                 {t("settings.sections.maintenance.dedup.cancel", {
                   defaultValue: "取消",
@@ -1288,13 +1362,13 @@ function DuplicateGroupCard({
             )}
             {(failed || awaitingResume) && (
               <>
-                <Button size="sm" onClick={onRetry}>
+                <Button size="sm" disabled={busy || !mergeReady} onClick={onRetry}>
                   <RotateCcw className="h-3.5 w-3.5" />
                   {awaitingResume ? "继续合并" : t("settings.sections.maintenance.dedup.retry", {
                     defaultValue: "重试",
                   })}
                 </Button>
-                <Button size="sm" variant="ghost" onClick={onCancel}>
+                <Button size="sm" variant="ghost" disabled={busy} onClick={onCancel}>
                   <Trash2 className="h-3.5 w-3.5" />
                   {t("settings.sections.maintenance.dedup.delete", {
                     defaultValue: "删除",
