@@ -79,6 +79,23 @@ const FOUR_POINT_FIVE_ZERO_ZH: string[] = [
   "为会员用户提供更好的使用体验和额度管理能力。",
 ];
 
+const FOUR_POINT_EIGHT_ONE_ZH: string[] = [
+  "人物档案支持手动分组和重新归档，归档后同步更新大纲引用。",
+  "章节与大纲的侧栏宽度可按小说分别保存。大纲侧栏新增分栏标签和实时搜索，切换人物小传时保留目录展开状态。",
+  "查重候选支持批量合并和分组进度显示。任务可以取消，重启后可手动继续。",
+  "升级旧项目时复用已有向量索引，保留可以继续的模型任务，并加快人物和概念查重。",
+  "改进章节检索和关系检索，支持用定稿原文核对检索结果，长篇记忆提取可从断点续跑。",
+  "移除人物角色与文风的自动进化功能，保留已有的人物档案、历史版本和文风预设。",
+  "修复资料链接、标题读取、长文件名和备份完整性问题。",
+  "按 OpenAI 模型能力适配推理参数与工具调用。",
+];
+
+const FOUR_POINT_EIGHT_ONE_CHANGELOG: ChangelogEntry = {
+  version: "4.8.1",
+  date: "2026-11-24",
+  highlights: { en: FOUR_POINT_EIGHT_ONE_ZH, zh: FOUR_POINT_EIGHT_ONE_ZH },
+};
+
 const FOUR_POINT_EIGHT_ZERO_ZH: string[] = [
   "打开旧版小说项目时支持迁移到新版格式，整合旧目录和记忆数据，并记录项目格式版本。",
   "项目迁移时会先备份和校验，显示迁移进度，并暂时锁定操作和退出。意外中断后，下次打开项目时会检查并恢复。",
@@ -2259,6 +2276,8 @@ export function currentVersionChangelog(version: string): ChangelogEntry[] {
    * 才是「当前版本发布说明」的取数口 —— 漏了这里，发布说明会退化成
    * 一行「QMAI x.y.z 发布版本」，scripts/release-notes.spec.mjs 会拦下来。
    */
+  if (version === FOUR_POINT_EIGHT_ONE_CHANGELOG.version)
+    return [FOUR_POINT_EIGHT_ONE_CHANGELOG];
   if (version === FOUR_POINT_EIGHT_ZERO_CHANGELOG.version)
     return [FOUR_POINT_EIGHT_ZERO_CHANGELOG];
   if (version === FOUR_POINT_SEVEN_TWO_CHANGELOG.version)
@@ -2462,6 +2481,7 @@ export function currentVersionChangelog(version: string): ChangelogEntry[] {
 
 export function allChangelog(): ChangelogEntry[] {
   return [
+    FOUR_POINT_EIGHT_ONE_CHANGELOG,
     FOUR_POINT_EIGHT_ZERO_CHANGELOG,
     FOUR_POINT_SEVEN_TWO_CHANGELOG,
     FOUR_POINT_SEVEN_ONE_CHANGELOG,
