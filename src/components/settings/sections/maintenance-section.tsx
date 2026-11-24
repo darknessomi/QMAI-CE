@@ -801,27 +801,28 @@ export function MaintenanceSection() {
           </div>
         )}
 
-        <Button
-          onClick={() => void handleScan()}
-          disabled={scanning || !projectReady || !hasAvailableModels || !llmReady}
-        >
-          {scanning ? (
-            <>
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              {t("settings.sections.maintenance.dedup.scanning", {
-                defaultValue: "扫描中...",
-              })}
-            </>
-          ) : (
-            t("settings.sections.maintenance.dedup.scanButton", {
-              defaultValue: "开始扫描重复项",
-            })
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            onClick={() => void handleScan()}
+            disabled={scanning || !projectReady || !hasAvailableModels || !llmReady}
+          >
+            {scanning ? (
+              <>
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                {t("settings.sections.maintenance.dedup.scanning", {
+                  defaultValue: "扫描中...",
+                })}
+              </>
+            ) : (
+              t("settings.sections.maintenance.dedup.scanButton", {
+                defaultValue: "开始扫描重复项",
+              })
+            )}
+          </Button>
+          {scanning && activeScan?.projectId === project?.id && (
+            <Button variant="outline" onClick={() => activeScan?.controller.abort()}>取消扫描</Button>
           )}
-        </Button>
-
-        {scanning && activeScan?.projectId === project?.id && (
-          <Button variant="outline" onClick={() => activeScan?.controller.abort()}>取消扫描</Button>
-        )}
+        </div>
         {scanning && (
           <div className="flex items-start gap-1.5 rounded border border-border/60 bg-background/80 px-2 py-1.5 text-xs text-muted-foreground">
             <Loader2 className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin" />

@@ -141,7 +141,8 @@ export function MemoryCleanupTool() {
         const issues = scan.issues.filter((issue) => selected.has(issue.id))
         if (!issues.length) throw new Error("请先选择要处理的候选。")
         const count = new Set(issues.flatMap((i) => i.removeIds)).size
-        if (!window.confirm(`将从来源删除 ${count} 条记忆，并同步派生文件。正文和大纲不变。是否执行？`)) return
+        const confirmed = await window.confirm(`将从来源删除 ${count} 条记忆，并同步派生文件。正文和大纲不变。是否执行？`)
+        if (confirmed !== true || scope.current !== currentPath) return
         const removed = await applyMemoryCleanup(currentPath, scan, issues, log)
         if (scope.current === currentPath) {
           // Revisions changed: all previous suggestions must be rescanned.
@@ -173,7 +174,8 @@ export function MemoryCleanupTool() {
       if (scope.current !== currentPath) return
       const { nonPositive, unupdated, stale, total } = plan.counts
       if (!total) { setError("这些规则没有命中来源记忆。"); return }
-      if (!window.confirm(`将从来源删除 ${total} 条记忆：大纲快照 ${nonPositive} 条，出场后再隔 ${rules.unupdatedChapterGap} 章仍未更新 ${unupdated} 条，过旧章节 ${stale} 条。正文和大纲文件不变。是否执行？`)) return
+      const confirmed = await window.confirm(`将从来源删除 ${total} 条记忆：大纲快照 ${nonPositive} 条，出场后再隔 ${rules.unupdatedChapterGap} 章仍未更新 ${unupdated} 条，过旧章节 ${stale} 条。正文和大纲文件不变。是否执行？`)
+      if (confirmed !== true || scope.current !== currentPath) return
       const removed = await applyMemoryCleanupRules(currentPath, rules, log)
       if (scope.current === currentPath) { setScan(null); setSelected(new Set()); toast.success(`已按规则清理 ${removed} 条来源记忆。`) }
     } catch (cause) {
