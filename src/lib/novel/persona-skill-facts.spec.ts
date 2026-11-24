@@ -184,7 +184,7 @@ describe("syncPersonaSkillChapterFacts — 真实落盘", () => {
     io.files.clear()
   })
 
-  it("把四段写进 SKILL.md，且不动 updatedAt（避免把档案推回自进化队列）", async () => {
+  it("把四段写进 SKILL.md，且不动 updatedAt", async () => {
     io.files.set(indexFile, JSON.stringify({ version: 1, skills: [meta()] }))
     io.files.set(
       docFile,

@@ -126,6 +126,7 @@ describe("syncPersonaFromOutlineSave", () => {
   it("新角色建档后生成投影 MD", async () => {
     await syncPersonaFromOutlineSave({ projectPath: project, outlineFileName: "卷纲-第一卷.md", requests: [req({ content: castTable("陆云飞") })], llmConfig: null })
     expect(io.files.get(`${project}/wiki/outlines/人物小传/陆云飞.md`)).toContain("generated-from: persona-skill")
+    expect(io.files.has(`${project}/.qmai/persona-skill-evolution.json`)).toBe(false)
   })
 
   it("runPersonaSyncSafely 永不抛，失败只 warn", async () => {
@@ -133,24 +134,5 @@ describe("syncPersonaFromOutlineSave", () => {
     await expect(runPersonaSyncSafely(async () => { throw new Error("model down") }, "同步人物小传")).resolves.toBeUndefined()
     expect(warn).toHaveBeenCalled()
     warn.mockRestore()
-  })
-
-  it("新角色建档后自动开启自进化", async () => {
-    await syncPersonaFromOutlineSave({
-      projectPath: project, outlineFileName: "卷纲-第一卷.md",
-      requests: [req({ content: castTable("陆云飞") })], llmConfig: null,
-    })
-    const state = JSON.parse(io.files.get(`${project}/.qmai/persona-skill-evolution.json`) ?? "null")
-    expect(state.enabled).toBe(true)
-  })
-
-  it("用户已关掉自进化时，抓新角色不会擅自打开", async () => {
-    io.files.set(`${project}/.qmai/persona-skill-evolution.json`, JSON.stringify({ version: 1, enabled: false, rounds: [] }))
-    await syncPersonaFromOutlineSave({
-      projectPath: project, outlineFileName: "卷纲-第一卷.md",
-      requests: [req({ content: castTable("陆云飞") })], llmConfig: null,
-    })
-    const state = JSON.parse(io.files.get(`${project}/.qmai/persona-skill-evolution.json`)!)
-    expect(state.enabled).toBe(false)
   })
 })

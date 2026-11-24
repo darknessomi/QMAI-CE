@@ -172,11 +172,7 @@ const PROJECT_FILES: &[&str] = &["schema.md", "purpose.md"];
  *                            这些是**人的判断**，任何扫描都推不出来。
  *   · novel-config.json / source-watch-config.json /
  *     revision-feedback-config.json / rerank-config.json  项目级功能配置。
- *   · style-evolution.json   文风自进化的**用户开关**与「打开日」进度。
- *                            开关是用户显式选的（默认关），任何扫描都推不出来；
- *                            打开日计数则是**只能靠时间积累**的进度 ——
- *                            丢了它不会报错，只会让用户先前攒下的 3~5 个打开日
- *                            无声归零、功能被关回默认，然后以为「它坏了」。
+ *   · style-evolution.json   兼容旧项目，继续备份历史设置和进度。
  */
 const PROJECT_OWNED_FILES: &[&str] = &[
     "project.json",
@@ -2319,8 +2315,7 @@ mod tests {
         "source-watch-config.json",
         "revision-feedback-config.json",
         "rerank-config.json",
-        // 文风自进化的开关与「打开日」进度：丢了它，恢复后功能被关回默认、
-        // 打开日计数归零，用户先前攒的 3~5 个打开日白等
+        // 兼容旧项目的历史设置和进度
         "style-evolution.json",
     ];
 

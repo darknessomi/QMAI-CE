@@ -813,27 +813,11 @@ describe("UnifiedSkillLibraryView", () => {
   })
 })
 
-/*
- * 「文风自进化」开关面板的入口。
- *
- * 面板对 `.qmai/style-evolution.json` 的读取会落到 `readFileMock` 的兜底
- * `throw new Error("missing")` 上 —— `loadStyleEvolutionState` 吞掉异常并返回
- * `emptyState()`，这正是「文件还没生成」的真实路径（用户从没开过这个开关）。
- *
- * 合并说明：这块面板来自 main 的文风自进化工作。本分支把这个 tab 从「文风」
- * 改名成「文风 skill」并换成完整编辑器，面板在合并时按用户要求保留，
- * 所以断言用的是 `WRITING_STYLE_TAB`。
- */
-/*
- * 「文风自进化」开关已按用户要求**搬到写作设置**（与人物角色自进化放在一起）。
- * 技能库里不再出现它 —— 两个自进化分处两个页面时，用户得记「哪个开关在哪」。
- */
-describe("文风自进化入口已移出技能库", () => {
+describe("文风预设列表", () => {
   it("「文风 skill」tab 里不再有自进化开关", async () => {
     const { container, root } = await renderLibrary()
     await switchToTab(container, WRITING_STYLE_TAB)
     expect(container.querySelector('[data-testid="style-evolution-panel"]')).toBeNull()
-    // 文风预设本身照旧列着（模块没被搬空，只搬了开关）
     expect(entryIds(container).some((id) => id.startsWith("style:"))).toBe(true)
     cleanup(root, container)
   })

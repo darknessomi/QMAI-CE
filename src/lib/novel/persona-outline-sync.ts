@@ -9,7 +9,6 @@
  * 所以这里没有定时器、没有文件监听、没有「提取记忆」按钮的入口。
  */
 import { normalizePath } from "@/lib/path-utils"
-import { enablePersonaEvolutionOnFirstBuild } from "./persona-evolution-autostart"
 import { createPersonaSkillByUser } from "./persona-skill-learning"
 import { projectPersonaToOutline } from "./persona-projection-writer"
 export { projectPersonaToOutline } from "./persona-projection-writer"
@@ -137,9 +136,6 @@ export async function syncPersonaFromOutlineSave(input: SyncPersonaFromOutlineSa
         origin: "auto",
       })
       known.add(normalized)
-      // 用户口径：新角色「自动进入人物小传，并且开启了自动进化」。
-      // 只在**首次建档**时调用；函数内部会尊重用户已有关掉的选择。
-      await enablePersonaEvolutionOnFirstBuild(pp)
     }
     // 已建档：只记引用。正文交给章节学习，这次保存没有可信的演技证据，不能瞎写。
     await attachOutlineRef(pp, name, input.outlineFileName)

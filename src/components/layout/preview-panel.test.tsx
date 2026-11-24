@@ -135,7 +135,7 @@ describe("章节区不再有「文风写作」选择器（用户要求删除）"
   it("不把章节区的文风选择落盘：既不记住上次用的文风，也不写文风库", () => {
     expect(code).not.toContain("setLastChapterWritingStyle")
     expect(code).not.toContain("setEnabledWritingStyle")
-    expect(code).not.toContain("upsertWritingStylePreset")
+    expect(code).not.toContain("createWritingStylePreset")
     expect(code).not.toContain("rememberChapterWritingStyle")
     // 命名/调用形态的任何一种复用都要挡住（含 hook 形式）
     expect(code).not.toMatch(/useLastChapterWritingStyle|LastChapterWritingStyleId/)

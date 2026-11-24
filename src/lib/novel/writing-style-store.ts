@@ -44,7 +44,7 @@ const DEFAULT_CONSTITUTION_LIMIT = 800
 const DEFAULT_SAMPLES_LIMIT = 2500
 /** 写作请求中整合文档正文的字数预算。 */
 const DEFAULT_DNA_BODY_LIMIT = 1800
-export const STYLE_EVOLUTION_SOURCE_PREFIX = "我的文风 · 自动进化"
+const LEGACY_EVOLUTION_SOURCE_PREFIX = "我的文风 · 自动进化"
 
 function storePath(projectPath: string): string {
   return `${normalizePath(projectPath)}/.qmai/writing-style.json`
@@ -75,7 +75,7 @@ function isAvailableWritingStyle(preset: WritingStylePreset): boolean {
 
   // 早期拆书和自进化共用 style-<时间>-<随机数>，手动预设有独立前缀。
   const profile = preset.profile
-  return (typeof preset.sourceBook === "string" && preset.sourceBook.startsWith(STYLE_EVOLUTION_SOURCE_PREFIX))
+  return (typeof preset.sourceBook === "string" && preset.sourceBook.startsWith(LEGACY_EVOLUTION_SOURCE_PREFIX))
     || (profile?.schemaVersion === 2
       && profile.sampledChapterIds?.length === 0
       && !profile.metrics
@@ -100,45 +100,6 @@ async function saveWritingStyleStore(projectPath: string, store: WritingStyleSto
   await createDirectory(`${normalizePath(projectPath)}/.qmai`)
   await writeFileAtomic(storePath(projectPath), JSON.stringify(store, null, 2))
   useWikiStore.getState().bumpDataVersion()
-}
-
-/**
- * 写入/更新一个文风预设（按 sourceBook 去重：同一本书只保留一份，重复提取则覆盖）。
- * 不改变当前启用项。返回该预设 id。
- */
-export async function upsertWritingStylePreset(
-  projectPath: string,
-  input: {
-    name: string
-    sourceBook: string
-    profile: BookStyleProfile
-  },
-): Promise<WritingStylePreset> {
-  const store = await readWritingStyleStore(projectPath)
-  const now = Date.now()
-  const existingIndex = store.styles.findIndex((s) => isAvailableWritingStyle(s) && s.sourceBook === input.sourceBook)
-  let preset: WritingStylePreset
-  if (existingIndex >= 0) {
-    preset = {
-      ...store.styles[existingIndex],
-      name: input.name,
-      profile: input.profile,
-      updatedAt: now,
-    }
-    store.styles[existingIndex] = preset
-  } else {
-    preset = {
-      id: `style-evolution-${now}-${Math.random().toString(36).slice(2, 8)}`,
-      name: input.name,
-      sourceBook: input.sourceBook,
-      profile: input.profile,
-      createdAt: now,
-      updatedAt: now,
-    }
-    store.styles.push(preset)
-  }
-  await saveWritingStyleStore(projectPath, store)
-  return preset
 }
 
 /** 用独立 ID 新建手工预设，允许同一来源保存多个预设。 */
@@ -231,13 +192,10 @@ export async function setEnabledWritingStyle(projectPath: string, styleId: strin
   return availableWritingStyleStore(next)
 }
 
-/** 删除可用预设，并在删除当前启用项时清除启用状态。 */
-async function removeWritingStylePresets(
-  projectPath: string,
-  match: (preset: WritingStylePreset) => boolean,
-): Promise<WritingStyleStore> {
+/** 按 id 删除可用预设，并在删除当前启用项时清除启用状态。 */
+export async function removeWritingStylePreset(projectPath: string, styleId: string): Promise<WritingStyleStore> {
   const store = await readWritingStyleStore(projectPath)
-  const styles = store.styles.filter((preset) => !isAvailableWritingStyle(preset) || !match(preset))
+  const styles = store.styles.filter((preset) => !isAvailableWritingStyle(preset) || preset.id !== styleId)
   const enabledRemoved = store.enabledStyleId !== null
     && !styles.some((preset) => preset?.id === store.enabledStyleId)
   const next: WritingStyleStore = {
@@ -247,16 +205,6 @@ async function removeWritingStylePresets(
   }
   await saveWritingStyleStore(projectPath, next)
   return availableWritingStyleStore(next)
-}
-
-/** 按 id 删除一个文风预设。 */
-export async function removeWritingStylePreset(projectPath: string, styleId: string): Promise<WritingStyleStore> {
-  return removeWritingStylePresets(projectPath, (preset) => preset.id === styleId)
-}
-
-/** 按来源名称清理上一轮自进化预设。 */
-export async function removeWritingStylePresetBySourceBook(projectPath: string, sourceBook: string): Promise<WritingStyleStore> {
-  return removeWritingStylePresets(projectPath, (preset) => preset.sourceBook === sourceBook)
 }
 
 export async function getEnabledWritingStyle(projectPath: string): Promise<WritingStylePreset | null> {

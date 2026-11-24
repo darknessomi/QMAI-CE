@@ -39,7 +39,6 @@ import {
   loadWritingStyleStore,
   resolveWritingStylePreset,
   setEnabledWritingStyle,
-  upsertWritingStylePreset,
 } from "./writing-style-store"
 import { collectReferencedStylePresetIds } from "@/lib/reference/style-reference"
 import { contextPackToPrompt, type ContextPack } from "./context-engine"
@@ -85,14 +84,11 @@ function makeProfile(overrides: Partial<BookStyleProfile> = {}): BookStyleProfil
   }
 }
 
-async function seedPreset(name: string, sourceBook: string, profile: BookStyleProfile) {
-  return upsertWritingStylePreset(PROJECT, { name, sourceBook, profile })
-}
-
-/** 项目启用 B、另有一条 A 可选。返回两条预设。 */
+/** 项目已启用 B，并存有旧版预设 A。 */
 async function seedTwoStyles(profileA: BookStyleProfile, profileB: BookStyleProfile) {
-  const a = await seedPreset("甲书 · 文风", "甲书A", profileA)
-  const b = await seedPreset("乙书 · 文风", "乙书B", profileB)
+  const a = { id: "style-a", name: "甲书 · 文风", sourceBook: "甲书A", profile: profileA, createdAt: 1, updatedAt: 1 }
+  const b = { id: "style-b", name: "乙书 · 文风", sourceBook: "乙书B", profile: profileB, createdAt: 1, updatedAt: 1 }
+  mem.set(STORE_PATH, JSON.stringify({ version: 1, enabledStyleId: null, styles: [a, b] }))
   await setEnabledWritingStyle(PROJECT, b.id)
   return { a, b }
 }
@@ -165,7 +161,7 @@ describe("文风覆盖：渲染器三态（undefined / null / string）", () => 
 
   it("覆盖也走 migrateStyleProfile：存量 v1 数据缺 constitution 时不抛错", async () => {
     /*
-     * 直接写盘模拟**存量 v1 数据**（不走 upsert，那样必然带齐字段）：
+     * 直接写盘模拟**存量 v1 数据**：
      * 这条 profile 没有 `constitution`。`clip()` 内部会 `.trim()`，
      * 不迁移就是 TypeError —— 这正是 `getEnabledWritingStyle:186` 迁移要求
      * 被写进 `resolveWritingStylePreset` 的真实理由（不是为了切换渲染分支）。

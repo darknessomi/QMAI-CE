@@ -1204,21 +1204,7 @@ function SkillLibraryContent({
   if (activeTab === "skillFavorites") return <FavoriteListView />
   const Editor = SKILL_EDITORS[activeTab]
   if (!editing) {
-    /*
-     * 「文风 skill」tab 额外挂一块自进化开关面板。
-     *
-     * ⚠️ 它**不是**画廊条目、也不进 `SKILL_EDITORS`：面板是「一块说明 + 一个开关」，
-     * 不随 `editing` 切换，也没有可编辑的草稿形态。塞进编辑器表会让 `editing`
-     * 为 false 时它整个不渲染 —— 而它恰恰是用户平时最需要看到的那块。
-     *
-     * 合并说明：这块来自 main 的文风自进化工作；本分支重写了本文件的 tab 结构
-     * （文风改成完整编辑器、删掉「角色灵魂」tab），合并时按用户要求保留面板。
-     */
-    return (
-      <>
-                <SkillGallery activeTab={activeTab} onOpen={onOpen} />
-      </>
-    )
+    return <SkillGallery activeTab={activeTab} onOpen={onOpen} />
   }
   return (
     <div className="ui-test-skills-editor">

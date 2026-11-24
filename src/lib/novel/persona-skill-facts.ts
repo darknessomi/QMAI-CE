@@ -287,8 +287,7 @@ export function mergeLiveLines(
 /**
  * 把本章事实写进所有**本章出场且已建档**的人物 Skill。
  *
- * - 不调模型、不改 `updatedAt`（自进化用 updatedAt 判定新素材，这里只是投影，
- *   不该把一个人的档案重新推回进化队列）、不改 `lastLearnedChapter`（那是学习的事）。
+ * - 事实投影不调用模型，也不更新档案的 `updatedAt` 和 `lastLearnedChapter`。
  * - `editedByUser` 的人也照写：这四段是自动维护的事实，用户手写它们本来就会被覆盖；
  *   挡掉等于「手改过的人永远看不到当前状态」。
  * - 永不抛：失败只 warn，返回成功更新的人名。

@@ -18,12 +18,10 @@ vi.mock("@/commands/fs", () => ({
 
 import {
   loadWritingStyleStore,
-  upsertWritingStylePreset,
   setEnabledWritingStyle,
   getEnabledWritingStyle,
   buildWritingStyleContext,
   removeWritingStylePreset,
-  removeWritingStylePresetBySourceBook,
   createWritingStylePreset,
   updateWritingStylePreset,
   getWritingStylePreset,
@@ -85,6 +83,7 @@ describe("writing-style-store", () => {
       { id: "style-1000-books", sourceBook: "旧拆书", profile },
       { id: "style-2000-tagged", sourceBook: "已发布的拆书", sourceBookId: "book-1", profile },
       { id: "style-3000-evolve", sourceBook: "我的文风 · 自动进化 · 第 1 轮", profile },
+      { id: "style-evolution-3500-abc123", sourceBook: "我的文风 · 自动进化 · 第 2 轮", profile },
       { id: "style-manual-4000-own", sourceBook: "自建预设", profile },
     ].map((preset) => ({ ...preset, name: preset.sourceBook, createdAt: 1, updatedAt: 1 }))
     const original = JSON.stringify({ version: 1, enabledStyleId: presets[0].id, styles: presets })
@@ -96,8 +95,10 @@ describe("writing-style-store", () => {
     expect(await buildWritingStyleContext(PROJECT, { styleIdOverride: presets[1].id })).toBe("")
     expect(mem.get(path)).toBe(original)
 
-    await setEnabledWritingStyle(PROJECT, presets[3].id)
-    expect(await buildWritingStyleContext(PROJECT)).toContain("自建预设")
+    for (const preset of presets.slice(2)) {
+      await setEnabledWritingStyle(PROJECT, preset.id)
+      expect(await buildWritingStyleContext(PROJECT)).toContain(preset.sourceBook)
+    }
     expect(JSON.parse(mem.get(path)!).styles).toEqual(presets)
   })
 
@@ -119,7 +120,7 @@ describe("writing-style-store", () => {
   it("每条写入路径都通知刷新：dataVersion 各加一次", async () => {
     const before = useWikiStore.getState().dataVersion
 
-    const preset = await upsertWritingStylePreset(PROJECT, { name: "通知", sourceBook: "通知书", profile: makeProfile() })
+    const preset = await createWritingStylePreset(PROJECT, { name: "通知", sourceBook: "通知书", constitution: "短句" })
     expect(useWikiStore.getState().dataVersion, "新建预设要通知").toBe(before + 1)
 
     await setEnabledWritingStyle(PROJECT, preset.id)
@@ -129,22 +130,8 @@ describe("writing-style-store", () => {
     expect(useWikiStore.getState().dataVersion, "删除预设也要通知").toBe(before + 3)
   })
 
-  it("dedupes presets by sourceBook and overwrites the profile", async () => {
-    const a = await upsertWritingStylePreset(PROJECT, { name: "凡人·文风", sourceBook: "凡人", profile: makeProfile() })
-    const b = await upsertWritingStylePreset(PROJECT, {
-      name: "凡人·文风",
-      sourceBook: "凡人",
-      profile: makeProfile({ narrativeDensity: "更新后的密度" }),
-    })
-
-    expect(a.id).toBe(b.id)
-    const store = await loadWritingStyleStore(PROJECT)
-    expect(store.styles).toHaveLength(1)
-    expect(store.styles[0].profile.narrativeDensity).toBe("更新后的密度")
-  })
-
   it("enables and clears the active style", async () => {
-    const preset = await upsertWritingStylePreset(PROJECT, { name: "x", sourceBook: "凡人", profile: makeProfile() })
+    const preset = await createWritingStylePreset(PROJECT, { name: "x", sourceBook: "凡人", constitution: "短句" })
     await setEnabledWritingStyle(PROJECT, preset.id)
     expect((await getEnabledWritingStyle(PROJECT))?.id).toBe(preset.id)
 
@@ -153,18 +140,18 @@ describe("writing-style-store", () => {
   })
 
   it("ignores an unknown style id when enabling", async () => {
-    await upsertWritingStylePreset(PROJECT, { name: "x", sourceBook: "凡人", profile: makeProfile() })
+    await createWritingStylePreset(PROJECT, { name: "x", sourceBook: "凡人", constitution: "短句" })
     await setEnabledWritingStyle(PROJECT, "does-not-exist")
     expect(await getEnabledWritingStyle(PROJECT)).toBeNull()
   })
 
   it("returns empty context when nothing is enabled", async () => {
-    await upsertWritingStylePreset(PROJECT, { name: "x", sourceBook: "凡人", profile: makeProfile() })
+    await createWritingStylePreset(PROJECT, { name: "x", sourceBook: "凡人", constitution: "短句" })
     expect(await buildWritingStyleContext(PROJECT)).toBe("")
   })
 
   it("injects the guard, constitution and samples by default", async () => {
-    const preset = await upsertWritingStylePreset(PROJECT, { name: "x", sourceBook: "凡人修仙传", profile: makeProfile() })
+    const preset = await createWritingStylePreset(PROJECT, { name: "x", sourceBook: "凡人修仙传", ...makeProfile() })
     await setEnabledWritingStyle(PROJECT, preset.id)
 
     const ctx = await buildWritingStyleContext(PROJECT)
@@ -175,7 +162,7 @@ describe("writing-style-store", () => {
   })
 
   it("omits samples when includeSamples is false", async () => {
-    const preset = await upsertWritingStylePreset(PROJECT, { name: "x", sourceBook: "凡人", profile: makeProfile() })
+    const preset = await createWritingStylePreset(PROJECT, { name: "x", sourceBook: "凡人", ...makeProfile() })
     await setEnabledWritingStyle(PROJECT, preset.id)
 
     const ctx = await buildWritingStyleContext(PROJECT, { includeSamples: false })
@@ -184,10 +171,10 @@ describe("writing-style-store", () => {
   })
 
   it("clips an over-long constitution to the configured limit", async () => {
-    const preset = await upsertWritingStylePreset(PROJECT, {
+    const preset = await createWritingStylePreset(PROJECT, {
       name: "x",
       sourceBook: "凡人",
-      profile: makeProfile({ constitution: "约束".repeat(1000) }),
+      constitution: "约束".repeat(1000),
     })
     await setEnabledWritingStyle(PROJECT, preset.id)
 
@@ -198,19 +185,13 @@ describe("writing-style-store", () => {
 })
 
 describe("writing-style-store · Writing DNA 注入", () => {
-  async function enable(profile: BookStyleProfile, extra: Record<string, unknown> = {}) {
-    const preset = await upsertWritingStylePreset(PROJECT, {
-      name: "x",
-      sourceBook: "凡人修仙传",
-      profile,
-      ...extra,
-    })
-    await setEnabledWritingStyle(PROJECT, preset.id)
-    return preset
+  function enable(profile: BookStyleProfile) {
+    const preset = { id: "style-legacy", name: "旧预设", sourceBook: "凡人修仙传", profile, createdAt: 1, updatedAt: 1 }
+    mem.set(`${PROJECT}/.qmai/writing-style.json`, JSON.stringify({ version: 1, enabledStyleId: preset.id, styles: [preset] }))
   }
 
   it("硬约束排在整合文档正文之前，保证不被挤掉", async () => {
-    await enable(makeDnaProfile())
+    enable(makeDnaProfile())
     const ctx = await buildWritingStyleContext(PROJECT)
 
     expect(ctx.indexOf("风格硬约束")).toBeGreaterThan(-1)
@@ -218,7 +199,7 @@ describe("writing-style-store · Writing DNA 注入", () => {
   })
 
   it("整合文档注入时摘掉硬约束小节，避免同一段内容注入两遍", async () => {
-    await enable(makeDnaProfile())
+    enable(makeDnaProfile())
     const ctx = await buildWritingStyleContext(PROJECT)
 
     expect(ctx).toContain("平均句长 12 字")
@@ -227,7 +208,7 @@ describe("writing-style-store · Writing DNA 注入", () => {
   })
 
   it("v1 旧画像没有整合文档时降级为只注入硬约束", async () => {
-    await enable(makeProfile())
+    enable(makeProfile())
     const ctx = await buildWritingStyleContext(PROJECT)
 
     expect(ctx).toContain("风格硬约束")
@@ -236,7 +217,7 @@ describe("writing-style-store · Writing DNA 注入", () => {
   })
 
   it("v1 旧画像读出时迁移为 v2 形状并按层归类 9 维内容", async () => {
-    await enable(makeProfile())
+    enable(makeProfile())
     const preset = await getEnabledWritingStyle(PROJECT)
 
     expect(preset?.profile.schemaVersion).toBe(2)
@@ -245,7 +226,7 @@ describe("writing-style-store · Writing DNA 注入", () => {
   })
 
   it("整合文档正文超预算时被截断，但硬约束完整保留", async () => {
-    await enable(makeDnaProfile({
+    enable(makeDnaProfile({
       constitution: "1. 环境描写不超过 2 句。",
       integratedDna: `## 语言特征\n${"细节".repeat(2000)}\n\n## 风格硬约束\n1. 环境描写不超过 2 句。`,
     }))
@@ -263,8 +244,8 @@ describe("writing-style-store · Writing DNA 注入", () => {
  */
 describe("文风预设删除", () => {
   it("按 id 删掉对应预设，其它预设保留", async () => {
-    const target = await upsertWritingStylePreset(PROJECT, { name: "甲书 · 文风", sourceBook: "甲书", profile: makeProfile() })
-    const keep = await upsertWritingStylePreset(PROJECT, { name: "乙书 · 文风", sourceBook: "乙书", profile: makeProfile() })
+    const target = await createWritingStylePreset(PROJECT, { name: "甲书 · 文风", sourceBook: "甲书", constitution: "短句" })
+    const keep = await createWritingStylePreset(PROJECT, { name: "乙书 · 文风", sourceBook: "乙书", constitution: "短句" })
 
     const next = await removeWritingStylePreset(PROJECT, target.id)
 
@@ -272,22 +253,11 @@ describe("文风预设删除", () => {
     expect((await loadWritingStyleStore(PROJECT)).styles.map((preset) => preset.id)).toEqual([keep.id])
   })
 
-  it("按 sourceBook 删掉对应预设，其它来源的预设保留", async () => {
-    await upsertWritingStylePreset(PROJECT, { name: "甲书 · 文风", sourceBook: "甲书", profile: makeProfile() })
-    const keep = await upsertWritingStylePreset(PROJECT, { name: "乙书 · 文风", sourceBook: "乙书", profile: makeProfile({ narrativeDensity: "乙书的密度" }) })
-
-    const next = await removeWritingStylePresetBySourceBook(PROJECT, "甲书")
-
-    expect(next.styles.map((preset) => preset.id)).toEqual([keep.id])
-    expect(next.styles[0].profile.narrativeDensity).toBe("乙书的密度")
-    expect((await loadWritingStyleStore(PROJECT)).styles).toHaveLength(1)
-  })
-
   it("删掉的正是当前启用项时必须清空 enabledStyleId，不留悬空的启用项", async () => {
-    const target = await upsertWritingStylePreset(PROJECT, { name: "甲书 · 文风", sourceBook: "甲书", profile: makeProfile() })
+    const target = await createWritingStylePreset(PROJECT, { name: "甲书 · 文风", sourceBook: "甲书", constitution: "短句" })
     await setEnabledWritingStyle(PROJECT, target.id)
 
-    const next = await removeWritingStylePresetBySourceBook(PROJECT, "甲书")
+    const next = await removeWritingStylePreset(PROJECT, target.id)
 
     expect(next.enabledStyleId).toBeNull()
     expect((await loadWritingStyleStore(PROJECT)).enabledStyleId).toBeNull()
@@ -296,26 +266,24 @@ describe("文风预设删除", () => {
   })
 
   it("删的不是当前启用项时启用态原样保留", async () => {
-    const enabled = await upsertWritingStylePreset(PROJECT, { name: "乙书 · 文风", sourceBook: "乙书", profile: makeProfile() })
-    await upsertWritingStylePreset(PROJECT, { name: "甲书 · 文风", sourceBook: "甲书", profile: makeProfile() })
+    const enabled = await createWritingStylePreset(PROJECT, { name: "乙书 · 文风", sourceBook: "乙书", constitution: "短句" })
+    const target = await createWritingStylePreset(PROJECT, { name: "甲书 · 文风", sourceBook: "甲书", constitution: "短句" })
     await setEnabledWritingStyle(PROJECT, enabled.id)
 
-    const next = await removeWritingStylePresetBySourceBook(PROJECT, "甲书")
+    const next = await removeWritingStylePreset(PROJECT, target.id)
 
     expect(next.enabledStyleId).toBe(enabled.id)
     expect((await getEnabledWritingStyle(PROJECT))?.id).toBe(enabled.id)
   })
 
   it("删不存在的目标不抛错，store 内容不变", async () => {
-    const keep = await upsertWritingStylePreset(PROJECT, { name: "甲书 · 文风", sourceBook: "甲书", profile: makeProfile() })
+    const keep = await createWritingStylePreset(PROJECT, { name: "甲书 · 文风", sourceBook: "甲书", constitution: "短句" })
     const before = await loadWritingStyleStore(PROJECT)
 
     const byId = await removeWritingStylePreset(PROJECT, "style-does-not-exist")
     expect(byId.styles.map((preset) => preset.id)).toEqual([keep.id])
     expect(byId.enabledStyleId).toEqual(before.enabledStyleId)
 
-    const byBook = await removeWritingStylePresetBySourceBook(PROJECT, "没有这本书")
-    expect(byBook).toEqual(byId)
     expect(await loadWritingStyleStore(PROJECT)).toEqual(byId)
   })
 })
