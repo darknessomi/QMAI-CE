@@ -1,3 +1,4 @@
+import { mapWithConcurrency } from "@/lib/async-pool"
 import { readFile, listDirectory } from "@/commands/fs"
 import type { FileNode } from "@/types/wiki"
 import { normalizePath } from "@/lib/path-utils"
@@ -195,20 +196,8 @@ function extractRelationLinks(content: string): Array<{ target: string; relation
   return links
 }
 
-function resolveTarget(
-  raw: string,
-  nodeIds: ReadonlySet<string>,
-): string | null {
-  if (nodeIds.has(raw)) return raw
-
-  const normalized = raw.toLowerCase().replace(/\s+/g, "-")
-  for (const id of nodeIds) {
-    const idLower = id.toLowerCase()
-    if (idLower === normalized) return id
-    if (idLower === raw.toLowerCase()) return id
-    if (idLower.replace(/\s+/g, "-") === normalized) return id
-  }
-  return null
+function normalizedLink(id: string): string {
+  return id.toLowerCase().replace(/\s+/g, "-")
 }
 
 function getNeighbors(node: RetrievalNode): ReadonlySet<string> {
@@ -260,31 +249,20 @@ async function buildRetrievalGraphForProject(
   const mdFiles = flattenMdFiles(tree)
 
   // First pass: read all files and build raw node data
-  const rawNodes: Array<{
-    id: string
-    title: string
-    type: string
-    path: string
-    sources: string[]
-    rawLinks: string[]
-    rawRelationLinks: Array<{ target: string; relation: string }>
-    fileName: string
-  }> = []
-
-  for (const file of mdFiles) {
+  const pages = await mapWithConcurrency(mdFiles, 12, async (file) => {
     const id = fileNameToId(file.name)
     let content = ""
     try {
       content = await readFile(file.path)
     } catch {
-      continue
+      return null
     }
 
     const fm = extractFrontmatter(content)
     if (fm.isHistorical) {
-      continue
+      return null
     }
-    rawNodes.push({
+    return {
       id,
       title: fm.title || file.name.replace(/\.md$/, "").replace(/-/g, " "),
       type: fm.type,
@@ -293,10 +271,17 @@ async function buildRetrievalGraphForProject(
       rawLinks: extractWikilinks(content),
       rawRelationLinks: extractRelationLinks(content),
       fileName: file.name,
-    })
-  }
-
+    }
+  })
+  const rawNodes = pages.filter(page => page !== null)
   const nodeIds = new Set(rawNodes.map((n) => n.id))
+
+  const aliases = new Map<string, string>()
+  for (const id of nodeIds) {
+    const key = normalizedLink(id)
+    if (!aliases.has(key)) aliases.set(key, id)
+  }
+  const resolveTarget = (raw: string) => nodeIds.has(raw) ? raw : aliases.get(normalizedLink(raw)) ?? null
 
   // Second pass: resolve links and build graph nodes
   const outLinksMap = new Map<string, Set<string>>()
@@ -311,14 +296,14 @@ async function buildRetrievalGraphForProject(
 
   for (const raw of rawNodes) {
     for (const linkTarget of raw.rawLinks) {
-      const resolvedId = resolveTarget(linkTarget, nodeIds)
+      const resolvedId = resolveTarget(linkTarget)
       if (resolvedId === null || resolvedId === raw.id) continue
       outLinksMap.get(raw.id)!.add(resolvedId)
       inLinksMap.get(resolvedId)!.add(raw.id)
     }
     // 解析关系链接，只保留能解析到目标节点的边
     for (const rel of raw.rawRelationLinks) {
-      const resolvedId = resolveTarget(rel.target, nodeIds)
+      const resolvedId = resolveTarget(rel.target)
       if (resolvedId === null || resolvedId === raw.id) continue
       relationEdgesMap.get(raw.id)!.push({ target: resolvedId, relation: rel.relation })
     }

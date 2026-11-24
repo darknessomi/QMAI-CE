@@ -96,9 +96,7 @@ const LEGACY: &[&str] = &[
 ];
 const CACHE: &[&str] = &[
     "context-cache",
-    "embedding-index.json",
     "embedding-index.log",
-    "lancedb",
     "memory-cleanup-last.json",
     "memory-cleanup-checkpoint.json",
     "memory-cleanup-history",
@@ -591,6 +589,8 @@ fn stage_tree(
             // Prose, Markdown, history text and chat messages are never globally replaced.
             if (meta || folder == ".novel")
                 && dest.extension().is_some_and(|x| x == "json")
+                && !dest.starts_with(stage.join(".qmai/lancedb"))
+                && dest != stage.join(".qmai/embedding-index.json")
                 && !dest.starts_with(stage.join(".qmai/novel/snapshots"))
             {
                 rewrite_json_file(&dest, original_project)?;
@@ -1465,7 +1465,13 @@ mod tests {
     #[test]
     fn migration_preserves_content_and_discards_its_working_files() {
         let (_dir, p) = fixture();
+        fs::create_dir_all(p.join(".qmai/lancedb/wiki_vectors.lance")).unwrap();
+        let manifest = r#"{"configHash":"旧模型","pages":{".novel/路径":"abc"}}"#;
+        fs::write(p.join(".qmai/embedding-index.json"), manifest).unwrap();
+        fs::write(p.join(".qmai/lancedb/wiki_vectors.lance/0.bin"), [0, 255, 7]).unwrap();
         run(&p, Mode::Apply, |_| (), worker).unwrap();
+        assert_eq!(fs::read_to_string(p.join(".qmai/embedding-index.json")).unwrap(), manifest);
+        assert_eq!(fs::read(p.join(".qmai/lancedb/wiki_vectors.lance/0.bin")).unwrap(), [0, 255, 7]);
         assert_eq!(project_format(&p).unwrap(), Some(CURRENT_FORMAT));
         assert!(!inspect(&p).unwrap().required);
         assert!(!p.join(".qmai/context-cache").exists());

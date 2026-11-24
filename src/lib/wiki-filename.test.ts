@@ -32,3 +32,8 @@ describe("makeChapterFileName", () => {
     expect(makeDefaultChapterTitle(2, "章节名称")).toBe("第2章-章节名称")
   })
 })
+it("长中文章名保留扩展与重名后缀的位置，不切断非 BMP 字符", () => {
+  const name = makeChapterFileName("書".repeat(76) + "𠮷".repeat(9), 444)
+  expect(new TextEncoder().encode(name.replace(/\.md$/, "-123.md")).length).toBeLessThan(256)
+  expect(!/[\uD800-\uDFFF]/u.test(name)).toBe(true)
+})

@@ -1079,17 +1079,8 @@ pub fn do_write_file_atomic(path: &str, contents: &str) -> Result<(), String> {
                 .map_err(|e| format!("Failed to create parent dirs for '{}': {}", path, e))?;
         }
 
-        let file_name = p
-            .file_name()
-            .map(|name| name.to_string_lossy().to_string())
-            .unwrap_or_else(|| "qmai-file".to_string());
-        let tmp_path = p.with_file_name(format!(
-            ".{file_name}.{}.tmp",
-            chrono::Utc::now()
-                .timestamp_nanos_opt()
-                .unwrap_or_else(|| chrono::Utc::now().timestamp_millis())
-        ));
-
+        // A valid long chapter filename can already occupy the entire component budget.
+        let tmp_path = p.with_file_name(format!(".qmai-{}.tmp", uuid::Uuid::new_v4()));
         file_sync::mark_app_write_path(&tmp_path);
         file_sync::mark_app_write_path(p);
         fs::write(&tmp_path, contents)
@@ -1716,6 +1707,14 @@ pub async fn get_file_md5(path: String) -> Result<String, String> {
 mod tests {
     use super::*;
     use std::io::Write;
+
+    #[test]
+    fn atomic_save_accepts_long_chinese_chapter_names() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join(format!("第444章-{}.md", "甲".repeat(80)));
+        do_write_file_atomic(&path.to_string_lossy(), "章末").unwrap();
+        assert_eq!(fs::read_to_string(path).unwrap(), "章末");
+    }
 
     #[test]
     fn missing_file_read_does_not_create_parent_cache_directory() {

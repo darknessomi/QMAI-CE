@@ -17,6 +17,7 @@ import { fetchEmbeddingModelList } from "@/lib/settings-model-list"
 import { testSettingsEmbeddingModel } from "@/lib/settings-model-test"
 import { ModelSelectInput } from "../model-select-input"
 import { ResourceLink } from "../resource-link"
+import { confirmModelAction } from "@/components/uitest/models/model-confirm"
 import type { SettingsDraft, DraftSetter } from "../settings-types"
 
 const SILICONFLOW_RESOURCE_URL = "https://cloud.siliconflow.cn/i/1lKTd7hi"
@@ -110,13 +111,11 @@ export function EmbeddingSection({ draft, setDraft }: Props) {
 
   const handleDropLegacy = useCallback(async () => {
     if (!project) return
+    if (!await confirmModelAction(t("settings.sections.embedding.dropLegacyConfirm", { name: project.name }))) return
     await dropLegacyVectorTable(project.path)
     setLegacyCount(0)
     setLegacyDropped(true)
-  }, [project])
-
-  const showLegacyMigration =
-    legacyCount > 0 && (chunkCount === null || chunkCount === 0)
+  }, [project, t])
   const hasConfig = Boolean(draft.embeddingEndpoint || draft.embeddingModel)
 
   const handleOpenPanel = useCallback(() => {
@@ -409,24 +408,19 @@ export function EmbeddingSection({ draft, setDraft }: Props) {
               </div>
             </div>
 
-            {showLegacyMigration && (
-              <div className="space-y-2 rounded-md border border-destructive/40 bg-destructive/5 p-3">
-                <div className="text-sm font-medium text-destructive">
-                  {t("settings.sections.embedding.legacyPromptTitle")}
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  {t("settings.sections.embedding.legacyPromptBody", { count: legacyCount })}
-                </p>
-              </div>
-            )}
-
             <div className="space-y-3 rounded-md border p-3">
               <div className="text-sm font-medium">
                 {t("settings.sections.embedding.statsHeading")}
               </div>
               <p className="text-xs text-muted-foreground">
-                {t("settings.sections.embedding.chunkCount", { count: chunkCount ?? 0 })}
+                {chunkCount === null ? t("settings.sections.embedding.pendingCount") : t("settings.sections.embedding.chunkCount", { count: chunkCount })}
               </p>
+
+              {legacyCount > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  {t("settings.sections.embedding.legacyPromptBody", { count: legacyCount })}
+                </p>
+              )}
 
               <div className="flex flex-wrap items-center gap-2">
                 <Button
@@ -448,7 +442,7 @@ export function EmbeddingSection({ draft, setDraft }: Props) {
                     variant="outline"
                     size="sm"
                     onClick={handleDropLegacy}
-                    disabled={!project}
+                    disabled={!project || reindex.kind === "running"}
                   >
                     {t("settings.sections.embedding.dropLegacy")}
                   </Button>

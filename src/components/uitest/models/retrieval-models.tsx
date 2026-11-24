@@ -63,10 +63,10 @@ export function UiTestEmbeddingModels() {
   }
   async function index(kind: "rebuild" | "legacy") {
     if (!project || indexBusy.current || dirty || saving) return
-    if (!(await confirmModelAction(kind === "rebuild" ? `将为“${project.name}”重建向量索引，调用已保存的向量模型并可能产生费用；不会删除正文。是否继续？` : `将删除“${project.name}”升级前留下的按页向量表。当前文本块索引和正文都不会改。是否继续？`))) return
+    if (!(await confirmModelAction(kind === "rebuild" ? `将为“${project.name}”重建向量索引，调用已保存的向量模型并可能产生费用；不会删除正文。是否继续？` : `将删除“${project.name}”升级前留下的按页向量表。只保存在这张表里的向量将无法检索。是否继续？`))) return
     indexBusy.current = true; setIndexAction({ running: true, text: "正在处理索引…" })
     try {
-      if (kind === "legacy") { await dropLegacyVectorTable(project.path); if (alive.current && scopeRef.current === scope) { setIndexAction({ text: "升级前的按页向量表已删除，当前索引和正文未改变。" }); await refresh() } }
+      if (kind === "legacy") { await dropLegacyVectorTable(project.path); if (alive.current && scopeRef.current === scope) { setIndexAction({ text: "升级前的按页向量表已删除。" }); await refresh() } }
       else {
         const count = await embedAllPages(project.path, saved, (done, total) => { if (alive.current && scopeRef.current === scope) setIndexAction({ running: true, text: `索引进度：${done}/${total}` }) })
         const skip = getEmbeddingSkipSummary()
@@ -100,8 +100,8 @@ export function UiTestEmbeddingModels() {
     <section className="model-section-note">
       <h3>当前小说索引</h3>
       <p>{project ? `${project.name} · ${stats.count === null ? "尚未读取索引数量" : `${stats.count} 个文本块`}` : "请先打开小说，再查看或重建索引。"}</p>
-      {project && stats.legacy > 0 && <p>另有升级前留下的按页向量表 {stats.legacy} 条。检索用的是上面的文本块，不用这份旧表。</p>}
-      <p>{indexStale ? "模型配置已改变，请重建索引后再使用新向量。" : "索引数量不代表与当前模型兼容；更改模型、维度或分块后请重建。"}</p>
+      {project && stats.legacy > 0 && <p>旧版按页向量共 {stats.legacy} 条。能匹配到唯一页面的记录会继续参与检索。</p>}
+      <p>{indexStale ? "模型配置已改变，请重建索引后再使用新向量。" : "沿用原模型可继续检索旧索引。更换模型或输出维度后，请重新索引。"}</p>
       <div className="model-index-actions">
         <button type="button" className="model-button ghost" disabled={!project || indexAction?.running} onClick={() => void refresh()}>刷新状态</button>
         <button type="button" className="model-button" disabled={!project || !saved.enabled || dirty || saving || indexAction?.running} onClick={() => void index("rebuild")}>重建索引</button>

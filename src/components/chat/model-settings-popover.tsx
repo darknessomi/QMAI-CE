@@ -16,6 +16,7 @@ import {
   type ReasoningDepth,
 } from "@/lib/reasoning-depth"
 import { resolveModelConfig } from "@/lib/novel/model-resolver"
+import { modelOffersReasoningMode, openAiReasoningMode } from "@/lib/openai-model-capabilities"
 import { modelSupportsReasoningControl } from "@/lib/llm-providers"
 import { safeModelError } from "@/components/uitest/models/model-feedback"
 
@@ -119,19 +120,21 @@ export function ModelSettingsPopover({
   const outputValue = normalizeUserLlmMaxOutputTokens(
     override?.maxOutputTokens ?? preset?.suggestedMaxOutputTokens,
   )
-  const reasoningMode: ReasoningDepth = override?.reasoning?.mode === "auto"
+  const modelConfig = useMemo(
+    () => resolveModelConfig(`${providerId}/${modelId}`, llmConfig, providerConfigs),
+    [providerId, modelId, llmConfig, providerConfigs],
+  )
+  const effectiveMode = openAiReasoningMode(modelConfig, override?.reasoning?.mode ?? "auto")
+  const reasoningMode: ReasoningDepth = effectiveMode === "auto"
     ? DEFAULT_REASONING_DEPTH
-    : (REASONING_DEPTH_STEPS as readonly string[]).includes(String(override?.reasoning?.mode))
-      ? (override?.reasoning?.mode as ReasoningDepth)
+    : (REASONING_DEPTH_STEPS as readonly string[]).includes(String(effectiveMode))
+      ? (effectiveMode as ReasoningDepth)
       : DEFAULT_REASONING_DEPTH
-  const reasoningIsCustom = override?.reasoning?.mode === "custom"
+  const reasoningIsCustom = effectiveMode === "custom"
   const functionCalling = override?.functionCallingEnabled !== false
 
   // 模型浏览器控制不了思考时不给旋钮：宁可写清原因，也不给一个点了没反应的按钮。
-  const reasoningSupported = useMemo(
-    () => modelSupportsReasoningControl(resolveModelConfig(`${providerId}/${modelId}`, llmConfig, providerConfigs)),
-    [providerId, modelId, llmConfig, providerConfigs],
-  )
+  const reasoningSupported = modelSupportsReasoningControl(modelConfig)
 
   const patch = useCallback(
     async (next: Partial<ProviderOverride>) => {
@@ -198,7 +201,7 @@ export function ModelSettingsPopover({
             )}
           </div>
           <div className={`flex flex-wrap gap-1 ${reasoningSupported ? "" : "opacity-40"}`}>
-            {REASONING_DEPTH_STEPS.map((step) => (
+            {REASONING_DEPTH_STEPS.filter((step) => modelOffersReasoningMode(modelConfig, step)).map((step) => (
               <button
                 key={step}
                 type="button"

@@ -58,7 +58,7 @@ describe("novelMixedSearch vector noise control", () => {
 
   it("rejects a high blended page score when the best raw chunk score is weak", async () => {
     mockSearchByEmbedding.mockResolvedValue([{
-      id: "noisy-hit",
+      id: "wiki/memory/noisy-hit",
       score: 0.99,
       matchedChunks: [{ text: "weak semantic neighbor", headingPath: "Noise", score: 0.4 }],
     }])
@@ -81,7 +81,7 @@ describe("novelMixedSearch vector noise control", () => {
 
   it("uses the actual matched chunk as the vector result snippet", async () => {
     mockSearchByEmbedding.mockResolvedValue([{
-      id: "seal-memory",
+      id: "wiki/memory/seal-memory",
       score: 0.92,
       matchedChunks: [{
         text: "Lin discovers that the northern faction owns the seal.",
@@ -115,7 +115,7 @@ describe("novelMixedSearch vector noise control", () => {
    */
   it("被选中（AI 不读取）的文档不会作为检索结果返回", async () => {
     mockSearchByEmbedding.mockResolvedValue([{
-      id: "seal-memory",
+      id: "wiki/memory/seal-memory",
       score: 0.92,
       matchedChunks: [{
         text: "Lin discovers that the northern faction owns the seal.",

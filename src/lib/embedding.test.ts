@@ -1109,7 +1109,7 @@ describe("embedAllPages", () => {
       .filter((c) => c[0] === "vector_rebuild_append")
       .flatMap((c) => (c[1] as { chunks: Array<{ page_id: string }> }).chunks)
     const pageIds = [...new Set(staged.map((row) => row.page_id))].sort()
-    expect(pageIds).toEqual(["attention", "rope"])
+    expect(pageIds).toEqual(["wiki/rope", "wiki/sub/attention"])
   })
 
   it("extracts the title from YAML frontmatter when present", async () => {
@@ -1186,13 +1186,13 @@ describe("embedAllPages", () => {
     expect(count).toBe(2)
     const upserts = mockInvoke.mock.calls.filter((c) => c[0] === "vector_upsert_chunks")
     expect(upserts).toHaveLength(1)
-    expect((upserts[0][1] as { pageId: string }).pageId).toBe("b")
+    expect((upserts[0][1] as { pageId: string }).pageId).toBe("wiki/b")
   })
 
-  it("skips a page id Lance would reject and still commits the other pages", async () => {
+  it("indexes paths with an apostrophe without interpreting it as a filter delimiter", async () => {
     listDirectoryMock.mockResolvedValueOnce([
       { name: "ok.md", path: "/proj/wiki/ok.md", is_dir: false },
-      { name: "第157章-Let's clear the air.md", path: "/proj/wiki/bad.md", is_dir: false },
+      { name: "第157章-Let's clear the air.md", path: "/proj/wiki/第157章-Let's clear the air.md", is_dir: false },
     ])
     readFileMock.mockResolvedValue("# Title\n\nBody text.")
     mockHttpFetch.mockImplementation(async (_url: string, opts?: RequestInit) => batchOkResponse(opts))
@@ -1205,8 +1205,8 @@ describe("embedAllPages", () => {
     const staged = mockInvoke.mock.calls
       .filter((call) => call[0] === "vector_rebuild_append")
       .flatMap((call) => (call[1] as { chunks: Array<{ page_id: string }> }).chunks)
-    expect([...new Set(staged.map((row) => row.page_id))]).toEqual(["ok"])
-    expect(getEmbeddingSkipSummary()).toContain("第157章-Let's clear the air")
+    expect([...new Set(staged.map((row) => row.page_id))].sort()).toEqual(["wiki/ok", "wiki/第157章-Let%27s clear the air"])
+    expect(getEmbeddingSkipSummary()).toBeNull()
   })
 
   it("commits a rebuild after a staging write fails instead of dropping it", async () => {

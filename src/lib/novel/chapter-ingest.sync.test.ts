@@ -2,7 +2,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { FileNode } from "@/types/wiki"
 import type { ChapterSnapshot } from "./chapter-ingest"
 import { clearGraphCache, buildRetrievalGraph } from "@/lib/graph-relevance"
-import { deleteChapterSnapshots, finalizeProjectMemoryRebuild, listSnapshotHistory, restoreSnapshotHistory, syncSnapshotToMemory } from "./chapter-ingest"
+import { deleteChapterSnapshots, finalizeProjectMemoryRebuild, ingestOutline, listSnapshotHistory, restoreSnapshotHistory, syncSnapshotToMemory } from "./chapter-ingest"
+import * as llmClient from "@/lib/llm-client"
+import * as modelResolver from "./model-resolver"
+import { useWikiStore } from "@/stores/wiki-store"
 import { deleteFile, writeFileAtomic } from "@/commands/fs"
 import { hasPendingMemoryRefresh } from "./memory-refresh-status"
 
@@ -161,6 +164,39 @@ describe("syncSnapshotToMemory", () => {
     const titles = Array.from(afterSync.nodes.values()).map((node) => node.title)
     expect(titles).not.toContain("手机")
     expect(titles).toContain("灵石")
+  })
+
+  it("长大纲从正式入口完整提取，源文件变更保留断点，重试写盘不重复请求模型", async () => {
+    const outline = "/project/wiki/outlines/卷三/转折.md"
+    const original = "首段约定。" + "风雨未停。".repeat(4000) + "末段交还信件。"
+    writeTestFile(outline, original)
+    const model = vi.spyOn(modelResolver, "resolveNovelModel").mockReturnValue({
+      ...useWikiStore.getState().llmConfig, provider: "custom", apiKey: "fixture", model: "local-test", maxContextSize: 4096,
+    })
+    const stream = vi.spyOn(llmClient, "streamChat").mockImplementation(async (_config, messages, callbacks) => {
+      const last = String(messages[1].content).includes("末段交还信件。")
+      callbacks.onToken(JSON.stringify({ summary: "约定还信", events: [last ? "还信" : "约定"], endingHook: last ? "交还" : "" }))
+    })
+    try {
+      const first = await ingestOutline("/project", outline, undefined, { skipSync: true })
+      expect(stream.mock.calls.length).toBeGreaterThan(1)
+      expect(first.snapshot?.events).toEqual(["约定", "还信"])
+      expect(first.snapshot?.endingHook).toBe("交还")
+      expect(first.truncated).toBe(false)
+      const options = { outlineExtraction: { filePath: outline, checkpointPath: first.checkpointPath! } }
+      writeTestFile(outline, original + "新稿")
+      await expect(syncSnapshotToMemory("/project", first.snapshot!, options)).rejects.toThrow("大纲已修改")
+      expect(files.has(first.checkpointPath!)).toBe(true)
+      writeTestFile(outline, original)
+      stream.mockClear()
+      const saved = await ingestOutline("/project", outline)
+      expect(saved.snapshot?.events).toEqual(["约定", "还信"])
+      expect(stream).not.toHaveBeenCalled()
+      expect(files.has(first.checkpointPath!)).toBe(false)
+    } finally {
+      model.mockRestore()
+      stream.mockRestore()
+    }
   })
 
   it("同步大纲快照时清理旧格式来源名留下的旧实体", async () => {

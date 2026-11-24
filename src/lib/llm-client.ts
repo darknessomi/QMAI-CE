@@ -1,6 +1,9 @@
 import type { LlmConfig } from "@/stores/wiki-store"
+import { ResponsesStream, type ResponseOutputItem } from "./openai-responses-stream"
+import { openAiCapabilities } from "./openai-model-capabilities"
 import { isAzureOpenAiEndpoint } from "@/lib/azure-openai"
 import {
+  getProviderConfig,
   getEffectiveMaxContextSize,
   getEffectiveMaxOutputTokens,
   isTruncationFinishReason,
@@ -63,6 +66,8 @@ export interface StreamCallbacks {
   onReasoningToken?: (token: string) => void
   /** 工具调用流式 delta，用于累积 tool_calls */
   onToolCallDelta?: (delta: { index: number; id?: string; name?: string; arguments?: string }) => void
+  /** Completed output items required for stateless Responses tool turns. */
+  onResponsesOutput?: (items: ResponseOutputItem[]) => void
   /** Provider reported finish reason for the current response. */
   onFinishReason?: (reason: string) => void
   onUsage?: (usage: LlmUsage) => void
@@ -317,6 +322,7 @@ function flattenMessagesForHooks(messages: ChatMessage[]): {
 } {
   let lossy = false
   const payload = messages.map((message) => {
+    if (message.tool_calls?.length || message.tool_call_id || message.responsesOutput?.length) lossy = true
     if (typeof message.content === "string") {
       return { role: message.role, content: message.content }
     }
@@ -616,6 +622,7 @@ async function streamChatHeld(
   // thinking 开着却回传不了上一轮 tool-assistant 的思考时，空串/缺字段都会 400。
   // 先关 thinking 再发，比带着 "" 去撞接口更干净。
   if (
+    !openAiCapabilities(runtimeConfig) &&
     !isReasoningDisabled(runtimeConfig, effectiveRequestOverrides) &&
     hasUnreplayableToolAssistantReasoning(budgetedMessages)
   ) {
@@ -636,6 +643,7 @@ async function streamChatHeld(
     effectiveRequestOverrides,
   )
   interface ActiveRequestTrace {
+    apiMode?: string
     requestId: string
     startedAt: number
     firstResponseAt?: number
@@ -659,6 +667,7 @@ async function streamChatHeld(
     try {
       callbacks.onRequestTrace?.(buildLlmRequestCacheTrace({
         requestId: trace.requestId,
+        apiMode: trace.apiMode,
         config: runtimeConfig,
         ...prefixDescriptor,
         startedAt: trace.startedAt,
@@ -746,7 +755,7 @@ async function streamChatHeld(
 
   // 插件 provider 需要先现取 token（异步），所以统一走 resolveProviderConfig：
   // 内置 provider 与 getProviderConfig 等价，插件 provider 走 OpenAI 兼容适配器。
-  const providerConfig = await resolveProviderConfig(runtimeConfig)
+  let providerConfig = await resolveProviderConfig(runtimeConfig, effectiveRequestOverrides, budgetedMessages)
 
   // Combined abort: (a) user cancel, (b) our long-horizon timeout.
   // The long timeout is a backstop for truly stuck requests; it's NOT
@@ -757,12 +766,13 @@ async function streamChatHeld(
   const timeoutMs = DEFAULT_LLM_REQUEST_TIMEOUT_MS // 30 min — generous backstop for huge-context reasoning models
   let combinedSignal = signal
   let timeoutController: AbortController | undefined
+  let timeoutId: ReturnType<typeof setTimeout> | undefined
   let timeoutFired = false
   let onSignalAbort: (() => void) | undefined
 
   if (typeof AbortSignal.timeout === "function") {
     timeoutController = new AbortController()
-    const timeoutId = setTimeout(() => {
+    timeoutId = setTimeout(() => {
       timeoutFired = true
       timeoutController?.abort()
     }, timeoutMs)
@@ -785,6 +795,7 @@ async function streamChatHeld(
       init: RequestInit,
     ): Promise<Response> => {
       const trace = startRequestTrace()
+      if (providerConfig.responsesWire) trace.apiMode = "responses"
       try {
         const result = await fetcher(url, init)
         if (result.ok) {
@@ -809,12 +820,15 @@ async function streamChatHeld(
     const buildRequestInit = (
       nextMessages: import("./llm-providers").ChatMessage[],
       overrides: RequestOverrides = effectiveRequestOverrides,
-    ): RequestInit => ({
-      method: "POST",
-      headers: providerConfig.headers,
-      body: JSON.stringify(providerConfig.buildBody(nextMessages, overrides)),
-      signal: combinedSignal,
-    })
+    ): RequestInit => {
+      if (openAiCapabilities(runtimeConfig)) providerConfig = getProviderConfig(runtimeConfig, overrides, nextMessages)
+      return {
+        method: "POST",
+        headers: providerConfig.headers,
+        body: JSON.stringify(providerConfig.buildBody(nextMessages, overrides)),
+        signal: combinedSignal,
+      }
+    }
 
     const sendRequest = async (requestInit: RequestInit): Promise<Response> => {
       const httpFetch = await getHttpFetch()
@@ -1164,70 +1178,62 @@ async function streamChatHeld(
       }
     }
 
+    const responses = providerConfig.responsesWire ? new ResponsesStream() : undefined
+    const processLine = (line: string) => {
+      if (!line) return
+      if (line.startsWith("data:") && !line.startsWith("data: ")) line = "data: " + line.slice(5)
+      const sseError = parseOpenAiSseError(line)
+      if (sseError) {
+        // 服务端可在 HTTP 200 的流中报告失败后继续保持连接。
+        void reader.cancel().catch(() => {})
+        throw new Error(sseError)
+      }
+      recordUsage(line)
+      recordFinishReason(line)
+      reasoningCharsObserved += countReasoningCharsInLine(line)
+      recordReasoning(line)
+      if (responses) {
+        responses.accept(line)
+      } else {
+        for (const delta of parseToolCallDeltasFromLine(line)) {
+          markFirstResponse(activeRequestTrace)
+          toolCallDeltaCount++
+          callbacks.onToolCallDelta?.(delta)
+        }
+      }
+      const token = providerConfig.parseStream(line)
+      if (token !== null) {
+        if (token) markFirstResponse(activeRequestTrace)
+        recordToken(token)
+      }
+    }
+
     try {
       while (true) {
         const { done, value } = await reader.read()
-
         if (done) {
-          if (lineBuffer.trim()) {
-            const trimmed = lineBuffer.trim()
-            const sseError = parseOpenAiSseError(trimmed)
-            if (sseError) {
-              finishRequestTrace(activeRequestTrace, "error", streamUsage)
-              onError(new Error(sseError))
-              return
-            }
-            recordUsage(trimmed)
-            recordFinishReason(trimmed)
-            // Always harvest reasoning first: some gateways emit
-            // reasoning_content and tool_calls on the same SSE line.
-            reasoningCharsObserved += countReasoningCharsInLine(trimmed)
-            recordReasoning(trimmed)
-            const toolDeltas = parseToolCallDeltasFromLine(trimmed)
-            for (const toolDelta of toolDeltas) {
-              markFirstResponse(activeRequestTrace)
-              toolCallDeltaCount += 1
-              callbacks.onToolCallDelta?.(toolDelta)
-            }
-            const token = providerConfig.parseStream(trimmed)
-            if (token !== null) {
-              if (token) markFirstResponse(activeRequestTrace)
-              recordToken(token)
-            }
-          }
+          processLine((lineBuffer + decoder.decode()).trim())
           break
         }
-
         const [lines, remaining] = parseLines(value, lineBuffer, decoder)
         lineBuffer = remaining
+        for (const line of lines) processLine(line.trim())
+      }
 
-        for (const line of lines) {
-          const trimmed = line.trim()
-          if (!trimmed) continue
-          const sseError = parseOpenAiSseError(trimmed)
-          if (sseError) {
-            finishRequestTrace(activeRequestTrace, "error", streamUsage)
-            onError(new Error(sseError))
-            return
+      if (responses && !responses.finished && (effectiveRequestOverrides.tools?.length || openAiCapabilities(runtimeConfig))) {
+        throw new Error("模型响应在完成事件前中断，请重试")
+      }
+      if (responses?.output?.length) {
+        for (const [index, item] of responses.output.entries()) {
+          if (item.type !== "function_call") continue
+          if (typeof item.call_id !== "string" || !item.call_id || typeof item.name !== "string" || !item.name || typeof item.arguments !== "string") {
+            throw new Error("模型返回的工具调用缺少调用标识、名称或完整参数")
           }
-          recordUsage(trimmed)
-          recordFinishReason(trimmed)
-          // Always harvest reasoning first: some gateways emit
-          // reasoning_content and tool_calls on the same SSE line.
-          reasoningCharsObserved += countReasoningCharsInLine(trimmed)
-          recordReasoning(trimmed)
-          const toolDeltas = parseToolCallDeltasFromLine(trimmed)
-          for (const toolDelta of toolDeltas) {
-            markFirstResponse(activeRequestTrace)
-            toolCallDeltaCount += 1
-            callbacks.onToolCallDelta?.(toolDelta)
-          }
-          const token = providerConfig.parseStream(trimmed)
-          if (token !== null) {
-            if (token) markFirstResponse(activeRequestTrace)
-            recordToken(token)
-          }
+          markFirstResponse(activeRequestTrace)
+          toolCallDeltaCount++
+          callbacks.onToolCallDelta?.({ index, id: item.call_id, name: item.name, arguments: item.arguments })
         }
+        if (toolCallDeltaCount) callbacks.onResponsesOutput?.(responses.output)
       }
 
       if (streamUsage) callbacks.onUsage?.(streamUsage)
@@ -1324,6 +1330,7 @@ async function streamChatHeld(
       reader.releaseLock()
     }
   } finally {
+    clearTimeout(timeoutId)
     if (onSignalAbort && signal) {
       signal.removeEventListener("abort", onSignalAbort)
     }

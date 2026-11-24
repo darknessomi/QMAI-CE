@@ -223,6 +223,7 @@ export class AgentRunner {
        * 都只有一份，不会出现"显示 A、实际是 B"。
        */
       let roundHookText: string | null = null
+      let roundResponsesOutput: ChatMessage["responsesOutput"]
       let roundReasoningContent = ""
       let streamError: Error | undefined
       let roundUsage: LlmUsage | undefined
@@ -235,6 +236,7 @@ export class AgentRunner {
           roundReasoningContent += t
           callbacks.onReasoningToken?.(t)
         },
+        onResponsesOutput: (items) => { roundResponsesOutput = items },
         onToolCallDelta: (delta: ToolCallDelta) => {
           toolCallDeltas.push(delta)
           const diagnostics = record.requiredToolDiagnostics
@@ -329,6 +331,7 @@ export class AgentRunner {
         openaiTools = undefined
         roundText = ""
         roundHookText = null
+        roundResponsesOutput = undefined
         roundReasoningContent = ""
         toolCallDeltas.length = 0
         streamError = undefined
@@ -372,6 +375,7 @@ export class AgentRunner {
       ) {
         roundText = ""
         roundHookText = null
+        roundResponsesOutput = undefined
         roundReasoningContent = ""
         toolCallDeltas.length = 0
         streamError = undefined
@@ -458,6 +462,7 @@ export class AgentRunner {
         role: "assistant",
         content: roundText || "",
         tool_calls: toolCalls,
+        ...(roundResponsesOutput ? { responsesOutput: roundResponsesOutput } : {}),
         ...(roundReasoningContent.trim() ? { reasoning_content: roundReasoningContent } : {}),
       }
       logReasoningReplay("agent.round.tool_assistant", {

@@ -24,7 +24,7 @@ import { getFirstAvailableModelKey, getEffectiveSavedModels } from "@/lib/llm-mo
 import { hasUsableLlm } from "@/lib/has-usable-llm"
 import { normalizePath } from "@/lib/path-utils"
 import { resolveDefaultModel, resolveModelConfig } from "@/lib/novel/model-resolver"
-import { runDuplicateDetection, type DedupScanStage } from "@/lib/dedup-runner"
+import { missingDedupSlugs, runDuplicateDetection, type DedupScanStage } from "@/lib/dedup-runner"
 import { addNotDuplicate } from "@/lib/dedup-storage"
 import {
   loadDedupScanCache,
@@ -37,7 +37,6 @@ import {
 } from "@/lib/dedup-model-prefs"
 import { registerDedupScanSessionApi } from "@/lib/dedup-scan-session"
 import { toast } from "@/lib/toast"
-import { fileExists } from "@/commands/fs"
 import {
   enqueueMerge,
   cancelTask,
@@ -50,6 +49,13 @@ import {
   onDedupMergeComplete,
   type DedupTask,
 } from "@/lib/dedup-queue"
+import {
+  cancelForeshadowingCleanupTask,
+  ensureForeshadowingCleanupQueueActive,
+  getForeshadowingCleanupQueue,
+  retryForeshadowingCleanupTask,
+  type ForeshadowingCleanupTask,
+} from "@/lib/foreshadowing-cleanup-queue"
 import type { DedupMergeStage } from "@/lib/dedup-runner"
 import type { WikiProject } from "@/types/wiki"
 import type { DuplicateGroup } from "@/lib/dedup"
@@ -90,6 +96,8 @@ interface MaintenanceScanState {
   groups: GroupUiEntry[]
   scanCompleted: boolean
   scannedPageCount: number | null
+  coverage?: string
+  progress?: string
 }
 
 const emptyScanState: MaintenanceScanState = {
@@ -142,12 +150,14 @@ function toScanCache(
     projectId,
     scannedAt: Date.now(),
     scannedPageCount: state.scannedPageCount,
+    coverage: state.coverage,
     modelId: detectModelId.trim() || undefined,
     mergeModelId: mergeModelId.trim() || undefined,
     groups: state.groups as DedupScanCacheEntry[],
   }
 }
 
+let activeScan: { projectId: string; controller: AbortController } | undefined
 let sharedScanState: MaintenanceScanState = emptyScanState
 const scanListeners = new Set<(state: MaintenanceScanState) => void>()
 
@@ -244,6 +254,7 @@ export function MaintenanceSection() {
         groups: cached.groups,
         scanCompleted: true,
         scannedPageCount: cached.scannedPageCount,
+        coverage: cached.coverage,
       }
       replaceSharedScanState(hydrated)
       setLocalScanState(hydrated)
@@ -311,6 +322,7 @@ export function MaintenanceSection() {
   // that completed while the user was on a different settings tab).
   // Poll local queue state the same way other in-app queues do.
   const [tasks, setTasks] = useState<readonly DedupTask[]>([])
+  const [legacyCleanupTasks, setLegacyCleanupTasks] = useState<ForeshadowingCleanupTask[]>([])
   const [mergeProgress, setMergeProgress] = useState<{
     taskId: string
     stage: DedupMergeStage
@@ -322,27 +334,24 @@ export function MaintenanceSection() {
   useEffect(() => {
     if (!project) {
       setTasks([])
+      setLegacyCleanupTasks([])
       setMergeProgress(null)
       setMergeLogs([])
       return
     }
     let cancelled = false
-    void ensureQueueActive(project.id, project.path)
-      .then(() => {
-        if (!cancelled) {
-          setTasks([...getQueue()])
-          setMergeProgress(getMergeProgress())
-          setMergeLogs([...getMergeLogs()])
-        }
-      })
-      .catch((err) => {
-        console.error("[Maintenance] ensureQueueActive failed:", err)
-      })
-    const id = setInterval(() => {
-      setTasks([...getQueue()])
+    const refresh = () => {
+      if (cancelled) return
+      setTasks(getQueue().filter((task) => task.projectId === project.id))
+      setLegacyCleanupTasks(getForeshadowingCleanupQueue().filter((task) => task.projectId === project.id && task.legacyRecovery))
       setMergeProgress(getMergeProgress())
       setMergeLogs([...getMergeLogs()])
-    }, 500)
+    }
+    void Promise.all([
+      ensureQueueActive(project.id, project.path),
+      ensureForeshadowingCleanupQueueActive(project.id, project.path),
+    ]).then(refresh).catch((err) => { console.error("[Maintenance] 恢复维护队列失败：", err) })
+    const id = setInterval(refresh, 500)
     return () => {
       cancelled = true
       clearInterval(id)
@@ -462,7 +471,13 @@ export function MaintenanceSection() {
       return
     }
 
+    if (activeScan?.projectId === projectId) return
+    activeScan?.controller.abort()
+    const controller = new AbortController()
+    activeScan = { projectId, controller }
     const appendScanLog = (message: string) => {
+      if (activeScan?.controller !== controller) return
+      setSharedScanState({ progress: message })
       const stamp = new Date().toLocaleTimeString()
       const line = `${stamp}  ${message}`
       setScanLogs((prev) => [...prev, line])
@@ -486,24 +501,29 @@ export function MaintenanceSection() {
       projectId,
       projectPath,
       scanning: true,
+      coverage: undefined,
+      progress: undefined,
       scanError: null,
       groups: [],
       scanCompleted: false,
       scannedPageCount: null,
     })
     try {
-      const { groups: detected, scannedPageCount } = await runDuplicateDetection(
+      const { groups: detected, scannedPageCount, coverage } = await runDuplicateDetection(
         projectPath,
         effectiveDetectConfig,
         {
+          signal: controller.signal,
           onProgress: setScanStage,
           onLog: appendScanLog,
         },
       )
+      if (activeScan?.controller !== controller) return
       applyScanState({
         projectId,
         projectPath,
         scanning: false,
+        coverage,
         groups: detected.map((g) => ({
           group: g,
           canonicalSlug: g.slugs[0],
@@ -513,6 +533,7 @@ export function MaintenanceSection() {
         scannedPageCount,
       })
     } catch (err) {
+      if (activeScan?.controller !== controller) return
       const message = err instanceof Error ? err.message : String(err)
       appendScanLog(`失败：${message}`)
       applyScanState({
@@ -524,8 +545,11 @@ export function MaintenanceSection() {
         scannedPageCount: null,
       })
     } finally {
-      setIsScanning(false)
-      setScanStage(null)
+      if (activeScan?.controller === controller) {
+        activeScan = undefined
+        setIsScanning(false)
+        setScanStage(null)
+      }
     }
   }, [
     project,
@@ -561,22 +585,13 @@ export function MaintenanceSection() {
         return next
       })
       try {
-        const pp = normalizeProjectPath(project.path)
-        const missing: string[] = []
-        for (const slug of entry.group.slugs) {
-          const entityPath = `${pp}/wiki/entities/${slug}.md`
-          const conceptPath = `${pp}/wiki/concepts/${slug}.md`
-          const exists =
-            (await fileExists(entityPath)) || (await fileExists(conceptPath))
-          if (!exists) missing.push(slug)
-        }
-        if (missing.length > 0) {
+        const missing = await missingDedupSlugs(project.path, entry.group.slugs)
+        if (missing.length) {
           removeMergedGroup(entry.group.slugs)
-          const message = t("settings.sections.maintenance.dedup.pagesMissing", {
+          toast.error(t("settings.sections.maintenance.dedup.pagesMissing", {
             defaultValue: "部分页面已不存在（可能已合并）：{{slugs}}。已从列表移除。",
             slugs: missing.join(", "),
-          })
-          toast.error(message)
+          }))
           return
         }
 
@@ -674,6 +689,24 @@ export function MaintenanceSection() {
       </div>
 
       <MemoryCleanupTool />
+      {legacyCleanupTasks.length > 0 && (
+        <section className="space-y-2 rounded-lg border border-border/60 p-3">
+          <h3 className="text-sm font-semibold">旧版伏笔清理任务</h3>
+          <p className="text-xs text-muted-foreground">继续清理会更新来源记录，并可能调用嵌入模型重建索引。</p>
+          {legacyCleanupTasks.map((task) => (
+            <div key={task.id} className="flex flex-wrap items-center gap-2 text-xs">
+              <span>{task.issue.ids.join("、")} · {task.issue.reason}</span>
+              {task.status === "awaiting_resume" || task.status === "failed" ? (
+                <Button size="sm" onClick={() => void retryForeshadowingCleanupTask(task.id).catch((err) => toast.error(String(err)))}>
+                  {task.status === "awaiting_resume" ? "继续清理" : "重试"}
+                </Button>
+              ) : <span>{task.status === "processing" ? "清理中" : "已排队"}</span>}
+              <Button variant="ghost" size="sm" onClick={() => void cancelForeshadowingCleanupTask(task.id).catch((err) => toast.error(String(err)))}>移除任务</Button>
+              {task.status === "failed" && <span>{task.error}</span>}
+            </div>
+          ))}
+        </section>
+      )}
 
       <ContextCacheMaintenance />
 
@@ -689,7 +722,7 @@ export function MaintenanceSection() {
         <p className="text-xs leading-relaxed text-muted-foreground">
           {t("settings.sections.maintenance.dedup.description", {
             defaultValue:
-              "让大模型扫描全部实体 / 概念页面，并把那些很可能只是名称不同、实则指向同一主题的条目分组出来（例如中英文名称、单复数、简称与全称）。每组都需要你确认后才会合并。合并任务会进入队列并逐个执行，以保持交叉引用一致。",
+              "分批复核名称不同、可能属于同一人物或概念的条目。启用向量模型后会优先筛选语义相近的候选。每组由你确认后才进入合并队列。",
           })}
         </p>
 
@@ -786,11 +819,14 @@ export function MaintenanceSection() {
           )}
         </Button>
 
+        {scanning && activeScan?.projectId === project?.id && (
+          <Button variant="outline" onClick={() => activeScan?.controller.abort()}>取消扫描</Button>
+        )}
         {scanning && (
           <div className="flex items-start gap-1.5 rounded border border-border/60 bg-background/80 px-2 py-1.5 text-xs text-muted-foreground">
             <Loader2 className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin" />
             <div>
-              {scanStage === "loading"
+              {scanState.progress || (scanStage === "loading"
                 ? t("settings.sections.maintenance.dedup.scanStageLoading", {
                     defaultValue: "正在读取实体 / 概念页面…",
                   })
@@ -801,7 +837,7 @@ export function MaintenanceSection() {
                   : t("settings.sections.maintenance.dedup.scanningHint", {
                       defaultValue:
                         "正在扫描实体 / 概念页面并调用模型分析，可能需要一会儿…",
-                    })}
+                    }))}
             </div>
           </div>
         )}
@@ -823,6 +859,9 @@ export function MaintenanceSection() {
           </div>
         )}
 
+        {scanCompleted && activeScanState.coverage && (
+          <p className="text-xs text-muted-foreground">{activeScanState.coverage}</p>
+        )}
         {scanCompleted && visibleGroups.length > 0 && !scanError && (
           <div className="flex items-start gap-1.5 rounded border border-sky-500/40 bg-sky-500/5 px-2 py-1.5 text-xs text-sky-800 dark:text-sky-300">
             <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" />
@@ -852,7 +891,7 @@ export function MaintenanceSection() {
             <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" />
             <div>
               {t("settings.sections.maintenance.dedup.noneFound", {
-                defaultValue: "未发现重复分组，当前资料库很干净。",
+                defaultValue: "本次检测未发现重复候选。",
               })}
             </div>
           </div>
@@ -998,14 +1037,14 @@ function QueueOrphanList({
                 mergeProgress?.taskId === task.id ? mergeProgress.stage : null
               }
             />
-            {task.status === "failed" && (
+            {(task.status === "failed" || task.status === "awaiting_resume") && (
               <Button
                 size="sm"
                 variant="ghost"
                 onClick={() => onRetry(task.id)}
               >
                 <RotateCcw className="h-3.5 w-3.5" />
-                {t("settings.sections.maintenance.dedup.retry", {
+                {task.status === "awaiting_resume" ? "继续合并" : t("settings.sections.maintenance.dedup.retry", {
                   defaultValue: "重试",
                 })}
               </Button>
@@ -1069,6 +1108,9 @@ function TaskStatusChip({ task, pendingPosition, mergeStage }: ChipProps) {
         {label}
       </span>
     )
+  }
+  if (task.status === "awaiting_resume") {
+    return <span className="text-xs text-muted-foreground">旧版任务，等待手动继续</span>
   }
   if (task.status === "pending") {
     if (pendingPosition === 0) {
@@ -1137,6 +1179,7 @@ function DuplicateGroupCard({
 
   const inFlight = !!task && (task.status === "pending" || task.status === "processing")
   const failed = !!task && task.status === "failed"
+  const awaitingResume = task?.status === "awaiting_resume"
   const finished = skipped
 
   const confidenceClass =
@@ -1202,7 +1245,7 @@ function DuplicateGroupCard({
                   name={`canonical-${group.slugs.join(",")}`}
                   checked={canonicalSlug === slug}
                   onChange={() => onCanonicalChange(slug)}
-                  disabled={inFlight}
+                  disabled={inFlight || awaitingResume}
                 />
                 <code className="font-mono text-xs">{slug}</code>
               </label>
@@ -1242,11 +1285,11 @@ function DuplicateGroupCard({
                 })}
               </Button>
             )}
-            {failed && (
+            {(failed || awaitingResume) && (
               <>
                 <Button size="sm" onClick={onRetry}>
                   <RotateCcw className="h-3.5 w-3.5" />
-                  {t("settings.sections.maintenance.dedup.retry", {
+                  {awaitingResume ? "继续合并" : t("settings.sections.maintenance.dedup.retry", {
                     defaultValue: "重试",
                   })}
                 </Button>

@@ -185,6 +185,7 @@ export interface AgentRunCallbacks {
 }
 
 export interface AgentMessage {
+  responsesOutput?: ChatMessage["responsesOutput"]
   role: "system" | "user" | "assistant" | "tool"
   content: ChatMessage["content"]
   tool_calls?: { id: string; type: "function"; function: { name: string; arguments: string } }[]

@@ -232,6 +232,7 @@ pub fn run() {
             commands::vectorstore::vector_count_chunks,
             commands::vectorstore::vector_legacy_row_count,
             commands::vectorstore::vector_drop_legacy,
+            commands::vectorstore::vector_prepare_page_ids,
             commands::vectorstore::vector_rebuild_begin,
             commands::vectorstore::vector_rebuild_append,
             commands::vectorstore::vector_rebuild_commit,

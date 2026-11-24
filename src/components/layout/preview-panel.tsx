@@ -42,7 +42,7 @@ import {
   setLastChapterDeAiSkill,
 } from "@/lib/novel/de-ai-skill-library"
 import { startOutlineIngestTask } from "@/lib/novel/outline-generation"
-import { getOutlineIngestIdentity, getOutlineFileName, outlineSnapshotExists } from "@/lib/novel/outline-ingest-utils"
+import { resolveOutlineIngestIdentity, getOutlineFileName } from "@/lib/novel/outline-ingest-utils"
 import { isOutputTruncatedError, streamChat } from "@/lib/llm-client"
 import { isTruncationFinishReason } from "@/lib/llm-providers"
 import { isUserAbortError } from "@/lib/user-abort"
@@ -1264,16 +1264,18 @@ export function PreviewPanel() {
       setOutlineSnapshotNumber(null)
       return
     }
-    const { chapterNumber } = getOutlineIngestIdentity(project.path, selectedFile)
-    setOutlineSnapshotNumber(chapterNumber)
     let cancelled = false
-    void outlineSnapshotExists(project.path, selectedFile)
-      .then((exists) => {
-        if (!cancelled) setOutlineIngested(exists)
+    setOutlineIngested(false)
+    setOutlineSnapshotNumber(null)
+    void resolveOutlineIngestIdentity(project.path, selectedFile)
+      .then(async identity => {
+        const exists = await fileExists(identity.snapshotJsonPath)
+        if (!cancelled) {
+          setOutlineSnapshotNumber(identity.chapterNumber)
+          setOutlineIngested(exists)
+        }
       })
-      .catch(() => {
-        if (!cancelled) setOutlineIngested(false)
-      })
+      .catch(() => { if (!cancelled) setOutlineIngested(false) })
     return () => {
       cancelled = true
     }

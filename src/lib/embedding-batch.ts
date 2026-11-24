@@ -93,7 +93,7 @@ export function embeddingConfigFingerprint(config: {
  */
 export function pageIdIndexBlock(pageId: string): string | null {
   const bytes = new TextEncoder().encode(pageId).length
-  if (pageId.length === 0 || bytes > 256) return "empty or too long"
+  if (pageId.length === 0 || bytes > (pageId.startsWith("wiki/") ? 131072 : 256)) return "empty or too long"
   for (const char of pageId) {
     const code = char.codePointAt(0) ?? 0
     if (char === "'" || char === "\\" || code <= 0x1f || (code >= 0x7f && code <= 0x9f)) {

@@ -1,3 +1,4 @@
+mod identity;
 use lancedb::connect;
 use lancedb::index::scalar::BTreeIndexBuilder;
 use lancedb::index::Index;
@@ -224,7 +225,7 @@ fn page_id_breaks_filter(page_id: &str) -> bool {
 
 /// Validate page_id to prevent filter injection
 fn validate_page_id(page_id: &str) -> Result<(), String> {
-    if page_id.is_empty() || page_id.len() > 256 {
+    if page_id.is_empty() || page_id.len() > if page_id.starts_with("wiki/") { 131072 } else { 256 } {
         return Err("Invalid page_id: empty or too long".to_string());
     }
     if page_id_breaks_filter(page_id) {
@@ -344,10 +345,12 @@ pub async fn do_vector_search(
         .await
         .map_err(|e| format!("Open table error: {e}"))?;
 
-    let results_stream = table
-        .vector_search(query_embedding)
-        .map_err(|e| format!("Search error: {e}"))?
-        .limit(top_k)
+    let mut query = table.vector_search(query_embedding)
+        .map_err(|e| format!("Search error: {e}"))?;
+    if identity::has_marker(&project_path) {
+        query = query.only_if("page_id LIKE 'wiki/%' OR page_id LIKE 'community:%'");
+    }
+    let results_stream = query.limit(top_k)
         .execute()
         .await
         .map_err(|e| format!("Execute search error: {e}"))?;
@@ -651,11 +654,17 @@ pub async fn do_vector_upsert_chunks(
 }
 
 #[tauri::command]
+pub async fn vector_prepare_page_ids(project_path: String) -> Result<(), String> {
+    run_guarded_async("vector_prepare_page_ids", identity::prepare(&project_path)).await
+}
+
+#[tauri::command]
 pub async fn vector_upsert_chunks(
     project_path: String,
     page_id: String,
     chunks: Vec<ChunkUpsertInput>,
 ) -> Result<(), String> {
+    identity::prepare(&project_path).await?;
     run_guarded_async("vector_upsert_chunks", do_vector_upsert_chunks(project_path, page_id, chunks)).await
 }
 
@@ -685,10 +694,12 @@ pub async fn do_vector_search_chunks(
         .await
         .map_err(|e| format!("Open table error: {e}"))?;
 
-    let results_stream = table
-        .vector_search(query_embedding)
-        .map_err(|e| format!("Search error: {e}"))?
-        .limit(top_k)
+    let mut query = table.vector_search(query_embedding)
+        .map_err(|e| format!("Search error: {e}"))?;
+    if identity::has_marker(&project_path) {
+        query = query.only_if("page_id LIKE 'wiki/%' OR page_id LIKE 'community:%'");
+    }
+    let results_stream = query.limit(top_k)
         .execute()
         .await
         .map_err(|e| format!("Execute search error: {e}"))?;
@@ -748,7 +759,29 @@ pub async fn vector_search_chunks(
     query_embedding: Vec<f32>,
     top_k: usize,
 ) -> Result<Vec<ChunkSearchResult>, String> {
-    run_guarded_async("vector_search_chunks", do_vector_search_chunks(project_path, query_embedding, top_k)).await
+    run_guarded_async("vector_search_chunks", async {
+        identity::prepare(&project_path).await?;
+        let chunks = do_vector_search_chunks(project_path.clone(), query_embedding.clone(), top_k).await;
+        if !table_dir(&project_path, TABLE_V1).is_dir() { return chunks }
+        // A v1-only project still has useful page-level vectors. Both tables
+        // search with the same query vector; they may have different dimensions.
+        let old_pages = do_vector_search(project_path.clone(), query_embedding, top_k).await;
+        let (mut results, pages) = match (chunks, old_pages) {
+            (Ok(results), Ok(pages)) => (results, pages),
+            (Ok(results), Err(_)) => return Ok(results),
+            (Err(_), Ok(pages)) => (Vec::new(), pages),
+            (Err(error), Err(_)) => return Err(error),
+        };
+        let current = identity::indexed_v2_pages(&project_path, &pages).await?;
+        for page in pages {
+            if !page.page_id.starts_with("wiki/") || current.contains(&page.page_id) { continue }
+            results.push(ChunkSearchResult {
+                chunk_id: page.page_id.clone(), page_id: page.page_id, chunk_index: 0,
+                chunk_text: String::new(), heading_path: String::new(), score: page.score,
+            });
+        }
+        Ok(results)
+    }).await
 }
 
 /// Delete every chunk belonging to a page. Used when a source document
@@ -791,6 +824,10 @@ pub async fn vector_delete_page(
     project_path: String,
     page_id: String,
 ) -> Result<(), String> {
+    identity::prepare(&project_path).await?;
+    if page_id.starts_with("wiki/") && table_dir(&project_path, TABLE_V1).is_dir() {
+        do_vector_delete(project_path.clone(), page_id.clone()).await?;
+    }
     run_guarded_async("vector_delete_page", do_vector_delete_page(project_path, page_id)).await
 }
 
@@ -1157,6 +1194,144 @@ mod tests_v2 {
                 embedding: fake_embedding(i, dim),
             })
             .collect()
+    }
+
+    #[tokio::test]
+    async fn migrates_unique_v1_and_v2_owners_locally_without_exposing_ambiguous_rows() {
+        let root = tmp_project();
+        let pp = root.to_string_lossy().to_string();
+        for path in [
+            "QM/entities/甲.md",
+            "QM/entities/同名.md",
+            "QM/sources/同名.md",
+            "QM/sources/旧页.md",
+        ] {
+            let page = root.join(path);
+            std::fs::create_dir_all(page.parent().unwrap()).unwrap();
+            std::fs::write(page, "本地正文").unwrap();
+        }
+        for (name, text) in [
+            (
+                "QM/entities/别称.md",
+                "---\ntitle: 别称\n---\n# 身份\n甲乙丙丁。",
+            ),
+            ("QM/sources/别称.md", "# 身份\n其他内容。"),
+        ] {
+            std::fs::write(root.join(name), text).unwrap();
+        }
+        let proof_rows = ["# 身份\n甲乙", "乙丙丁。"]
+            .iter()
+            .enumerate()
+            .map(|(i, text)| ChunkUpsertInput {
+                chunk_index: i as u32,
+                chunk_text: text.to_string(),
+                heading_path: "# 身份".into(),
+                embedding: fake_embedding(i as u32, 16),
+            })
+            .collect();
+        do_vector_upsert_chunks(pp.clone(), "别称".into(), proof_rows)
+            .await
+            .unwrap();
+        do_vector_upsert_chunks(pp.clone(), "甲".into(), make_chunks("甲", 2, 16))
+            .await
+            .unwrap();
+        do_vector_upsert_chunks(pp.clone(), "同名".into(), make_chunks("同名", 2, 16))
+            .await
+            .unwrap();
+        do_vector_upsert(pp.clone(), "旧页".into(), fake_embedding(0, 16))
+            .await
+            .unwrap();
+        let manifest = root.join(".qmai/embedding-index.json");
+        std::fs::write(
+            &manifest,
+            r#"{"configHash":"old","pages":{"甲":"hash","同名":"unknown"}}"#,
+        )
+        .unwrap();
+
+        for _ in 0..2 {
+            vector_prepare_page_ids(pp.clone()).await.unwrap();
+        }
+        let hits = vector_search_chunks(pp.clone(), fake_embedding(0, 16), 20)
+            .await
+            .unwrap();
+        assert!(hits.iter().any(|r| r.page_id == "wiki/entities/甲"
+            && r.chunk_id == "wiki/entities/甲#1"
+            && r.chunk_text == "甲 chunk 1"));
+        assert!(hits.iter().any(|r| r.page_id == "wiki/sources/旧页"));
+        assert!(hits.iter().all(|r| !r.page_id.contains("同名")));
+        let json: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&manifest).unwrap()).unwrap();
+        assert_eq!(json["pages"]["wiki/entities/甲"], "hash");
+        assert_eq!(do_vector_count_chunks(pp.clone()).await.unwrap(), 6);
+        assert!(hits
+            .iter()
+            .any(|row| row.page_id == "wiki/entities/别称" && row.chunk_index == 1));
+        assert!(hits.iter().all(|r| r.page_id != "wiki/sources/别称"));
+        vector_delete_page(pp.clone(), "wiki/sources/旧页".into())
+            .await
+            .unwrap();
+        assert!(vector_search_chunks(pp, fake_embedding(0, 16), 20)
+            .await
+            .unwrap()
+            .iter()
+            .all(|r| r.page_id != "wiki/sources/旧页"));
+    }
+
+    #[tokio::test]
+    async fn migrates_without_manifest_and_keeps_identical_siblings_isolated() {
+        let root = tmp_project();
+        let pp = root.to_string_lossy().to_string();
+        for dir in ["entities", "concepts"] {
+            let parent = root.join("QM").join(dir);
+            std::fs::create_dir_all(&parent).unwrap();
+            std::fs::write(parent.join("重名.md"), "相同段落").unwrap();
+        }
+        std::fs::write(root.join("QM/entities/50%.md"), "证据").unwrap();
+        let old_row = |text: &str| {
+            vec![ChunkUpsertInput {
+                chunk_index: 0,
+                chunk_text: text.into(),
+                heading_path: String::new(),
+                embedding: fake_embedding(7, 16),
+            }]
+        };
+        do_vector_upsert_chunks(pp.clone(), "重名".into(), old_row("相同段落"))
+            .await
+            .unwrap();
+        do_vector_upsert_chunks(pp.clone(), "50%".into(), old_row("证据"))
+            .await
+            .unwrap();
+        do_vector_upsert_chunks(pp.clone(), "community:fixed".into(), old_row("群组"))
+            .await
+            .unwrap();
+        vector_prepare_page_ids(pp.clone()).await.unwrap();
+        let hits = vector_search_chunks(pp.clone(), fake_embedding(7, 16), 10)
+            .await
+            .unwrap();
+        assert!(hits.iter().any(|r| r.page_id == "wiki/entities/50%25"
+            && r.chunk_id == "wiki/entities/50%25#0"
+            && r.score == 1.0));
+        assert!(hits.iter().any(|r| r.page_id == "community:fixed"));
+        assert!(hits.iter().all(|r| !r.page_id.contains("重名")));
+        assert_eq!(do_vector_count_chunks(pp).await.unwrap(), 3);
+        assert!(!root.join(".qmai/embedding-index.json").exists());
+    }
+
+    #[tokio::test]
+    async fn page_only_project_searches_without_creating_a_chunk_table() {
+        let root = tmp_project();
+        let pp = root.to_string_lossy().to_string();
+        let folder = root.join("QM/chapters");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(folder.join("第一章.md"), "开场").unwrap();
+        let old = fake_embedding(11, 16);
+        do_vector_upsert(pp.clone(), "第一章".into(), old.clone()).await.unwrap();
+        let hits = vector_search_chunks(pp.clone(), old, 5).await.unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].page_id, "wiki/chapters/第一章");
+        assert_eq!(hits[0].score, 1.0);
+        assert!(!table_dir(&pp, TABLE_V2).exists());
+        assert!(!root.join(".qmai/embedding-index.json").exists());
     }
 
     #[tokio::test]

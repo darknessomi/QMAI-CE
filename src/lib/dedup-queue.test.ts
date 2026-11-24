@@ -304,7 +304,8 @@ describe("dedup-queue — pauseQueue / restoreQueue", () => {
   it("restoreQueue reverts processing tasks to pending so they re-run", async () => {
     const persisted = JSON.stringify([
       {
-        id: "dedup-old",
+        id: "dedup-interrupted",
+        autoResume: true,
         projectId: TEST_ID,
         group: { slugs: ["a", "b"], confidence: "high", reason: "x" },
         canonicalSlug: "a",

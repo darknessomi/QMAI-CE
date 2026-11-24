@@ -174,7 +174,7 @@ const readStoredSidebarNavConfig = (): SidebarNavConfig => {
  */
 export type CustomApiMode = "chat_completions" | "responses" | "anthropic_messages"
 export type AzureModelFamily = "auto" | "gpt5"
-export type ReasoningMode = "auto" | "off" | "low" | "medium" | "high" | "max" | "custom"
+export type ReasoningMode = "auto" | "off" | "low" | "medium" | "high" | "xhigh" | "max" | "custom"
 
 export interface ReasoningConfig {
   mode: ReasoningMode

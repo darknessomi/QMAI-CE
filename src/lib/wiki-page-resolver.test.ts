@@ -195,3 +195,12 @@ describe("resolveSourceName", () => {
     )
   })
 })
+
+it("opens relative, project-relative and anchored links to nested settings", () => {
+  const path = "/book/wiki/outlines/设定/北境.md"
+  const tree = [{ name: "北境.md", path, is_dir: false }]
+  for (const ref of ["[[outlines/设定/北境#地理|北境]]", "wiki/outlines/设定/北境", "QM/outlines/设定/北境.md"]) {
+    expect(resolveRelatedSlug(tree, ref, "/book/wiki")).toBe(path)
+  }
+  expect(resolveRelatedSlug(tree, "../北境", "/book/wiki")).toBeNull()
+})

@@ -1,3 +1,4 @@
+import { wikiEmbeddingPath } from "../embedding-page-id"
 import { searchWiki } from "@/lib/search"
 import { readFile } from "@/commands/fs"
 import { normalizePath } from "@/lib/path-utils"
@@ -205,28 +206,13 @@ async function runVectorSearch(
     const items: NovelSearchResult[] = []
     for (const vr of relevantResults) {
       try {
-        const dirs = ["entities", "concepts", "sources", "synthesis", "comparison", "queries"]
-        let content = ""
-        let foundPath = ""
-        for (const dir of dirs) {
-          const tryPath = `${pp}/wiki/${dir}/${vr.id}.md`
-          try {
-            content = await readFile(tryPath)
-            foundPath = tryPath
-            break
-          } catch {}
-        }
-        if (!foundPath) {
-          const tryPath = `${pp}/wiki/${vr.id}.md`
-          try {
-            content = await readFile(tryPath)
-            foundPath = tryPath
-          } catch {}
-        }
-        if (foundPath && content) {
+        const foundPath = wikiEmbeddingPath(pp, vr.id)
+        if (!foundPath) continue
+        const content = await readFile(foundPath)
+        if (content) {
           // 「选中（AI 不读取）」：检索命中也不能把被排除的内容当"参考资料"送进模型。
           if (isAiExcludedContent(content)) continue
-          const title = extractTitle(content, vr.id)
+          const title = extractTitle(content, foundPath.split("/").pop()!.slice(0, -3))
           const matchedSnippet = buildNovelVectorSnippet(vr)
           items.push({
             type: "vector",

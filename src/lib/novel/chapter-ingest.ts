@@ -1,3 +1,7 @@
+import { extractMemoryInParts, finishMemoryExtraction, type MemoryExtraction } from "./memory-extraction-parts"
+import { CHAPTER_BODY_EXCERPT_MAX_CHARS } from "./chapter-excerpts"
+import { resolveOutlineIngestIdentity } from "./outline-ingest-utils"
+import { wikiEmbeddingId } from "../embedding-page-id"
 import { normalizeChapterSnapshot, buildSourceHash } from "./snapshot-format"
 import { finishMemoryRefresh, markMemoryRefreshPending } from "./memory-refresh-status"
 export { buildSourceHash } from "./snapshot-format"
@@ -285,27 +289,31 @@ export async function ingestChapter(
     provider: runtimeLlmConfig.provider,
   })
   const existingSnapshotPromise = readCurrentSnapshot(pp, chapterNumber)
-  let extractedSnapshot: ChapterSnapshot | null
+  let extraction: MemoryExtraction
   try {
     // 先备好「已建立设定」：物品分类要判断归属（谁是主角/配角/反派）与有无意义
     // （对照已埋设伏笔），只看本章正文是判不准的。读取失败会退化成空串，
     // 提示词随之与改造前完全一致，绝不会因此中断摄取。
     const establishedContext = await buildEstablishedContextForExtraction(pp)
       .catch(() => "")
-    extractedSnapshot = await extractSnapshotWithLLM(
-      chapterNumber, body, runtimeLlmConfig, signal, establishedContext,
+    extraction = await extractSnapshotWithLLM(
+      pp, chapterNumber, body, runtimeLlmConfig, signal, establishedContext,
       (await loadMemoryCleanupPolicy(pp)).removed.filter((r) => r.chapterNumber === chapterNumber),
     )
   } catch (err) {
     return logFail("extract_failed", err instanceof Error ? err.message : String(err))
   }
-  const snapshot = extractedSnapshot ? canonicalizeSnapshotCharacters(extractedSnapshot) : null
+  const snapshot = canonicalizeSnapshotCharacters(extraction.snapshot)
 
   if (!snapshot) {
     return logFail("extract_failed", "模型没有返回快照")
   }
 
   return withMemoryWriteLock(pp, async () => {
+    if (signal?.aborted) return logFail("cancelled", "已取消")
+    if (extraction.checkpointPath && await readFile(chapterPath) !== content) {
+      return logFail("extract_failed", "提取期间章节已修改，请使用新稿重新提取")
+    }
     Object.assign(snapshot, filterRemovedMemories(snapshot, await loadMemoryCleanupPolicy(pp)))
     const existingSnapshot = await existingSnapshotPromise
     const isReingest = existingSnapshot != null
@@ -326,9 +334,9 @@ export async function ingestChapter(
       if (!embCfg.enabled || !embCfg.model) return
       try {
         const { embedPage } = await import("@/lib/embedding")
-        const pageId = chapterPath.split(/[/\\]/).pop()?.replace(/\.md$/, "") ?? ""
+        const pageId = wikiEmbeddingId(pp, chapterPath)
         if (!pageId) return
-        const title = typeof fm?.title === "string" ? fm.title : pageId
+        const title = typeof fm?.title === "string" ? fm.title : chapterPath.split(/[/\\]/).pop()!.slice(0, -3)
         await embedPage(pp, pageId, title, content, embCfg)
       } catch {
         console.warn("[Chapter Ingest] Embedding update failed, skipping")
@@ -339,6 +347,7 @@ export async function ingestChapter(
       source: { filePath: normalizePath(chapterPath).slice(pp.length + 1), sourceHash: buildSourceHash(content) },
       title: typeof fm.title === "string" ? fm.title : undefined,
     })
+    await finishMemoryExtraction(extraction.checkpointPath)
 
     try {
       const patchPath = `${pp}/.qmai/novel/chapter-ingest-output/${String(snapshot.chapterNumber).padStart(3, "0")}.wiki-patch.json`
@@ -426,6 +435,7 @@ function normalizeOutlineIngestError(err: unknown): Error {
 
 export interface OutlineIngestResult {
   snapshot: ChapterSnapshot | null
+  checkpointPath?: string
   truncated: boolean
   originalLength: number
   bodyLength: number
@@ -442,67 +452,57 @@ function buildOutlineIngestUserPrompt(body: string): string {
 }
 
 async function extractSnapshotWithLLM(
+  projectPath: string,
   chapterNumber: number,
   chapterBody: string,
   llmConfig: LlmConfig,
   signal?: AbortSignal,
   establishedContext = "",
   removed: MemoryRemoval[] = [],
-): Promise<ChapterSnapshot | null> {
-  const outputLang = getOutputLanguage()
-  const langReminder = buildLanguageReminder(outputLang)
-  const systemPrompt = buildChapterExtractSystemPrompt(langReminder)
-  const userPrompt = buildChapterExtractUserPrompt(chapterNumber, chapterBody, establishedContext, removed)
+): Promise<MemoryExtraction> {
+  const systemPrompt = buildChapterExtractSystemPrompt(buildLanguageReminder(getOutputLanguage()))
+  return extractNovelMemory({
+    projectPath, chapterNumber, chapterId: `chapter-${chapterNumber}`, content: chapterBody,
+    bodyBudget: CHAPTER_BODY_EXCERPT_MAX_CHARS, llmConfig, signal, systemPrompt,
+    prompt: body => buildChapterExtractUserPrompt(chapterNumber, body, establishedContext, removed),
+  })
+}
 
-  try {
-    const messages: ChatMessage[] = [
-      { role: "system", content: systemPrompt },
-      { role: "user", content: userPrompt },
-    ]
-
-    let result = ""
-    let streamError: Error | null = null
-    const callbacks: StreamCallbacks = {
-      onToken: (token: string) => {
-        result += token
-      },
-      onDone: () => {},
-      onError: (error: Error) => {
-        streamError = error
-      },
-    }
-
-    await streamChat(llmConfig, messages, callbacks, signal, {
-      ...CHAPTER_EXTRACT_REQUEST_OVERRIDES,
-      max_tokens: resolveChapterExtractMaxTokens(llmConfig.maxContextSize),
-    })
-    if (streamError) throw streamError
-    if (!result.trim()) {
-      throw new Error("章节快照提取失败：模型返回空内容（流结束但没有任何正文）")
-    }
-
-    const parsed = parseLlmJsonObject(result)
-    if (!parsed) {
-      throw new Error(
-        `章节快照提取失败：模型没有返回可解析的 JSON（${result.trim().length} chars） ${previewLlmOutput(result, 400)}`,
-      )
-    }
-    return normalizeChapterSnapshot({
-      ...parsed,
-      chapterId: parsed.chapterId || `chapter-${chapterNumber}`,
-      chapterNumber: chapterNumber, // 强制使用代码传入的章节号，不信任LLM输出
-      validationWarnings: [],
-      characterDetails: parsed.characterDetails || undefined,
-      locationDetails: parsed.locationDetails || undefined,
-      organizationDetails: parsed.organizationDetails || undefined,
-      itemDetails: parsed.itemDetails || undefined,
-      itemCategories: parsed.itemCategories || undefined,
-      eventDetails: parsed.eventDetails || undefined,
-    }, { chapterId: `chapter-${chapterNumber}`, chapterNumber })
-  } catch (err) {
-    console.error("[Chapter Ingest] Failed to extract snapshot:", err)
-    throw err
-  }
+async function extractNovelMemory(options: {
+  projectPath: string; chapterNumber: number; chapterId: string; content: string; bodyBudget: number
+  llmConfig: LlmConfig; signal?: AbortSignal; systemPrompt: string; prompt: (body: string) => string
+}): Promise<MemoryExtraction> {
+  const { llmConfig, chapterNumber, chapterId, systemPrompt, signal } = options
+  return extractMemoryInParts({
+    source: options.content, budget: options.bodyBudget, projectPath: options.projectPath, sourceKey: chapterId,
+    requestKey: JSON.stringify([llmConfig.provider, llmConfig.customEndpoint, llmConfig.model, systemPrompt, options.prompt("")]),
+    signal,
+    async extract(body, instructions) {
+      const messages: ChatMessage[] = [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: options.prompt(body) + instructions },
+      ]
+      let result = ""
+      let streamError: Error | null = null
+      const callbacks: StreamCallbacks = {
+        onToken: token => { result += token },
+        onDone: () => {},
+        onError: error => { streamError = error },
+      }
+      await streamChat(llmConfig, messages, callbacks, signal, {
+        ...CHAPTER_EXTRACT_REQUEST_OVERRIDES,
+        max_tokens: resolveChapterExtractMaxTokens(llmConfig.maxContextSize),
+      })
+      signal?.throwIfAborted()
+      if (streamError) throw streamError
+      if (!result.trim()) throw new Error("快照提取失败：模型返回空内容（流结束但没有任何正文）")
+      const parsed = parseLlmJsonObject(result)
+      if (!parsed) throw new Error(`快照提取失败：模型没有返回可解析的 JSON。${previewLlmOutput(result, 400)}`)
+      const snapshot = normalizeChapterSnapshot({ ...parsed, chapterNumber, chapterId, validationWarnings: [] })
+      if (!snapshot) throw new Error("模型返回的快照格式无效")
+      return snapshot
+    },
+  })
 }
 
 function snapshotToMarkdown(snapshot: ChapterSnapshot): string {
@@ -682,6 +682,7 @@ interface SyncSnapshotToMemoryOptions {
   deferDerivedRebuild?: boolean
   source?: ChapterSource
   title?: string
+  outlineExtraction?: { filePath: string; checkpointPath: string }
 }
 
 export async function syncSnapshotToMemory(
@@ -698,9 +699,17 @@ async function syncSnapshotToMemoryUnlocked(
   options?: SyncSnapshotToMemoryOptions,
 ): Promise<SyncSnapshotToMemoryResult> {
   const pp = normalizePath(projectPath)
+  const pending = options?.outlineExtraction
+  if (pending && snapshot.sourceHash !== buildSourceHash(await readFile(pending.filePath))) {
+    throw new Error("提取期间大纲已修改，请使用新稿重新提取")
+  }
   const filtered = filterRemovedMemories(snapshot, await loadMemoryCleanupPolicy(pp))
   Object.assign(snapshot, filtered)
   const currentSnapshot = await readCurrentSnapshot(pp, snapshot.chapterNumber)
+  if (snapshot.chapterNumber < 0 && currentSnapshot?.chapterId.startsWith("outline-path:")
+    && currentSnapshot.chapterId !== snapshot.chapterId) {
+    throw new Error("该编号已属于另一份大纲，原快照已保留")
+  }
   const memorySyncedAt = new Date().toISOString()
   const normalizedSnapshot = normalizeChapterSnapshot(
     { ...snapshot, chapterTitle: options?.title || snapshot.chapterTitle,
@@ -758,6 +767,7 @@ async function syncSnapshotToMemoryUnlocked(
     useWikiStore.getState().bumpDataVersion()
   }
 
+  await finishMemoryExtraction(pending?.checkpointPath)
   return { writtenEntityPaths, memoryPagePaths, memorySyncedAt }
 }
 
@@ -1152,79 +1162,43 @@ export async function ingestOutline(
   const systemPrompt = buildOutlineExtractSystemPrompt(langReminder)
   const promptOverhead = systemPrompt.length + buildOutlineIngestUserPrompt("").length
   const bodyBudget = computeOutlineIngestBodyBudget(runtimeLlmConfig.maxContextSize, promptOverhead)
-  const truncated = content.length > bodyBudget
-  const body = truncated ? content.slice(0, bodyBudget) : content
 
-  // 从文件路径提取大纲名称作为标题
-  const normalizedOutlinePath = normalizePath(outlinePath)
-  const fileName = normalizedOutlinePath.split("/").pop() ?? "outline"
-  const outlineName = fileName.replace(/\.\w+$/, "") // 去掉扩展名，如 "总大纲"、"人物小传"
+  const { outlineName, chapterNumber: outlineNumber, sourceKey } = await resolveOutlineIngestIdentity(pp, outlinePath)
+  const chapterId = `outline-path:${sourceKey}`
 
-  // 根据文件名生成唯一的负数 chapterNumber（不同大纲不会互相覆盖）
-  // 使用文件名的简单哈希生成 1-999 范围的数字
-  let hash = 0
-  for (let i = 0; i < outlineName.length; i++) {
-    hash = ((hash << 5) - hash + outlineName.charCodeAt(i)) | 0
-  }
-  const outlineNumber = -(Math.abs(hash % 999) + 1) // -1 到 -999
-  const chapterId = `outline-${outlineName}`
-
-  const userPrompt = buildOutlineIngestUserPrompt(body) + buildMemoryCleanupExclusions(
-    (await loadMemoryCleanupPolicy(pp)).removed.filter((r) => r.chapterNumber === outlineNumber),
+  const exclusions = buildMemoryCleanupExclusions(
+    (await loadMemoryCleanupPolicy(pp)).removed.filter(r => r.chapterNumber === outlineNumber),
   )
-
   try {
-    const messages: ChatMessage[] = [
-      { role: "system", content: systemPrompt },
-      { role: "user", content: userPrompt },
-    ]
-
-    let result = ""
-    let streamError: Error | null = null
-    const callbacks: StreamCallbacks = {
-      onToken: (token: string) => { result += token },
-      onDone: () => {},
-      onError: (error: Error) => { streamError = error },
-    }
-
-    await streamChat(runtimeLlmConfig, messages, callbacks, signal, {
-      ...CHAPTER_EXTRACT_REQUEST_OVERRIDES,
-      max_tokens: resolveChapterExtractMaxTokens(runtimeLlmConfig.maxContextSize),
+    const { snapshot, checkpointPath } = await extractNovelMemory({
+      projectPath: pp, chapterId, chapterNumber: outlineNumber, content, bodyBudget,
+      llmConfig: runtimeLlmConfig, signal, systemPrompt,
+      prompt: body => buildOutlineIngestUserPrompt(body) + exclusions,
     })
-    if (streamError) throw streamError
-
-    const parsed = parseLlmJsonObject(result)
-    if (!parsed) {
-      throw new Error("大纲摄取失败：模型没有返回可解析的 JSON")
-    }
-    const snapshot = normalizeChapterSnapshot({
-      ...parsed,
-      chapterId,
-      chapterNumber: outlineNumber,
-      chapterTitle: outlineName,
-      validationWarnings: [],
-    }, { chapterId, chapterNumber: outlineNumber })
-    if (!snapshot) {
-      throw new Error("Outline snapshot payload is invalid.")
-    }
+    snapshot.chapterTitle = outlineName
+    if (checkpointPath) snapshot.sourceHash = buildSourceHash(content)
+    signal?.throwIfAborted()
 
     if (options?.skipSync) {
       return {
         snapshot,
-        truncated,
+        checkpointPath,
+        truncated: false,
         originalLength,
-        bodyLength: body.length,
+        bodyLength: originalLength,
         bodyBudget,
         failureReason: null,
       }
     }
 
-    const syncResult = await syncSnapshotToMemory(pp, snapshot)
+    const syncResult = await syncSnapshotToMemory(pp, snapshot, {
+      outlineExtraction: checkpointPath ? { filePath: outlinePath, checkpointPath } : undefined,
+    })
     return {
       snapshot: { ...snapshot, memorySyncedAt: syncResult.memorySyncedAt },
-      truncated,
+      truncated: false,
       originalLength,
-      bodyLength: body.length,
+      bodyLength: originalLength,
       bodyBudget,
       failureReason: null,
     }

@@ -9,7 +9,7 @@ import { saveEmbeddingConfig, saveRerankConfig } from "@/lib/project-store"
 import { flushAppState } from "@/lib/web-store"
 import { fetchEmbeddingModelList, fetchRerankModelList } from "@/lib/settings-model-list"
 import { testSettingsEmbeddingModel, testSettingsRerankModel } from "@/lib/settings-model-test"
-import { embedAllPages } from "@/lib/embedding"
+import { dropLegacyVectorTable, embedAllPages, getEmbeddingCount, legacyVectorRowCount } from "@/lib/embedding"
 import { mountModel, changeInput, click, button, deferred } from "./model-test-utils"
 vi.mock("@/lib/project-store", () => ({ saveEmbeddingConfig: vi.fn(), saveRerankConfig: vi.fn() }))
 vi.mock("@/lib/web-store", () => ({ flushAppState: vi.fn() }))
@@ -61,6 +61,18 @@ it("向量测试失败脱敏、不保存，旧请求不能覆盖新输入", asyn
   expect(host.textContent).toContain("认证失败")
   expect(host.textContent).not.toContain("fake-vector-key")
   expect(saveEmbeddingConfig).not.toHaveBeenCalled()
+})
+it.each([0, 4])("文本块为 %i 时仍显示旧版按页索引和删除的实际影响", async (chunks) => {
+  vi.mocked(getEmbeddingCount).mockResolvedValueOnce(chunks)
+  vi.mocked(legacyVectorRowCount).mockResolvedValueOnce(3)
+  await render()
+  expect(host.textContent).toContain(`${chunks} 个文本块`)
+  expect(host.textContent).toContain("旧版按页向量共 3 条。能匹配到唯一页面的记录会继续参与检索。")
+  expect(embedAllPages).not.toHaveBeenCalled()
+  vi.spyOn(window, "confirm").mockReturnValueOnce(false)
+  await click(host, "删除升级前的按页向量表")
+  expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining("只保存在这张表里的向量将无法检索"))
+  expect(dropLegacyVectorTable).not.toHaveBeenCalled()
 })
 it("索引运行时不能更改启用状态或保存新配置", async () => {
   const pending = deferred<number>()

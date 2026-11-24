@@ -4,21 +4,21 @@
  * functions; everything below is about read/write/spawn-llm so
  * the algorithm core stays testable without mocks of all that.
  */
-import { listDirectory, readFile, writeFile, deleteFile } from "@/commands/fs"
+import { listDirectory, readFile, writeFileAtomic, deleteFile, fileExists } from "@/commands/fs"
 import { streamChat } from "@/lib/llm-client"
 import { normalizePath } from "@/lib/path-utils"
-import type { LlmConfig } from "@/stores/wiki-store"
+import { useWikiStore, type EmbeddingConfig, type LlmConfig } from "@/stores/wiki-store"
 import type { FileNode } from "@/types/wiki"
 import {
   detectDuplicateGroups,
   extractEntitySummary,
   mergeDuplicateGroup,
-  rewriteIndexMd,
   type DedupLlmCall,
   type DuplicateGroup,
   type EntitySummary,
   type MergeResult,
 } from "./dedup"
+import { buildDetectionBatches, checkDedupSignal } from "./dedup-candidates"
 import { loadNotDuplicates } from "./dedup-storage"
 
 const WIKI_READ_CONCURRENCY = 12
@@ -40,6 +40,7 @@ interface ExecuteMergeOptions {
 interface RunDuplicateDetectionOptions {
   signal?: AbortSignal
   summaries?: EntitySummary[]
+  embeddingConfig?: EmbeddingConfig | null
   onProgress?: (stage: DedupScanStage) => void
   onLog?: DedupLogFn
 }
@@ -53,6 +54,7 @@ function describeLlm(llmConfig: LlmConfig): string {
 interface DuplicateDetectionResult {
   groups: DuplicateGroup[]
   scannedPageCount: number
+  coverage?: string
 }
 
 /**
@@ -105,9 +107,11 @@ async function runWithConcurrency<T>(
     }
   }
 
-  await Promise.all(
+  // Wait for all in-flight writes before propagating an error to the rollback.
+  const settled = await Promise.allSettled(
     Array.from({ length: Math.min(limit, items.length) }, () => worker()),
   )
+  for (const result of settled) if (result.status === "rejected") throw result.reason
 }
 
 /**
@@ -115,34 +119,26 @@ async function runWithConcurrency<T>(
  * the dedup module expects. Same pattern page-merge uses — keeps
  * the algorithm modules free of any LlmConfig knowledge.
  */
-function buildDedupLlmCall(llmConfig: LlmConfig): DedupLlmCall {
+function buildDedupLlmCall(llmConfig: LlmConfig, maxTokens: number): DedupLlmCall {
   return async (systemPrompt, userMessage, signal) => {
     let result = ""
     let streamError: Error | null = null
-    await new Promise<void>((resolve) => {
-      streamChat(
-        llmConfig,
-        [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userMessage },
-        ],
-        {
-          onToken: (t) => {
-            result += t
-          },
-          onDone: () => resolve(),
-          onError: (err) => {
-            streamError = err
-            resolve()
-          },
-        },
-        signal,
-        { temperature: 0.1 },
-      ).catch((err) => {
-        streamError = err instanceof Error ? err : new Error(String(err))
-        resolve()
-      })
-    })
+    checkDedupSignal(signal)
+    await streamChat(
+      llmConfig,
+      [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userMessage },
+      ],
+      {
+        onToken: (token) => { result += token },
+        onDone: () => {},
+        onError: (error) => { streamError = error },
+      },
+      signal,
+      { temperature: 0.1, max_tokens: maxTokens, reasoning: { mode: "off" }, skipUserMemory: true },
+    )
+    checkDedupSignal(signal)
     if (streamError) throw streamError
     return result
   }
@@ -170,6 +166,18 @@ function toWikiRelative(projectPath: string, absPath: string): string {
   return norm
 }
 
+async function listEntityNodes(projectPath: string): Promise<FileNode[]> {
+  const tree = await listDirectory(projectPath)
+  return [...walkMd(tree, "wiki/entities"), ...walkMd(tree, "wiki/concepts")]
+}
+
+/** Re-check stale result cards without reading or modifying a page body. */
+export async function missingDedupSlugs(projectPath: string, slugs: string[]): Promise<string[]> {
+  const nodes = await listEntityNodes(normalizePath(projectPath))
+  const names = new Set(nodes.map((node) => node.name))
+  return slugs.filter((slug) => !names.has(slug + ".md"))
+}
+
 /**
  * Walk wiki/entities/ and wiki/concepts/, build summaries.
  * Pages that fail to parse (no frontmatter, etc.) are skipped
@@ -177,20 +185,21 @@ function toWikiRelative(projectPath: string, absPath: string): string {
  */
 export async function loadAllEntitySummaries(
   projectPath: string,
+  onSkipped?: () => void,
+  signal?: AbortSignal,
 ): Promise<EntitySummary[]> {
   const pp = normalizePath(projectPath)
-  const tree = await listDirectory(pp)
-  const nodes: FileNode[] = []
-  for (const prefix of ["wiki/entities", "wiki/concepts"]) {
-    nodes.push(...walkMd(tree, prefix))
-  }
-
+  const nodes = await listEntityNodes(pp)
   return mapWithConcurrency(nodes, WIKI_READ_CONCURRENCY, async (node) => {
+    checkDedupSignal(signal)
     try {
       const content = await readFile(node.path)
       const rel = toWikiRelative(pp, node.path)
-      return extractEntitySummary(rel, content)
+      const summary = extractEntitySummary(rel, content)
+      if (!summary) onSkipped?.()
+      return summary
     } catch {
+      onSkipped?.()
       return null
     }
   })
@@ -200,6 +209,7 @@ export async function loadAllEntitySummaries(
  *  the wiki-relative form callers downstream use. */
 export async function loadAllWikiPages(
   projectPath: string,
+  requireReadable = false,
 ): Promise<{ path: string; content: string }[]> {
   const pp = normalizePath(projectPath)
   const tree = await listDirectory(pp)
@@ -210,6 +220,7 @@ export async function loadAllWikiPages(
       const content = await readFile(node.path)
       return { path: toWikiRelative(pp, node.path), content }
     } catch {
+      if (requireReadable) throw new Error(`无法读取文档，不能确认合并引用：${node.path}`)
       return null
     }
   })
@@ -227,15 +238,18 @@ export async function runDuplicateDetection(
 ): Promise<DuplicateDetectionResult> {
   const log = options.onLog
   log?.(`开始扫描，模型：${describeLlm(llmConfig)}`)
+  checkDedupSignal(options.signal)
   options.onProgress?.("loading")
   log?.("正在读取实体 / 概念页面…")
-  const summaries =
-    options.summaries ?? (await loadAllEntitySummaries(projectPath))
+  let skipped = 0
+  const summaries = options.summaries ?? await loadAllEntitySummaries(projectPath, () => { skipped++ }, options.signal)
+  checkDedupSignal(options.signal)
+  const skippedNote = skipped ? `；另有 ${skipped} 页无法读取或缺少元数据，未参与检测` : ""
   log?.(`已读取 ${summaries.length} 个实体 / 概念页面`)
 
   if (summaries.length < 2) {
     log?.("页面不足 2 个，跳过模型检测")
-    return { groups: [], scannedPageCount: summaries.length }
+    return { groups: [], scannedPageCount: summaries.length, ...(skippedNote ? { coverage: skippedNote.slice(1) } : {}) }
   }
 
   options.onProgress?.("detecting")
@@ -243,14 +257,37 @@ export async function runDuplicateDetection(
   if (notDup.length > 0) {
     log?.(`已加载 ${notDup.length} 组「非重复」白名单`)
   }
-  log?.("正在调用模型分析重复候选…")
-  const llm = buildDedupLlmCall(llmConfig)
-  const groups = await detectDuplicateGroups(summaries, llm, {
-    signal: options.signal,
-    notDuplicates: notDup,
+  const llm = buildDedupLlmCall(llmConfig, 8192)
+  const config = options.embeddingConfig === undefined ? useWikiStore.getState().embeddingConfig : options.embeddingConfig
+  const ordered = [...summaries].sort((a, b) => a.path.localeCompare(b.path))
+  const { batches, coverage } = await buildDetectionBatches(projectPath, ordered, config, notDup, log ?? (() => {}), options.signal)
+  const unique = new Map<string, DuplicateGroup>()
+  for (const [i, batch] of batches.entries()) {
+    checkDedupSignal(options.signal)
+    log?.(`正在复核第 ${i + 1}/${batches.length} 批，共 ${batch.length} 页`)
+    const groups = await detectDuplicateGroups(batch, llm, { signal: options.signal, notDuplicates: notDup })
+    for (const group of groups) {
+      const key = JSON.stringify([...group.slugs].sort())
+      if (!unique.has(key)) unique.set(key, group)
+    }
+  }
+  checkDedupSignal(options.signal)
+  log?.(`模型分析完成，得到 ${unique.size} 组重复候选`)
+  return { groups: [...unique.values()], scannedPageCount: summaries.length, coverage: `${coverage}，模型复核 ${batches.length} 批${skippedNote}` }
+}
+
+/** Resolve only entity/concept documents. The saved group format identifies members by slug. */
+export function resolveDedupPages<T extends { path: string }>(pages: T[], slugs: string[]): (T & { slug: string })[] {
+  if (slugs.length < 2 || new Set(slugs).size !== slugs.length) throw new Error("候选组缺少两个不同的条目")
+  return slugs.map((slug) => {
+    const matches = pages.filter((page) =>
+      /^(wiki|QM)\/(entities|concepts)\//.test(page.path) && page.path.split("/").pop() === slug + ".md",
+    )
+    if (matches.length !== 1) throw new Error(matches.length
+      ? `实体或概念目录中有多份同名条目「${slug}」，无法确定合并对象`
+      : `未找到实体或概念条目「${slug}」，请重新扫描`)
+    return { ...matches[0], slug }
   })
-  log?.(`模型分析完成，得到 ${groups.length} 组重复候选`)
-  return { groups, scannedPageCount: summaries.length }
 }
 
 /**
@@ -265,9 +302,6 @@ export async function runDuplicateDetection(
  *   4. Write canonical content
  *   5. Apply cross-reference rewrites
  *   6. Delete merged-away files
- *   7. Apply index.md rewrite (separate pass — index isn't in
- *      otherWikiPages because removing references is a different
- *      operation than slug-rewriting them)
  */
 export async function executeMerge(
   projectPath: string,
@@ -286,34 +320,15 @@ export async function executeMerge(
   // 1. Resolve each group slug to its actual on-disk path + content
   onProgress?.("loading")
   log?.("正在读取 wiki 页面…")
-  const allPages = await loadAllWikiPages(pp)
+  const allPages = await loadAllWikiPages(pp, true)
   log?.(`已读取 ${allPages.length} 个 wiki 页面`)
-  const pathBySlug = new Map<string, string>()
-  for (const p of allPages) {
-    const base = p.path.split("/").pop() ?? ""
-    if (base.endsWith(".md")) {
-      pathBySlug.set(base.slice(0, -3), p.path)
-    }
-  }
-  const groupPages: { slug: string; path: string; content: string }[] = []
-  for (const slug of group.slugs) {
-    const relPath = pathBySlug.get(slug)
-    if (!relPath) {
-      throw new Error(
-        `Slug "${slug}" not found on disk — was the page deleted between detection and merge?`,
-      )
-    }
-    const page = allPages.find((p) => p.path === relPath)
-    if (!page) {
-      throw new Error(`Internal: page lookup miss for ${relPath}`)
-    }
-    groupPages.push({ slug, path: relPath, content: page.content })
-  }
+  const groupPages = resolveDedupPages(allPages, group.slugs)
+  checkDedupSignal(signal)
 
   const groupPaths = new Set(groupPages.map((p) => p.path))
-  const otherPages = allPages.filter((p) => !groupPaths.has(p.path))
+  const otherPages = allPages.filter((page) => !groupPaths.has(page.path))
 
-  const llm = buildDedupLlmCall(llmConfig)
+  const llm = buildDedupLlmCall(llmConfig, 16_384)
   onProgress?.("merging")
   log?.("正在调用模型合并正文…")
   const result = await mergeDuplicateGroup(
@@ -327,6 +342,7 @@ export async function executeMerge(
   )
   log?.("模型正文合并完成")
 
+  checkDedupSignal(signal)
   onProgress?.("writing")
   log?.("正在写入备份与文件…")
 
@@ -336,49 +352,48 @@ export async function executeMerge(
   const stamp = new Date().toISOString().replace(/[:.]/g, "-")
   const backupDir = `${pp}/.qmai/page-history/dedup-${stamp}`
   await runWithConcurrency(result.backup, WIKI_WRITE_CONCURRENCY, async (b) => {
-    const sanitized = b.path.replace(/[/\\]/g, "_")
-    await writeFile(`${backupDir}/${sanitized}`, b.content)
+    if (await readFile(`${pp}/${b.path}`) !== b.content) {
+      throw new Error(`模型生成期间文件已变更，请重新扫描后再合并：${b.path}`)
+    }
+    await writeFileAtomic(`${backupDir}/${b.path}`, b.content)
   })
   log?.(`已备份 ${result.backup.length} 个文件 → ${backupDir}`)
 
-  // 3. Write canonical
-  await writeFile(`${pp}/${result.canonicalPath}`, result.canonicalContent)
-  log?.(`已写入主条目 ${result.canonicalPath}`)
-
-  // 4. Apply rewrites
-  await runWithConcurrency(result.rewrites, WIKI_WRITE_CONCURRENCY, async (r) => {
-    await writeFile(`${pp}/${r.path}`, r.newContent)
-  })
-  if (result.rewrites.length > 0) {
-    log?.(`已改写 ${result.rewrites.length} 个交叉引用页面`)
+  checkDedupSignal(signal)
+  const originals = new Map(result.backup.map((b) => [b.path, b.content]))
+  const applied = new Map<string, string | null>()
+  const verifyOriginal = async (path: string) => {
+    if (await readFile(`${pp}/${path}`) !== originals.get(path)) {
+      throw new Error(`文件已变更，请重新扫描后再合并：${path}`)
+    }
   }
-
-  // 5. Delete merged-away pages
-  await runWithConcurrency(result.pagesToDelete, WIKI_WRITE_CONCURRENCY, async (dead) => {
+  try {
+    const writes = [{ path: result.canonicalPath, newContent: result.canonicalContent }, ...result.rewrites]
+    await runWithConcurrency(writes, WIKI_WRITE_CONCURRENCY, async ({ path, newContent }) => {
+      checkDedupSignal(signal)
+      await verifyOriginal(path)
+      await writeFileAtomic(`${pp}/${path}`, newContent)
+      applied.set(path, newContent)
+    })
+    await runWithConcurrency(result.pagesToDelete, WIKI_WRITE_CONCURRENCY, async (path) => {
+      checkDedupSignal(signal)
+      await verifyOriginal(path)
+      await deleteFile(`${pp}/${path}`)
+      applied.set(path, null)
+    })
+    log?.(`已写入主条目，更新 ${result.rewrites.length} 个引用文件，移除 ${result.pagesToDelete.length} 个已合并页面`)
+  } catch (error) {
+    // 仅撤回本次成功写入且仍匹配的状态，保留随后发生的外部编辑。
     try {
-      await deleteFile(`${pp}/${dead}`)
-    } catch (err) {
-      // Surface as a warning — backup is still safe.
-      console.warn(`[dedup] failed to delete ${dead}: ${err}`)
-      log?.(`删除失败（已有备份）：${dead}`)
+      await runWithConcurrency([...applied], WIKI_WRITE_CONCURRENCY, async ([path, value]) => {
+        const absPath = `${pp}/${path}`
+        const current = await fileExists(absPath) ? await readFile(absPath) : null
+        if (current === value) await writeFileAtomic(absPath, originals.get(path)!)
+      })
+    } catch {
+      throw new Error(`合并中断，有文件未能恢复，原文件备份位于 ${backupDir}`)
     }
-  })
-  if (result.pagesToDelete.length > 0) {
-    log?.(`已删除 ${result.pagesToDelete.length} 个合并掉的页面`)
-  }
-
-  // 6. Rewrite index.md to drop merged-away entries.
-  const indexPath = `${pp}/wiki/index.md`
-  const indexEntry = allPages.find((p) => p.path === "wiki/index.md")
-  if (indexEntry) {
-    const removed = new Set(
-      group.slugs.filter((s) => s !== canonicalSlug),
-    )
-    const rewritten = rewriteIndexMd(indexEntry.content, removed)
-    if (rewritten !== indexEntry.content) {
-      await writeFile(indexPath, rewritten)
-      log?.("已更新 wiki/index.md")
-    }
+    throw error
   }
 
   log?.("合并完成")

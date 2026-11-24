@@ -1,3 +1,4 @@
+import { parseFrontmatter } from "./frontmatter"
 import { describe, it, expect, vi } from "vitest"
 import {
   extractEntitySummary,
@@ -8,23 +9,6 @@ import {
   type EntitySummary,
 } from "./dedup"
 import { parseFrontmatterArray } from "./sources-merge"
-
-// ──────────────────────────────────────────────────────────────────
-// Maintenance note — why two suites drive the public API.
-//
-// Commit 01aab5f ("refactor(cleanup): 收口测试专用旧模块和未使用导出")
-// removed the `export` keyword from parseDetectorResponse() and
-// rewriteCrossReferences() in ./dedup. Neither function was deleted:
-// both are still present, byte-for-byte semantically unchanged, as
-// private helpers of detectDuplicateGroups() and mergeDuplicateGroup().
-// Only the public export — which existed solely for unit tests — was
-// withdrawn. Production code must not be edited to re-export them, so
-// the two suites below exercise the exact same code paths through the
-// public entry points: detectDuplicateGroups() hands the raw LLM
-// response straight to parseDetectorResponse(), and mergeDuplicateGroup()
-// feeds every otherWikiPages entry through rewriteCrossReferences().
-// Every original case, assertion and intent is preserved.
-// ──────────────────────────────────────────────────────────────────
 
 const PAGE = (fm: string, body: string) => `---\n${fm}\n---\n\n${body}`
 
@@ -141,14 +125,14 @@ describe("parseDetectorResponse", () => {
     expect((await parseVia(raw, ["a", "b"]))[0].confidence).toBe("low")
   })
 
-  it("returns [] for malformed JSON", async () => {
-    expect(await parseVia("not json at all", ["a", "b"])).toEqual([])
-    expect(await parseVia('{"groups": [unclosed', ["a", "b"])).toEqual([])
-    expect(await parseVia("", ["a", "b"])).toEqual([])
+  it("reports an incomplete scan for malformed JSON", async () => {
+    await expect(parseVia("not json at all", ["a", "b"])).rejects.toThrow("本次扫描未完成")
+    await expect(parseVia('{"groups": [unclosed', ["a", "b"])).rejects.toThrow("本次扫描未完成")
+    await expect(parseVia("", ["a", "b"])).rejects.toThrow("本次扫描未完成")
   })
 
-  it("returns [] when the JSON object has no groups field", async () => {
-    expect(await parseVia('{"other_field": []}', ["a", "b"])).toEqual([])
+  it("reports an incomplete scan when the JSON object has no groups field", async () => {
+    await expect(parseVia('{"other_field": []}', ["a", "b"])).rejects.toThrow("本次扫描未完成")
   })
 
   it("survives quoted braces inside reason strings", async () => {
@@ -613,5 +597,70 @@ describe("mergeDuplicateGroup", () => {
     // The backup content is the ORIGINAL, not the post-merge version
     const refBackup = result.backup.find((b) => b.path === "wiki/concepts/ref.md")
     expect(refBackup?.content).toBe(refOrig)
+  })
+})
+
+describe("mergeDuplicateGroup 按路径更新引用", () => {
+  const canonical = { slug: "新名", path: "wiki/concepts/新名.md", content: PAGE("type: concept", "新页") }
+  const removed = {
+    slug: "旧名", path: "wiki/entities/北境/旧名.md",
+    content: PAGE('type: entity\nrelated: ["[[QM/entities/北境/旧名.md#头衔|尊称]]", "旧名"]', "旧页"),
+  }
+  const oldPath = "entities/北境/旧名"
+  const newPath = "concepts/新名"
+  const ambiguous = [
+    { path: "wiki/chapters/旧名.md", content: "同名章节" },
+    { path: "wiki/chapters/新名.md", content: "同名章节" },
+  ]
+  async function merge(other: {path: string; content: string}[], body: string) {
+    return mergeDuplicateGroup({ group: [canonical, removed], canonicalSlug: "新名", otherWikiPages: other },
+      vi.fn().mockResolvedValue(PAGE("type: concept", body)))
+  }
+
+  it("跨目录重定向正文和模型生成的主条目，保留后缀、代码及歧义引用", async () => {
+    const body = (path: string) => [
+      `[[${path}#头衔|尊称]] [[QM/${path}.md|显示]] [[./wiki/${path}.md#章节]]`,
+      "[[旧名]] [[chapters/旧名]] [[entities/旧名]] [[../entities/北境/旧名]]",
+      "`[[entities/北境/旧名]]`",
+      '~~~md\n[[entities/北境/旧名]]\n~~~',
+    ].join("\n")
+    const ref = PAGE('type: note\nrelated:\n  - "wiki/entities/北境/旧名.md#头衔"\n  - "[[entities/北境/旧名|旧称]]"\n  - "chapters/旧名"\n  - 旧名\nsources: ["[[entities/北境/旧名]]"]', body(oldPath))
+    const result = await merge([...ambiguous, { path: "wiki/notes/引文.md", content: ref }], body(oldPath))
+    expect(result.pagesToDelete).toEqual([removed.path])
+    expect(result.rewrites).toHaveLength(1)
+    const revised = result.rewrites[0].newContent
+    expect(revised).toContain(body(newPath))
+    expect(parseFrontmatter(revised).frontmatter).toMatchObject({
+      related: ["wiki/concepts/新名.md#头衔", "[[concepts/新名|旧称]]", "chapters/旧名", "旧名"],
+      sources: ["[[entities/北境/旧名]]"],
+    })
+    expect(result.canonicalContent).toContain(body(newPath))
+    expect(parseFrontmatter(result.canonicalContent).frontmatter?.related).toEqual(["[[QM/concepts/新名.md#头衔|尊称]]", "旧名"])
+  })
+
+  it.each(["related: [[entities/北境/旧名#头衔|旧称]]", "related:\n  - [[entities/北境/旧名#头衔|旧称]]"])("旧版 YAML 无引号双链 %s", async field => {
+    const result = await merge([{ path: "wiki/notes/说明.md", content: PAGE(field + "\ntitle: 说明", "正文") }], "正文")
+    expect(parseFrontmatter(result.rewrites[0].newContent).frontmatter).toEqual({
+      related: ["[[concepts/新名#头衔|旧称]]"], title: "说明",
+    })
+  })
+
+  it("唯一旧名指向有重名的主条目时补全路径", async () => {
+    const result = await merge([ambiguous[1]], "[[旧名#身份|本名]]")
+    expect(result.canonicalContent).toContain("[[concepts/新名#身份|本名]]")
+  })
+
+  it.each(["wiki/index.md", "QM/index.md"])("%s 识别独立旧条目，混合行保留其他引用", async (path) => {
+    const index = [
+      '# 索引', '- [旧条目](<QM/entities/北境/旧名.md#头衔>)', '- wiki/entities/北境/旧名.md',
+      '- [[旧名]]', '- [[entities/北境/旧名#身世|旧名]] 和 [章节](chapters/旧名.md)',
+      '接续 [入口](<./wiki/entities/北境/旧名.md#位置> "提示")。', '- [外站](https://example.org/旧名.md)',
+      '`[[entities/北境/旧名]]`',
+    ]
+    const result = await merge([...ambiguous, { path, content: index.join("\n") }], "正文")
+    expect(result.rewrites).toEqual([{ path, newContent: [
+      index[0], index[3], '- [[concepts/新名#身世|旧名]] 和 [章节](chapters/旧名.md)',
+      '接续 [入口](<./wiki/concepts/新名.md#位置> "提示")。', index[6], index[7],
+    ].join("\n") }])
   })
 })

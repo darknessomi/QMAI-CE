@@ -9,6 +9,8 @@ import {
   normalizeUserLlmContextSize,
   normalizeUserLlmMaxOutputTokens,
 } from "@/lib/llm-context-size"
+import { OPENAI_OFFICIAL_MAX_OUTPUT_TOKENS, openAiCapabilities, openAiReasoningMode, requiresOpenAiResponses } from "./openai-model-capabilities"
+import type { ResponseOutputItem } from "./openai-responses-stream"
 import { RESPONSE_RESERVE_FRAC } from "./context-budget"
 import type { LlmUsage } from "./llm-usage"
 import { isThoughtDumpText } from "./thought-dump"
@@ -108,6 +110,7 @@ export interface ChatMessage {
    * `extractOllamaImages` below.
    */
   content: string | ContentBlock[]
+  responsesOutput?: ResponseOutputItem[]
   tool_calls?: ToolCall[]
   tool_call_id?: string
   name?: string
@@ -156,6 +159,7 @@ export interface RequestOverrides {
  * 解析 SSE 的函数。由 `getProviderConfig()` / `resolveProviderConfig()` 返回。
  */
 export interface ProviderConfig {
+  responsesWire?: boolean
   url: string
   headers: Record<string, string>
   buildBody: (messages: ChatMessage[], overrides?: RequestOverrides) => unknown
@@ -289,7 +293,12 @@ export function parseOpenAiSseError(line: string): string | null {
   const data = line.startsWith("data: ") ? line.slice(6).trim() : line.trim()
   if (!data || data === "[DONE]") return null
   try {
-    const parsed = JSON.parse(data) as { error?: { message?: string } | string }
+    const parsed = JSON.parse(data) as {
+      type?: string; message?: string; error?: { message?: string } | string
+      response?: { error?: { message?: string } }
+    }
+    if (parsed?.type === "response.failed") return parsed.response?.error?.message || "模型未能完成此次响应"
+    if (parsed?.type === "error" && parsed.message) return parsed.message
     if (typeof parsed.error === "string" && parsed.error.trim()) return parsed.error.trim()
     if (parsed.error && typeof parsed.error === "object") {
       const message = parsed.error.message?.trim()
@@ -668,11 +677,23 @@ function buildOpenAiBody(
   return body
 }
 
-function toResponsesContent(content: string | ContentBlock[]): unknown {
+function responsesRequest(config: LlmConfig, url: string, headers: Record<string, string>): ProviderConfig {
+  return {
+    url,
+    headers,
+    responsesWire: true,
+    buildBody: (messages, overrides) => buildResponsesBody(config, messages, overrides),
+    parseStream: parseResponsesLine,
+    parseUsage: parseResponsesUsage,
+    parseFinishReason: parseResponsesFinishReason,
+  }
+}
+
+function toResponsesContent(content: string | ContentBlock[], assistant = false): unknown {
   if (typeof content === "string") return content
   return content.map((block) => {
     if (block.type === "text") {
-      return { type: "input_text", text: block.text }
+      return { type: assistant ? "output_text" : "input_text", text: block.text }
     }
     return {
       type: "input_image",
@@ -691,20 +712,44 @@ function buildResponsesBody(
     : messages
   const body: Record<string, unknown> = {
     model: config.model,
-    input: wiredMessages.map((message) => ({
-      role: message.role,
-      content: toResponsesContent(message.content),
-    })),
+    input: wiredMessages.flatMap((message): unknown[] => {
+      if (message.role === "tool") {
+        return [{ type: "function_call_output", call_id: message.tool_call_id, output: flattenSystemText(message.content) }]
+      }
+      if (message.role === "assistant" && message.responsesOutput?.length) return message.responsesOutput
+      const text = { role: message.role, content: toResponsesContent(message.content, message.role === "assistant") }
+      if (!message.tool_calls?.length) return [text]
+      return [
+        ...(message.content.length ? [text] : []),
+        ...message.tool_calls.map((call) => ({ type: "function_call", call_id: call.id, ...call.function })),
+      ]
+    }),
     stream: true,
   }
 
   if (overrides?.promptCacheKey && supportsPromptCacheRouting(config)) body.prompt_cache_key = overrides.promptCacheKey
+  if (overrides?.tools?.length) {
+    body.tools = overrides.tools.map((tool) => ({ type: tool.type, ...tool.function, strict: false }))
+    body.tool_choice = overrides.toolChoice ?? "auto"
+  }
+  if (openAiCapabilities(config)) {
+    body.store = false
+    body.include = ["reasoning.encrypted_content"]
+  }
   if (overrides?.temperature !== undefined) body.temperature = overrides.temperature
   if (overrides?.top_p !== undefined) body.top_p = overrides.top_p
   if (overrides?.max_tokens !== undefined) body.max_output_tokens = overrides.max_tokens
-  if (overrides?.stop !== undefined) body.stop = overrides.stop
+  if (overrides?.stop !== undefined && !openAiCapabilities(config)) body.stop = overrides.stop
 
   const reasoning = effectiveReasoning(config, overrides)
+  if (openAiCapabilities(config)) {
+    if (typeof body.max_output_tokens === "number") {
+      body.max_output_tokens = Math.min(body.max_output_tokens, OPENAI_OFFICIAL_MAX_OUTPUT_TOKENS)
+    }
+    const effort = applyOfficialOpenAiSampling(config, body, reasoning)
+    if (effort) body.reasoning = { effort }
+    return body
+  }
   const effort = reasoningEffort(reasoning)
   if (effort) {
     // 始终思考的智谱型号只认 low / high / max（medium 会被拒）；拿不到合法档位就不发。
@@ -745,7 +790,18 @@ function stripWireAgnosticOverrides(overrides?: RequestOverrides): Omit<
 }
 
 function effectiveReasoning(config: LlmConfig, overrides?: RequestOverrides): ReasoningConfig {
-  return overrides?.reasoning ?? config.reasoning ?? { mode: "auto" }
+  const reasoning = overrides?.reasoning ?? config.reasoning ?? { mode: "auto" }
+  return reasoning.mode === "xhigh" && !openAiCapabilities(config) ? { mode: "high" } : reasoning
+}
+
+function applyOfficialOpenAiSampling(config: LlmConfig, body: Record<string, unknown>, reasoning: ReasoningConfig) {
+  const mode = openAiReasoningMode(config, reasoning.mode)
+  delete body.top_k
+  if (mode !== "off") {
+    delete body.temperature
+    delete body.top_p
+  }
+  return mode === "off" ? "none" : mode === "auto" ? undefined : mode
 }
 
 function reasoningEffort(reasoning: ReasoningConfig): "low" | "medium" | "high" | null {
@@ -779,6 +835,7 @@ export function thinkingMinMaxTokens(reasoning: ReasoningConfig): number {
     case "medium":
       return 8192
     case "high":
+    case "xhigh":
     case "max":
       return 16384
     case "custom":
@@ -831,7 +888,8 @@ export function getEffectiveMaxContextSize(config: LlmConfig): number {
 
 /** The declared output ceiling to plan against, in tokens. */
 export function getEffectiveMaxOutputTokens(config: LlmConfig): number {
-  return normalizeUserLlmMaxOutputTokens(config.maxOutputTokens)
+  const configured = normalizeUserLlmMaxOutputTokens(config.maxOutputTokens)
+  return openAiCapabilities(config) ? Math.min(configured, OPENAI_OFFICIAL_MAX_OUTPUT_TOKENS) : configured
 }
 
 /**
@@ -925,7 +983,7 @@ export function modelAlwaysThinks(config: LlmConfig): boolean {
  */
 export function reasoningOutputFloor(config: LlmConfig): number {
   const reasoning = config.reasoning ?? { mode: "auto" as const }
-  if (modelAlwaysThinks(config) && (reasoning.mode === "auto" || reasoning.mode === "off")) {
+  if ((modelAlwaysThinks(config) || openAiCapabilities(config)?.none === false) && (reasoning.mode === "auto" || reasoning.mode === "off")) {
     return thinkingMinMaxTokens({ mode: "low" })
   }
   return thinkingMinMaxTokens(reasoning)
@@ -1020,7 +1078,7 @@ export function modelSupportsReasoningControl(config: LlmConfig): boolean {
   // rather than reading config.reasoning.
   if (config.provider === "claude-code" || config.provider === "cursor-cli" || config.provider === "antigravity-cli") return false
   // Codex CLI maps the mode straight onto `turn/start.effort`.
-  if (config.provider === "codex-cli") return true
+  if (config.provider === "codex-cli" || openAiCapabilities(config)) return true
   if (config.provider === "google") return googleModelSupportsThinkingConfig(config.model)
 
   const anthropicWire = config.provider === "anthropic"
@@ -1090,6 +1148,16 @@ function buildOpenAiCompatibleBody(
     || (config.provider === "custom" && isAzureOpenAiEndpoint(config.customEndpoint))
   ) {
     body.stream_options = { include_usage: true }
+  }
+  if (openAiCapabilities(config)) {
+    if (typeof body.max_tokens === "number") {
+      body.max_completion_tokens = Math.min(body.max_tokens, OPENAI_OFFICIAL_MAX_OUTPUT_TOKENS)
+      delete body.max_tokens
+    }
+    delete body.stop
+    const effort = applyOfficialOpenAiSampling(config, body, reasoning)
+    if (effort) body.reasoning_effort = effort
+    return body
   }
   adaptOpenAiStrictCompletionBody(config, body)
   adaptKimiBody(config, body)
@@ -1564,17 +1632,22 @@ function pluginProviderRequest(config: LlmConfig, token: string): ProviderConfig
  *
  * **HTTP 请求路径必须用它**：`getProviderConfig` 是同步的，拿不到 `await` 的 token。
  */
-export async function resolveProviderConfig(config: LlmConfig): Promise<ProviderConfig> {
-  if (isBuiltinProviderId(config.provider)) return getProviderConfig(config)
+export async function resolveProviderConfig(config: LlmConfig, overrides?: RequestOverrides, messages?: ChatMessage[]): Promise<ProviderConfig> {
+  if (isBuiltinProviderId(config.provider)) return getProviderConfig(config, overrides, messages)
   const auth = await ensurePluginProviderAuth(config.provider)
   return pluginProviderRequest(config, auth)
 }
 
-export function getProviderConfig(config: LlmConfig): ProviderConfig {
+export function getProviderConfig(config: LlmConfig, overrides?: RequestOverrides, messages?: ChatMessage[]): ProviderConfig {
   const { provider, apiKey, model, ollamaUrl, customEndpoint } = config
 
   switch (provider) {
-    case "openai":
+    case "openai": {
+      if (requiresOpenAiResponses(config, overrides, messages)) {
+        return responsesRequest(config, "https://api.openai.com/v1/responses", {
+          "Content-Type": JSON_CONTENT_TYPE, Authorization: `Bearer ${apiKey}`,
+        })
+      }
       return openAiCompatibleRequest(config, {
         url: "https://api.openai.com/v1/chat/completions",
         headers: {
@@ -1582,6 +1655,7 @@ export function getProviderConfig(config: LlmConfig): ProviderConfig {
           Authorization: `Bearer ${apiKey}`,
         },
       }, model)
+    }
 
     case "anthropic": {
       const url = buildAnthropicUrl("https://api.anthropic.com")
@@ -1733,14 +1807,7 @@ export function getProviderConfig(config: LlmConfig): ProviderConfig {
         const url = /\/responses$/i.test(base)
           ? base
           : `${base}/responses`
-        return {
-          url,
-          headers: getCustomCompatibleHeaders(apiKey, url),
-          buildBody: (messages, overrides) => buildResponsesBody(config, messages, overrides),
-          parseStream: parseResponsesLine,
-          parseUsage: parseResponsesUsage,
-          parseFinishReason: parseResponsesFinishReason,
-        }
+        return responsesRequest(config, url, getCustomCompatibleHeaders(apiKey, url))
       }
       // Defense-in-depth: settings-side EndpointField normalizes URLs on
       // blur, but older configs saved before that shipped may still carry

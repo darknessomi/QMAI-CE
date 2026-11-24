@@ -125,7 +125,7 @@ describe("user-facing hardcoded chinese strings", () => {
     expect(maintenanceSection).toContain('defaultValue: "检测重复实体 / 概念"')
     expect(maintenanceSection).toContain('t("settings.sections.maintenance.dedup.description", {')
     expect(maintenanceSection).toContain(
-      'defaultValue:\n              "让大模型扫描全部实体 / 概念页面，并把那些很可能只是名称不同、实则指向同一主题的条目分组出来（例如中英文名称、单复数、简称与全称）。每组都需要你确认后才会合并。合并任务会进入队列并逐个执行，以保持交叉引用一致。",'
+      'defaultValue:\n              "分批复核名称不同、可能属于同一人物或概念的条目。启用向量模型后会优先筛选语义相近的候选。每组由你确认后才进入合并队列。",'
     )
     expect(maintenanceSection).toContain('t("settings.sections.maintenance.noProject", {')
     expect(maintenanceSection).toContain('defaultValue: "请先打开一个项目。"')
@@ -150,7 +150,7 @@ describe("user-facing hardcoded chinese strings", () => {
     expect(maintenanceSection).toContain('t("settings.sections.maintenance.dedup.scanButton", {')
     expect(maintenanceSection).toContain('defaultValue: "开始扫描重复项"')
     expect(maintenanceSection).toContain('t("settings.sections.maintenance.dedup.noneFound", {')
-    expect(maintenanceSection).toContain('defaultValue: "未发现重复分组，当前资料库很干净。"')
+    expect(maintenanceSection).toContain('defaultValue: "本次检测未发现重复候选。"')
     expect(maintenanceSection).toContain('t("settings.sections.maintenance.dedup.queueTitle", {')
     expect(maintenanceSection).toContain('defaultValue: "进行中的合并任务"')
     expect(maintenanceSection).toContain('t("settings.sections.maintenance.dedup.queueDescription", {')

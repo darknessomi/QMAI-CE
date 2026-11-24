@@ -1,3 +1,6 @@
+import { splitSourceIntoSemanticChunks, type SourceChunk } from "./semantic-source-chunks"
+export { splitSourceIntoSemanticChunks } from "./semantic-source-chunks"
+import { wikiEmbeddingId, wikiEmbeddingTitle } from "./embedding-page-id"
 import {
   createDirectory,
   deleteFile,
@@ -72,15 +75,6 @@ const LONG_SOURCE_DIGEST_MAX = 15_000
 const LONG_SOURCE_CHUNK_ANALYSIS_MAX = 40_000
 const REVIEW_STAGE_MIN_SIGNAL_CHARS = 10_000
 const REVIEW_STAGE_MIN_FILE_BLOCKS = 4
-
-interface SourceChunk {
-  id: string
-  index: number
-  total: number
-  headingPath: string
-  overlapBefore: string
-  main: string
-}
 
 interface LongSourcePlan {
   chunked: boolean
@@ -898,12 +892,12 @@ async function autoIngestImpl(
     try {
       const { embedPage } = await import("@/lib/embedding")
       for (const wpath of writtenPaths) {
-        const pageId = wpath.split("/").pop()?.replace(/\.md$/, "") ?? ""
-        if (!pageId || ["index", "log", "overview"].includes(pageId)) continue
+        const pageId = wikiEmbeddingId(pp, wpath)
+        const stem = getFileName(wpath).replace(/\.md$/, "")
+        if (!pageId || ["index", "log", "overview"].includes(stem)) continue
         try {
-          const content = await readFile(`${pp}/${wpath}`)
-          const titleMatch = content.match(/^---\n[\s\S]*?^title:\s*["']?(.+?)["']?\s*$/m)
-          const title = titleMatch ? titleMatch[1].trim() : pageId
+          const content = await readFile(wpath.startsWith(pp + "/") ? wpath : pp + "/" + wpath)
+          const title = wikiEmbeddingTitle(content, stem)
           await embedPage(pp, pageId, title, content, embCfg)
         } catch {
           // non-critical
@@ -1298,130 +1292,6 @@ export function fitIngestOutputToWindow(
   const inputTokens = promptChars / (INGEST_CHARS_PER_TOKEN * scale)
   const remaining = Math.floor(windowTokens - inputTokens)
   return Math.max(INGEST_OUTPUT_TOKEN_FLOOR, Math.min(desiredTokens, remaining))
-}
-
-function splitOversizedBlock(block: string, targetChars: number): string[] {
-  if (block.length <= targetChars * 1.25) return [block]
-
-  const pieces = block.match(/[^.!?。！？\n]+[.!?。！？]?|\n+/g) ?? [block]
-  const out: string[] = []
-  let current = ""
-  for (const piece of pieces) {
-    if (current && current.length + piece.length > targetChars) {
-      out.push(current.trim())
-      current = ""
-    }
-    if (piece.length > targetChars) {
-      for (let i = 0; i < piece.length; i += targetChars) {
-        const slice = piece.slice(i, i + targetChars).trim()
-        if (slice) out.push(slice)
-      }
-    } else {
-      current += piece
-    }
-  }
-  if (current.trim()) out.push(current.trim())
-  return out
-}
-
-function semanticBlocks(content: string, targetChars: number): Array<{ text: string; headingPath: string }> {
-  const blocks: Array<{ text: string; headingPath: string }> = []
-  const headingStack: string[] = []
-  let paragraph: string[] = []
-  let paragraphHeading = ""
-
-  const currentHeadingPath = () => headingStack.filter(Boolean).join(" > ")
-  const flushParagraph = () => {
-    const text = paragraph.join("\n").trim()
-    if (text) {
-      for (const piece of splitOversizedBlock(text, targetChars)) {
-        blocks.push({ text: piece, headingPath: paragraphHeading })
-      }
-    }
-    paragraph = []
-  }
-
-  for (const line of content.replace(/\r\n/g, "\n").split("\n")) {
-    const heading = /^(#{1,6})\s+(.+?)\s*$/.exec(line)
-    if (heading) {
-      flushParagraph()
-      const depth = heading[1].length
-      headingStack.length = depth - 1
-      headingStack[depth - 1] = heading[2].trim()
-      blocks.push({ text: line.trim(), headingPath: currentHeadingPath() })
-      paragraphHeading = currentHeadingPath()
-      continue
-    }
-
-    if (line.trim() === "") {
-      flushParagraph()
-      paragraphHeading = currentHeadingPath()
-      continue
-    }
-
-    if (paragraph.length === 0) paragraphHeading = currentHeadingPath()
-    paragraph.push(line)
-  }
-  flushParagraph()
-
-  return blocks
-}
-
-function overlapSuffix(text: string, maxChars: number): string {
-  if (!text || maxChars <= 0) return ""
-  if (text.length <= maxChars) return text
-  const raw = text.slice(-maxChars)
-  const paragraphBreak = raw.search(/\n\s*\n/)
-  if (paragraphBreak > 0 && raw.length - paragraphBreak > maxChars * 0.4) {
-    return raw.slice(paragraphBreak).trim()
-  }
-  const sentenceBreak = raw.search(/[.!?。！？]\s+/)
-  if (sentenceBreak > 0 && raw.length - sentenceBreak > maxChars * 0.4) {
-    return raw.slice(sentenceBreak + 1).trim()
-  }
-  return raw.trim()
-}
-
-export function splitSourceIntoSemanticChunks(
-  content: string,
-  targetChars: number,
-  overlapChars: number,
-): SourceChunk[] {
-  const target = Math.max(1_000, targetChars)
-  const blocks = semanticBlocks(content, target)
-  if (blocks.length === 0) return []
-
-  const rawChunks: Array<{ main: string; headingPath: string }> = []
-  let current: string[] = []
-  let currentLength = 0
-  let currentHeading = blocks[0]?.headingPath ?? ""
-
-  const flush = () => {
-    const main = current.join("\n\n").trim()
-    if (main) rawChunks.push({ main, headingPath: currentHeading })
-    current = []
-    currentLength = 0
-  }
-
-  for (const block of blocks) {
-    const nextLength = currentLength + block.text.length + (current.length > 0 ? 2 : 0)
-    if (current.length > 0 && nextLength > target) {
-      flush()
-    }
-    if (current.length === 0) currentHeading = block.headingPath
-    current.push(block.text)
-    currentLength += block.text.length + (current.length > 1 ? 2 : 0)
-  }
-  flush()
-
-  return rawChunks.map((chunk, idx) => ({
-    id: `chunk-${idx + 1}`,
-    index: idx + 1,
-    total: rawChunks.length,
-    headingPath: chunk.headingPath,
-    overlapBefore: idx > 0 ? overlapSuffix(rawChunks[idx - 1].main, overlapChars) : "",
-    main: chunk.main,
-  }))
 }
 
 function trimLongText(text: string, maxChars: number): string {
@@ -2156,12 +2026,10 @@ async function reembedSourceSummary(pp: string, fileName: string): Promise<void>
   const sourceSummaryFullPath = `${pp}/wiki/sources/${sourceBaseName}.md`
   try {
     const content = await readFile(sourceSummaryFullPath)
-    const titleMatch = content.match(
-      /^---\n[\s\S]*?^title:\s*["']?(.+?)["']?\s*$/m,
-    )
-    const title = titleMatch ? titleMatch[1].trim() : sourceBaseName
     const { embedPage } = await import("@/lib/embedding")
-    await embedPage(pp, sourceBaseName, title, content, embCfg)
+    const id = wikiEmbeddingId(pp, sourceSummaryFullPath)
+    if (!id) return
+    await embedPage(pp, id, wikiEmbeddingTitle(content, sourceBaseName), content, embCfg)
     console.log(`[ingest:caption] re-embedded ${sourceBaseName} with captioned alt text`)
   } catch (err) {
     console.warn(

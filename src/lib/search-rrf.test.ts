@@ -92,8 +92,8 @@ describe("searchWiki — RRF fusion of token + vector lists", () => {
     // possibly nothing for flash-attention. Vector search ranks
     // flash-attention #1.
     mockSearchByEmbedding.mockResolvedValueOnce([
-      { id: "flash-attention", score: 0.85 },
-      { id: "memory-leak", score: 0.4 },
+      { id: "wiki/concepts/flash-attention", score: 0.85 },
+      { id: "wiki/concepts/memory-leak", score: 0.4 },
     ])
 
     const out = await searchWiki(ctx.tmp.path, "GPU memory bandwidth optimization for attention")
@@ -125,8 +125,8 @@ describe("searchWiki — RRF fusion of token + vector lists", () => {
     })
 
     mockSearchByEmbedding.mockResolvedValueOnce([
-      { id: "aaa", score: 0.95 },
-      { id: "ccc", score: 0.7 },
+      { id: "wiki/concepts/aaa", score: 0.95 },
+      { id: "wiki/concepts/ccc", score: 0.7 },
     ])
 
     const out = await searchWiki(ctx.tmp.path, "rope")
@@ -190,8 +190,8 @@ describe("searchWiki — RRF fusion of token + vector lists", () => {
 
     // Query has no token overlap with either page; vector finds them.
     mockSearchByEmbedding.mockResolvedValueOnce([
-      { id: "bar", score: 0.7 },
-      { id: "foo", score: 0.3 },
+      { id: "wiki/concepts/bar", score: 0.7 },
+      { id: "wiki/concepts/foo", score: 0.3 },
     ])
 
     const out = await searchWiki(ctx.tmp.path, "completely unrelated query terms")
@@ -222,7 +222,7 @@ describe("searchWiki — RRF fusion of token + vector lists", () => {
     // Token search will hit "rope" only in quick-mention.md.
     // Vector search puts positional-encoding at rank 1.
     mockSearchByEmbedding.mockResolvedValueOnce([
-      { id: "positional-encoding", score: 0.92 },
+      { id: "wiki/concepts/positional-encoding", score: 0.92 },
     ])
 
     const out = await searchWiki(ctx.tmp.path, "rope")
@@ -253,8 +253,8 @@ describe("searchWiki — RRF fusion of token + vector lists", () => {
     })
 
     mockSearchByEmbedding.mockResolvedValueOnce([
-      { id: "exists", score: 0.9 },
-      { id: "ghost", score: 0.85 }, // no file with this slug
+      { id: "wiki/concepts/exists", score: 0.9 },
+      { id: "wiki/concepts/ghost", score: 0.85 }, // no file with this slug
     ])
 
     const out = await searchWiki(ctx.tmp.path, "anything")

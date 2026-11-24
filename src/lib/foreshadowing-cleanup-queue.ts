@@ -2,7 +2,7 @@
  * Persistent serial queue for foreshadowing cleanup operations.
  * Mirrors dedup-queue.ts.
  */
-import { readFile, writeFile } from "@/commands/fs"
+import { readFile, writeFile, fileExists } from "@/commands/fs"
 import { useWikiStore } from "@/stores/wiki-store"
 import { normalizePath } from "@/lib/path-utils"
 import { getProjectPathById } from "@/lib/project-identity"
@@ -30,7 +30,10 @@ export interface ForeshadowingCleanupTask {
   action?: CleanupApplyAction
   canonicalId?: string
   modelId?: string
-  status: "pending" | "processing" | "done" | "failed"
+  /** 新版创建或由作者明确继续的任务，可在下次启动时恢复。 */
+  autoResume?: true
+  legacyRecovery?: true
+  status: "pending" | "processing" | "done" | "failed" | "awaiting_resume"
   addedAt: number
   error: string | null
   retryCount: number
@@ -38,6 +41,8 @@ export interface ForeshadowingCleanupTask {
 
 let queue: ForeshadowingCleanupTask[] = []
 let processing = false
+let restoring: Promise<void> | undefined
+let bindingVersion = 0
 let currentProjectId = ""
 let currentProjectPath = ""
 let currentAbortController: AbortController | null = null
@@ -149,6 +154,7 @@ export async function enqueueForeshadowingCleanup(
         ? options.canonicalId?.trim() || issue.canonicalId
         : undefined,
     modelId: options.modelId?.trim() || undefined,
+    autoResume: true,
     status: "pending",
     addedAt: Date.now(),
     error: null,
@@ -174,6 +180,8 @@ export async function retryForeshadowingCleanupTask(taskId: string): Promise<voi
   task = queue.find((t) => t.id === taskId)
   if (!task || task.projectId !== currentProjectId) return
 
+  if (task.status !== "awaiting_resume" && task.status !== "failed") return
+  task.autoResume = true
   task.status = "pending"
   task.error = null
   task.retryCount = 0
@@ -228,12 +236,14 @@ export async function ensureForeshadowingCleanupQueueActive(
   projectPath: string,
 ): Promise<void> {
   const pp = normalizePath(projectPath)
-  if (currentProjectId === projectId && currentProjectPath === pp) return
+  if (currentProjectId === projectId && currentProjectPath === pp) return restoring
   await restoreForeshadowingCleanupQueue(projectId, projectPath)
 }
 
 export async function pauseForeshadowingCleanupQueue(): Promise<void> {
-  if (!currentProjectId || !currentProjectPath) return
+  const version = bindingVersion
+  if (restoring) await restoring
+  if (version !== bindingVersion || !currentProjectId || !currentProjectPath) return
 
   const pausedProjectPath = currentProjectPath
 
@@ -252,6 +262,7 @@ export async function pauseForeshadowingCleanupQueue(): Promise<void> {
   }
 
   await saveQueue(pausedProjectPath)
+  if (version !== bindingVersion) return
 
   queue = []
   currentProjectId = ""
@@ -263,6 +274,14 @@ export async function restoreForeshadowingCleanupQueue(
   projectPath: string,
 ): Promise<void> {
   const pp = normalizePath(projectPath)
+  if (currentProjectId === projectId && currentProjectPath === pp && restoring) return restoring
+  const pending = loadProjectQueue(projectId, pp, ++bindingVersion)
+  restoring = pending
+  try { await pending } finally { if (restoring === pending) restoring = undefined }
+}
+
+async function loadProjectQueue(projectId: string, pp: string, version: number): Promise<void> {
+  currentAbortController?.abort()
   queue = []
   processing = false
   currentAbortController = null
@@ -270,12 +289,23 @@ export async function restoreForeshadowingCleanupQueue(
   currentProjectPath = pp
 
   const saved = await loadQueue(pp, projectId)
-  if (saved.length === 0) return
+  if (version !== bindingVersion || saved.length === 0) return
 
   const mine = saved.filter((t) => t.projectId === projectId)
+  // 旧删除会重算受影响的摘要向量。纯本地清理及新版任务沿用原来的恢复规则。
+  const mayReembed = (task: ForeshadowingCleanupTask) => !task.autoResume &&
+    (task.status === "pending" || task.status === "processing") &&
+    (task.action ?? defaultCleanupAction(task.issue.kind)) === "delete"
+  const config = useWikiStore.getState().embeddingConfig
+  const hasVectors = config.enabled && Boolean(config.model) && mine.some(mayReembed) &&
+    await fileExists(`${pp}/.qmai/lancedb`).catch(() => true)
+  if (version !== bindingVersion) return
   let restored = 0
   for (const task of mine) {
-    if (task.status === "processing") {
+    if (hasVectors && mayReembed(task)) {
+      task.legacyRecovery = true
+      task.status = "awaiting_resume"
+    } else if (task.status === "processing") {
       task.status = "pending"
       restored++
     }
@@ -283,6 +313,7 @@ export async function restoreForeshadowingCleanupQueue(
 
   queue = mine
   await saveQueue(pp)
+  if (version !== bindingVersion) return
 
   const pending = queue.filter((t) => t.status === "pending").length
   if (pending > 0 || restored > 0) {
@@ -306,7 +337,7 @@ async function processNext(projectId: string): Promise<void> {
 
   const registryPath = await getProjectPathById(projectId)
   const pp = registryPath ? normalizePath(registryPath) : ""
-  if (currentProjectId !== projectId) return
+  if (currentProjectId !== projectId || processing || !queue.includes(next) || next.status !== "pending") return
 
   if (!pp) {
     next.status = "failed"
@@ -319,7 +350,7 @@ async function processNext(projectId: string): Promise<void> {
   processing = true
   next.status = "processing"
   await saveQueue(pp)
-  if (currentProjectId !== projectId) return
+  if (currentProjectId !== projectId || !queue.includes(next) || next.status !== "processing") return
 
   const state = useWikiStore.getState()
   const llmConfig = next.modelId?.trim()
@@ -361,7 +392,7 @@ async function processNext(projectId: string): Promise<void> {
       )
     })
 
-    if (currentProjectId !== projectId) return
+    if (currentProjectId !== projectId || !queue.includes(next) || next.status !== "processing") return
 
     currentAbortController = null
     currentApplyProgress = null
@@ -371,7 +402,7 @@ async function processNext(projectId: string): Promise<void> {
     useWikiStore.getState().bumpDataVersion()
     notifyComplete(completedTask)
   } catch (err) {
-    if (currentProjectId !== projectId) return
+    if (currentProjectId !== projectId || !queue.includes(next) || next.status !== "processing") return
     currentAbortController = null
     currentApplyProgress = null
     const message = err instanceof Error ? err.message : String(err)

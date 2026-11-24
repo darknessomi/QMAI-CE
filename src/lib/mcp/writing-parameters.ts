@@ -21,7 +21,7 @@ function requireReasoningDepth(value: unknown): ReasoningDepth {
   if (typeof value === "string" && (REASONING_DEPTH_STEPS as readonly string[]).includes(value)) {
     return value as ReasoningDepth
   }
-  throw new Error("思考深度无效，只能是 off、low、medium、high、max")
+  throw new Error("思考深度无效，只能是 off、low、medium、high、xhigh、max")
 }
 
 export function resolveWritingParameters(input: {

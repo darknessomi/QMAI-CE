@@ -1,3 +1,4 @@
+import { requiresOpenAiResponses } from "./openai-model-capabilities"
 import { estimateChatMessagesTokens } from "@/lib/chat-request-budget"
 import { sha256Text } from "@/lib/context-hub/fingerprint"
 import type { ChatMessage, RequestOverrides } from "@/lib/llm-providers"
@@ -116,7 +117,7 @@ export async function buildLlmRequestPrefixDescriptor(
   const canonical = JSON.stringify({
     provider: config.provider,
     model: config.model,
-    apiMode: resolveLlmRequestApiMode(config),
+    apiMode: requiresOpenAiResponses(config, overrides, messages) ? "responses" : resolveLlmRequestApiMode(config),
     tools: overrides?.tools ?? [],
     toolChoice: overrides?.toolChoice,
     reasoning: overrides?.reasoning ?? config.reasoning ?? { mode: "auto" },
@@ -130,6 +131,7 @@ export async function buildLlmRequestPrefixDescriptor(
 
 export function buildLlmRequestCacheTrace(input: {
   requestId?: string
+  apiMode?: string
   config: LlmConfig
   prefixFingerprint?: string
   prefixEstimatedTokens?: number
@@ -143,7 +145,7 @@ export function buildLlmRequestCacheTrace(input: {
     ...(input.requestId ? { requestId: input.requestId } : {}),
     provider: input.config.provider,
     model: input.config.model,
-    apiMode: resolveLlmRequestApiMode(input.config),
+    apiMode: input.apiMode ?? resolveLlmRequestApiMode(input.config),
     ...(input.prefixFingerprint ? { prefixFingerprint: input.prefixFingerprint } : {}),
     ...(input.prefixEstimatedTokens !== undefined
       ? { prefixEstimatedTokens: input.prefixEstimatedTokens }

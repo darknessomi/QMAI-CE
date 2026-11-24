@@ -1,6 +1,6 @@
 
 
-export function makeSafeFileSlug(title: string, fallback = "untitled"): string {
+export function makeSafeFileSlug(title: string, fallback = "untitled", maxBytes = 240): string {
   const slug = title
     .normalize("NFKC")
     .trim()
@@ -9,8 +9,16 @@ export function makeSafeFileSlug(title: string, fallback = "untitled"): string {
     .replace(/[^\p{L}\p{N}._-]/gu, "")
     .replace(/-+/g, "-")
     .replace(/^-|-$/g, "")
-    .slice(0, 80)
-  return slug.length > 0 ? slug : fallback
+  let value = ""
+  let bytes = 0
+  const encoder = new TextEncoder()
+  for (const character of slug) {
+    const size = encoder.encode(character).length
+    if (value.length + character.length > 80 || bytes + size > maxBytes) break
+    bytes += size
+    value += character
+  }
+  return value || fallback
 }
 
 function stripChapterPrefix(title: string): string {
@@ -30,7 +38,9 @@ export function makeChapterFileStem(title: string, chapterNumber?: number | null
   const cleanTitle = title.normalize("NFKC").trim()
   if (typeof chapterNumber === "number" && Number.isFinite(chapterNumber) && chapterNumber > 0) {
     const namePart = stripChapterPrefix(cleanTitle)
-    const safeName = namePart ? makeSafeFileSlug(namePart) : ""
+    // Allow room for the extension and duplicate-name suffix added by callers.
+    const budget = 240 - new TextEncoder().encode(`第${chapterNumber}章-`).length
+    const safeName = namePart ? makeSafeFileSlug(namePart, "untitled", budget) : ""
     return safeName ? `第${chapterNumber}章-${safeName}` : `第${chapterNumber}章`
   }
   return makeSafeFileSlug(cleanTitle)

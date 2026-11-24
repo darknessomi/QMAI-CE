@@ -84,12 +84,12 @@ describe("ModelSettingsPopover", () => {
     vi.clearAllMocks()
   })
 
-  function render() {
+  function render(providerId = "deepseek", modelId = "deepseek-v4-flash") {
     act(() => {
       root.render(
         <ModelSettingsPopover
-          providerId="deepseek"
-          modelId="deepseek-v4-flash"
+          providerId={providerId}
+          modelId={modelId}
           modelTitle="Kimi-K2.8-Preview"
           style={style}
           onPointerEnter={() => {}}
@@ -113,6 +113,16 @@ describe("ModelSettingsPopover", () => {
     const labels = Array.from(reasoning!.querySelectorAll("button")).map((b) => b.textContent)
     expect(labels).toEqual(["关闭", "低", "中", "高", "最大"])
     expect(reasoning!.querySelector('[aria-pressed="true"]')?.textContent).toBe("高")
+  })
+
+  it("GPT-6.2 的旧关闭配置显示为低档，极高和最大可分别选择", async () => {
+    useWikiStore.setState({ providerConfigs: { openai: { model: "gpt-6.2-sol", reasoning: { mode: "off" } } } })
+    const section = render("openai", "gpt-6.2-sol").querySelector("section")!
+    const buttons = Array.from(section.querySelectorAll("button"))
+    expect(buttons.map((button) => button.textContent)).toEqual(["低", "中", "高", "极高", "最大"])
+    expect(section.querySelector('[aria-pressed="true"]')?.textContent).toBe("低")
+    await act(async () => buttons.find((button) => button.textContent === "极高")!.click())
+    expect(useWikiStore.getState().providerConfigs.openai.reasoning?.mode).toBe("xhigh")
   })
 
   it("点推理档位即时写回供应商配置", async () => {

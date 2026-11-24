@@ -146,10 +146,12 @@ function toolMetadataTokens(message: ChatMessage): number {
 }
 
 function messageTokenLength(message: ChatMessage): number {
+  if (message.responsesOutput?.length) return MESSAGE_OVERHEAD_TOKENS + estimateContextTokens(JSON.stringify(message.responsesOutput))
   return MESSAGE_OVERHEAD_TOKENS + contentTokenLength(message.content) + toolMetadataTokens(message)
 }
 
 function minimumMessageTokenLength(message: ChatMessage, requireContent: boolean): number {
+  if (message.responsesOutput?.length) return messageTokenLength(message)
   const fixedMetadataTokens = MESSAGE_OVERHEAD_TOKENS + estimateContextTokens(
     `${message.tool_call_id ?? ""}\n${message.name ?? ""}`,
   )
@@ -234,6 +236,8 @@ function trimMessageToTokenBudget(
   maxTokens: number,
   preserveHead = false,
 ): ChatMessage {
+  // Encrypted reasoning and its paired tool calls must be replayed as returned.
+  if (message.responsesOutput?.length) return message
   const fixedMetadataTokens = MESSAGE_OVERHEAD_TOKENS + estimateContextTokens(
     `${message.tool_call_id ?? ""}\n${message.name ?? ""}`,
   )

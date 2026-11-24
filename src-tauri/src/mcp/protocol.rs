@@ -90,7 +90,7 @@ pub fn tools_list_result() -> Value {
                     "conversationId": prop("要继续的写作会话 id。不传则新建"),
                     "workflowMode": { "type": "string", "enum": ["fast", "standard", "strict", "discuss"], "description": "这一次的写作模式" },
                     "model": prop("这一次的写作模型 id"),
-                    "reasoningDepth": { "type": "string", "enum": ["auto", "off", "low", "medium", "high", "max"], "description": "这一次的思考深度" },
+                    "reasoningDepth": { "type": "string", "enum": ["auto", "off", "low", "medium", "high", "xhigh", "max"], "description": "这一次的思考深度" },
                     "background": { "type": "boolean", "default": false, "description": "为 true 时后台执行，返回 runId、conversationId 和进度文件路径；断开客户端不取消任务" }
                 }),
                 vec!["message"]

@@ -356,6 +356,9 @@ export async function runOutlineIngestPaths(
     try {
       await syncSnapshotToMemory(pp, item.ingestResult.snapshot!, {
         deferDerivedRebuild: true,
+        ...(item.ingestResult.checkpointPath && {
+          outlineExtraction: { filePath: item.path, checkpointPath: item.ingestResult.checkpointPath },
+        }),
       })
       const successMessage = item.ingestResult.truncated
         ? i18n.t("novel.outlineGenerator.ingestSuccessTruncatedNotification", {

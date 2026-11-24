@@ -1,3 +1,5 @@
+import { chapterBound, searchChapterEvidence } from "@/lib/novel/chapter-evidence"
+import { isAiExcludedContent } from "@/lib/novel/ai-exclude"
 import type { Tool } from "../types"
 import { listDirectory, readFile } from "@/commands/fs"
 import type { ReadTextFile } from "./read-markdown-resource"
@@ -36,15 +38,29 @@ export function createSearchChaptersTool(
 ): Tool {
   return {
     name: "search_chapters",
-    description: "按关键词在所有章节中搜索匹配内容。参数 keyword 为搜索关键词。",
+    description: "按关键词在所有章节中搜索匹配内容。核对剧情、原文或角色何时知情时启用 evidenceOnly，按章号范围仅从定稿正文引用，给出命中章号和路径。未命中该词时须说明查找范围。",
     category: "read",
     parameters: {
+      evidenceOnly: { type: "boolean", description: "仅查定稿原文并逐字引用；查证剧情时开启" },
+      fromChapter: { type: "integer", description: "起始章号（含）" },
+      toChapter: { type: "integer", description: "结束章号（含）" },
       keyword: { type: "string", description: "搜索关键词", required: true },
     },
-    execute: async (params) => {
+    execute: async (params, signal) => {
       const keyword = typeof params.keyword === "string" ? params.keyword.trim() : ""
       if (!keyword) {
         return "错误：缺少搜索关键词，无法搜索章节。"
+      }
+
+      if (params.evidenceOnly === true || params.fromChapter !== undefined || params.toChapter !== undefined) {
+        try {
+          const { hits, coverage } = await searchChapterEvidence(chaptersDir, keyword, {
+            from: chapterBound(params.fromChapter), to: chapterBound(params.toChapter), read: readTextFile, signal,
+          })
+          return [coverage, ...hits.map(hit => `第${hit.number}章 · ${hit.path}\n原文：${hit.quote}`)].join("\n")
+        } catch (error) {
+          return `原文查证未完成：${error instanceof Error ? error.message : String(error)}`
+        }
       }
 
       let files
@@ -73,6 +89,7 @@ export function createSearchChaptersTool(
           continue
         }
 
+        if (isAiExcludedContent(content)) continue
         const chapterName = file.name.replace(/\.md$/i, "")
         const nameMatches = chapterName.toLowerCase().includes(keywordLower)
         const contentIndex = content.toLowerCase().indexOf(keywordLower)

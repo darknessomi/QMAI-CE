@@ -1,3 +1,4 @@
+import { requiresOpenAiResponses } from "./openai-model-capabilities"
 import type { LlmConfig } from "@/stores/wiki-store"
 import type { ChatMessage, RequestOverrides } from "./llm-providers"
 import { sha256Text } from "./context-hub/fingerprint"
@@ -34,7 +35,7 @@ export async function preparePromptCacheRouting(
       const promptCacheKey = await sha256Text(JSON.stringify({
         version: 1,
         model: config.model,
-        apiMode: config.provider === "openai" ? "chat_completions" : config.apiMode ?? "chat_completions",
+        apiMode: requiresOpenAiResponses(config, overrides, messages) ? "responses" : config.apiMode ?? "chat_completions",
         scope: overrides.userMemoryProjectKey ?? overrides.userMemorySessionKey ?? "",
         tools: overrides.tools ?? [],
         toolChoice: overrides.toolChoice,

@@ -1,5 +1,5 @@
 import "@/components/uitest/ui-test-tools.css"
-import { useState, useCallback, useMemo, useEffect, memo } from "react"
+import { useState, useCallback, useMemo, useEffect, useRef, memo } from "react"
 import { Search, FileText, ImageIcon, X, ArrowUpRight } from "lucide-react"
 import { useWikiStore } from "@/stores/wiki-store"
 import { readFile } from "@/commands/fs"
@@ -172,6 +172,24 @@ export function SearchView({ onClose, onOpenFile }: SearchViewProps) {
   const [hasSearched, setHasSearched] = useState(false)
   const [lightbox, setLightbox] = useState<ImageHit | null>(null)
 
+  const [evidenceOnly, setEvidenceOnly] = useState(false)
+  const [fromChapter, setFromChapter] = useState("")
+  const [toChapter, setToChapter] = useState("")
+  const [coverage, setCoverage] = useState("")
+  const request = useRef(0)
+  const evidenceScan = useRef<AbortController | null>(null)
+  useEffect(() => {
+    request.current++
+    setCoverage("")
+    setResults([])
+    setSearching(false)
+    setHasSearched(false)
+    return () => {
+      request.current++
+      evidenceScan.current?.abort()
+    }
+  }, [project?.id, evidenceOnly, fromChapter, toChapter])
+
   const [searchOpts, setSearchOpts] = useState<NovelSearchUiOptions>({
     includeKeyword: true,
     includeVector: false,
@@ -192,10 +210,15 @@ export function SearchView({ onClose, onOpenFile }: SearchViewProps) {
 
   const doSearch = useCallback(
     async (q: string) => {
+      const id = ++request.current
+      evidenceScan.current?.abort()
+      setCoverage("")
       console.log("[Search] START", q, "novelMode=", novelMode)
       if (!project || !q.trim()) {
         console.log("[Search] SKIP - no project or empty query")
         setResults([])
+        setSearching(false)
+        setHasSearched(false)
         return
       }
       setSearching(true)
@@ -208,26 +231,40 @@ export function SearchView({ onClose, onOpenFile }: SearchViewProps) {
       setSearchHistory(next)
       try {
         const projectPath = normalizePath(project.path)
-        if (novelMode) {
+        if (novelMode && evidenceOnly) {
+          const controller = new AbortController()
+          evidenceScan.current = controller
+          const { chapterBound, searchChapterEvidence } = await import("@/lib/novel/chapter-evidence")
+          const { hits, coverage } = await searchChapterEvidence(`${projectPath}/wiki/chapters`, trimmedQuery, {
+            from: chapterBound(fromChapter), to: chapterBound(toChapter), signal: controller.signal,
+          })
+          if (id !== request.current) return
+          setCoverage(coverage)
+          setResults(hits.map(hit => ({
+            path: hit.path, title: `第${hit.number}章 · ${hit.title}`, snippet: hit.quote, titleMatch: false, score: 1, images: [],
+          })))
+        } else if (novelMode) {
           const t0 = performance.now()
           const novelResults = await runNovelPanelSearch(projectPath, q, searchOpts)
           console.log("[Search] novel panel search done in", Math.round(performance.now() - t0), "ms, got", novelResults.length, "results")
-          setResults(novelResults)
+          if (id === request.current) setResults(novelResults)
         } else {
           const t0 = performance.now()
           const found = await runWikiPanelSearch(projectPath, q, { rerank: true, includeVector: true })
           console.log("[Search] searchWiki done in", Math.round(performance.now() - t0), "ms, got", found.length, "results")
-          setResults(found)
+          if (id === request.current) setResults(found)
         }
       } catch (err) {
+        if (id !== request.current) return
+        if (evidenceOnly) setCoverage(`原文查证未完成：${err instanceof Error ? err.message : String(err)}`)
         console.error("[Search] FAILED:", err)
         setResults([])
       } finally {
         console.log("[Search] FINISHED, searching=", false)
-        setSearching(false)
+        if (id === request.current) setSearching(false)
       }
     },
-    [project, novelMode, searchOpts, setSearchHistory],
+    [project, novelMode, searchOpts, setSearchHistory, evidenceOnly, fromChapter, toChapter],
   )
 
   useEffect(() => {
@@ -395,7 +432,7 @@ export function SearchView({ onClose, onOpenFile }: SearchViewProps) {
                 if (isImeComposing(e)) return
                 if (e.key === "Enter") doSearch(query)
               }}
-              placeholder={t(novelMode ? "novel.search.placeholder" : "search.placeholder")}
+              placeholder={evidenceOnly && novelMode ? "输入定稿中的原词或短句" : t(novelMode ? "novel.search.placeholder" : "search.placeholder")}
               autoFocus
               className="w-full rounded-md border bg-background py-2 pl-9 pr-3 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
             />
@@ -412,7 +449,16 @@ export function SearchView({ onClose, onOpenFile }: SearchViewProps) {
         </div>
         {novelMode && (
           <div className="mt-2 flex flex-wrap gap-1.5">
-            {([
+            <label className="flex items-center gap-1 text-xs">
+              <input type="checkbox" checked={evidenceOnly} onChange={e => setEvidenceOnly(e.target.checked)} />
+              定稿原文查证
+            </label>
+            {evidenceOnly ? <>
+              <input type="number" min="1" aria-label="起始章号" placeholder="起始章" value={fromChapter}
+                onChange={e => setFromChapter(e.target.value)} className="w-20 rounded border px-1 text-xs" />
+              <input type="number" min="1" aria-label="结束章号" placeholder="结束章" value={toChapter}
+                onChange={e => setToChapter(e.target.value)} className="w-20 rounded border px-1 text-xs" />
+            </> : ([
               ["keyword", "includeKeyword"],
               ["vector", "includeVector"],
               ["graph", "includeGraph"],
@@ -439,6 +485,7 @@ export function SearchView({ onClose, onOpenFile }: SearchViewProps) {
         )}
       </div>
 
+      {coverage && <div role="status" className="px-4 py-2 text-xs text-muted-foreground">{coverage}</div>}
       {/*
        * Body. Two independently scrollable regions: images (capped
        * height = 2 rows of thumbnails) and pages (fills the rest).
@@ -457,7 +504,7 @@ export function SearchView({ onClose, onOpenFile }: SearchViewProps) {
         </div>
       ) : results.length === 0 ? (
         <div className="flex-1 p-4 text-center text-sm text-muted-foreground">
-          {t(novelMode ? "novel.search.noResults" : "search.noResults")} <span className="font-medium">"{query}"</span>
+          {!(novelMode && evidenceOnly) && <>{t(novelMode ? "novel.search.noResults" : "search.noResults")} <span className="font-medium">"{query}"</span></>}
         </div>
       ) : (
         <div className="flex min-h-0 flex-1 flex-col">

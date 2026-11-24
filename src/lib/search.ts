@@ -1,6 +1,7 @@
+import { wikiEmbeddingId, wikiEmbeddingPath, wikiEmbeddingTitle } from "./embedding-page-id"
 import { readFile, listDirectory } from "@/commands/fs"
 import type { FileNode } from "@/types/wiki"
-import { normalizePath, getFileStem } from "@/lib/path-utils"
+import { normalizePath } from "@/lib/path-utils"
 
 /**
  * One image reference extracted from a matched page's markdown.
@@ -166,9 +167,8 @@ function flattenMdFiles(nodes: FileNode[]): FileNode[] {
 }
 
 function extractTitle(content: string, fileName: string): string {
-  // Try YAML frontmatter title
-  const frontmatterMatch = content.match(/^---\n[\s\S]*?^title:\s*["']?(.+?)["']?\s*$/m)
-  if (frontmatterMatch) return frontmatterMatch[1].trim()
+  const title = wikiEmbeddingTitle(content, "")
+  if (title) return title
 
   // Try first heading
   const headingMatch = content.match(/^#\s+(.+)$/m)
@@ -308,38 +308,22 @@ export async function searchWiki(
             : "")
         )
 
-        // Build vectorRank by page_id (slug); searchByEmbedding returns
-        // results pre-sorted by descending similarity.
-        vectorResults.forEach((vr, i) => vectorRank.set(vr.id, i + 1))
-
-        // Materialize any vector-result page that token search didn't
-        // already include — without this, `results` has no entry for
-        // them and they can't surface even with a top vector rank.
-        const knownIds = new Set(results.map((r) => getFileStem(r.path)))
+        const knownIds = new Set(results.map(r => wikiEmbeddingId(pp, r.path)))
         let added = 0
-        for (const vr of vectorResults) {
+        for (const [rank, vr] of vectorResults.entries()) {
+          const path = wikiEmbeddingPath(pp, vr.id)
+          if (!path) continue
+          vectorRank.set(vr.id, rank + 1)
           if (knownIds.has(vr.id)) continue
-          const dirs = ["entities", "concepts", "sources", "synthesis", "comparison", "queries"]
-          for (const dir of dirs) {
-            const tryPath = `${pp}/wiki/${dir}/${vr.id}.md`
-            try {
-              const content = await readFile(tryPath)
-              const title = extractTitle(content, `${vr.id}.md`)
-              results.push({
-                path: tryPath,
-                title,
-                snippet: buildSnippet(content, query),
-                titleMatch: false,
-                score: 0, // overwritten by RRF below
-                images: extractImageRefs(content),
-              })
-              knownIds.add(vr.id)
-              added++
-              break
-            } catch {
-              // not in this directory
-            }
-          }
+          try {
+            const content = await readFile(path)
+            results.push({
+              path, title: extractTitle(content, path.split("/").pop()!), snippet: buildSnippet(content, query),
+              titleMatch: false, score: 0, images: extractImageRefs(content),
+            })
+            knownIds.add(vr.id)
+            added++
+          } catch { /* The page may have been removed since indexing. */ }
         }
         if (added > 0) {
           console.log(`[Vector Search] Added ${added} vector-only pages to candidate set`)
@@ -361,7 +345,7 @@ export async function searchWiki(
   // results array, which already contains every candidate).
   for (const r of results) {
     const tRank = tokenRank.get(normalizePath(r.path))
-    const vRank = vectorRank.get(getFileStem(r.path))
+    const vRank = vectorRank.get(wikiEmbeddingId(pp, r.path) ?? "")
     let rrf = 0
     if (tRank !== undefined) rrf += 1 / (RRF_K + tRank)
     if (vRank !== undefined) rrf += 1 / (RRF_K + vRank)

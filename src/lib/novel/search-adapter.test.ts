@@ -52,7 +52,7 @@ describe("novelMixedSearch", () => {
     mockSearchWiki.mockResolvedValue([
       searchHit("/project/wiki/entities/keyword.md", "Keyword Hit", 0.01),
     ])
-    mockSearchByEmbedding.mockResolvedValue([{ id: "vector-hit", score: 0.99 }])
+    mockSearchByEmbedding.mockResolvedValue([{ id: "wiki/entities/vector-hit", score: 0.99 }])
     mockReadFile.mockResolvedValue("# Vector Hit\n\nstrong semantic memory")
 
     const results = await novelMixedSearch({
@@ -75,8 +75,8 @@ describe("novelMixedSearch", () => {
       searchHit("/project/wiki/entities/shared.md", "Shared Keyword", 0.7),
     ])
     mockSearchByEmbedding.mockResolvedValue([
-      { id: "shared", score: 0.95 },
-      { id: "vector-only", score: 0.93 },
+      { id: "wiki/entities/shared", score: 0.95 },
+      { id: "wiki/entities/vector-only", score: 0.93 },
     ])
     mockReadFile.mockImplementation(async (path) => {
       if (path.endsWith("/shared.md")) return "# Shared Vector\n\nshared semantic memory"
@@ -103,7 +103,7 @@ describe("novelMixedSearch", () => {
     vi.useFakeTimers()
     try {
       mockSearchWiki.mockImplementation(() => new Promise(() => {}))
-      mockSearchByEmbedding.mockResolvedValue([{ id: "vector-hit", score: 0.99 }])
+      mockSearchByEmbedding.mockResolvedValue([{ id: "wiki/entities/vector-hit", score: 0.99 }])
       mockReadFile.mockResolvedValue("# Vector Hit\n\nstrong semantic memory")
 
       const searchPromise = novelMixedSearch({

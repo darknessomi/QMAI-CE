@@ -504,7 +504,7 @@ fn add_project_meta_dir_to_zip(
         }
         match name.as_ref() {
             "novel" => include_memory || format_path.is_file(),
-            "lancedb" | "retrieval" => include_indexes,
+            "lancedb" | "retrieval" | "embedding-index.json" | "dedup-summary-vectors.json" => include_indexes,
             _ => is_project_owned_entry(&name) || include_analysis,
         }
     });
@@ -803,6 +803,40 @@ fn partial_path_for(save_path: &Path) -> std::path::PathBuf {
     std::path::PathBuf::from(partial)
 }
 
+/// Check the actual directory before touching either the final or partial file.
+fn validate_backup_destination(params: &ExportParams, output: &Path) -> Result<(), String> {
+    let parent = output.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
+    let parent = parent.canonicalize().map_err(|e| format!("无法定位备份目标目录：{e}"))?;
+    let name = output.file_name().ok_or("请选择备份文件名")?;
+    let destination = parent.join(name);
+    for project in &params.projects {
+        let root = Path::new(&project.path);
+        if !root.exists() {
+            continue;
+        }
+        let root = root.canonicalize().map_err(|e| format!("无法定位项目目录：{e}"))?;
+        let mut sections = vec![".qmai"];
+        if project.sections.contains(&ProjectBackupSection::Content) {
+            sections.extend(["QM", "raw"]);
+        } else if project.sections.contains(&ProjectBackupSection::Memory) {
+            sections.push("QM/memory");
+        }
+        if project.sections.contains(&ProjectBackupSection::Trash) {
+            sections.push(".trash");
+        }
+        for section in sections {
+            let directory = root.join(section);
+            if directory.exists() {
+                let resolved = directory.canonicalize().map_err(|e| format!("无法定位备份源目录：{e}"))?;
+                if destination.starts_with(resolved) {
+                    return Err(format!("备份文件位于正在打包的目录中，请选择其他保存位置：{}", directory.display()));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Core export backup logic.
 /// `app_state_path` is the path to `app-state.json` on disk.
 /// `on_progress` is called with progress payloads during the operation.
@@ -817,6 +851,7 @@ pub fn do_export_backup<F: Fn(&BackupProgressPayload)>(
     on_progress: F,
 ) -> Result<ExportResult, String> {
     let save_path = std::path::PathBuf::from(&params.save_path);
+    validate_backup_destination(&params, &save_path)?;
     let partial_path = partial_path_for(&save_path);
     let total_projects = params.projects.len();
 
@@ -1674,6 +1709,32 @@ mod tests {
     }
 
     #[test]
+    fn rejects_backup_inside_selected_content_before_touching_partial_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let project = tmp.path().join("book");
+        let nested = project.join("QM/outlines");
+        fs::create_dir_all(&nested).unwrap();
+        let output = nested.join("../archive.zip");
+        let partial = partial_path_for(&output);
+        fs::write(&partial, b"untouched").unwrap();
+        let params = ExportParams {
+            save_path: output.to_string_lossy().into_owned(),
+            include_global_config: false,
+            include_ui_preferences: false,
+            include_credentials: false,
+            local_storage_data: serde_json::json!({}),
+            projects: vec![ProjectBackupInfo {
+                id: "book".into(),
+                name: "书".into(),
+                path: project.to_string_lossy().into_owned(),
+                sections: vec![ProjectBackupSection::Content],
+            }],
+        };
+        assert!(do_export_backup(params, &tmp.path().join("app.json"), |_| {}).is_err());
+        assert_eq!(fs::read(partial).unwrap(), b"untouched");
+    }
+
+    #[test]
     fn export_v2_only_writes_selected_project_sections() {
         let tmp = unique_test_dir("selected_sections");
         let project = tmp.join("project");
@@ -1692,6 +1753,8 @@ mod tests {
         std::fs::write(project.join("book-analysis/book-1/result.json"), "{}").unwrap();
         std::fs::write(project.join(".qmai/chat.json"), "{}").unwrap();
         std::fs::write(project.join(".qmai/lancedb/index.bin"), "index").unwrap();
+        std::fs::write(project.join(".qmai/embedding-index.json"), "{}").unwrap();
+        std::fs::write(project.join(".qmai/dedup-summary-vectors.json"), "{}").unwrap();
         std::fs::write(project.join(".qmai/retrieval/index.md"), "索引").unwrap();
         std::fs::write(project.join(".trash/deleted.md"), "删除").unwrap();
 
@@ -1727,6 +1790,8 @@ mod tests {
         assert!(names
             .iter()
             .any(|name| name == "projects/p1/.qmai/lancedb/index.bin"));
+        assert!(names.iter().any(|name| name == "projects/p1/.qmai/embedding-index.json"));
+        assert!(names.iter().any(|name| name == "projects/p1/.qmai/dedup-summary-vectors.json"));
         assert!(names
             .iter()
             .any(|name| name == "projects/p1/.qmai/retrieval/index.md"));

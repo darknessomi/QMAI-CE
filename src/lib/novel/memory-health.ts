@@ -18,7 +18,7 @@ import { normalizePath } from "@/lib/path-utils"
 import { parseFrontmatter } from "@/lib/frontmatter"
 import { isChapterPage, parseChapterNumber } from "./chapter-meta"
 import { listSnapshots } from "./chapter-ingest"
-import { getOutlineSnapshotNumberFromPath } from "./delete-source-memory"
+import { getOutlineSnapshotNumberFromPath, legacyOutlineNumber } from "./outline-ingest-utils"
 import type { FileNode } from "@/types/wiki"
 
 export interface OrphanMemorySource {
@@ -87,9 +87,9 @@ async function collectChapterNumbers(projectPath: string): Promise<Set<number>> 
 }
 
 /** 现有大纲编号（负数的文件名哈希），与删除时的算法保持一致。 */
-async function collectOutlineNumbers(projectPath: string): Promise<Set<number>> {
+async function collectOutlineNumbers(projectPath: string) {
   const files = await listMarkdownFiles(`${normalizePath(projectPath)}/wiki/outlines`)
-  return new Set(files.map((file) => getOutlineSnapshotNumberFromPath(file.path)))
+  return { count: files.length, numbers: new Set(files.flatMap(file => [getOutlineSnapshotNumberFromPath(file.path, projectPath), legacyOutlineNumber(file.path)])) }
 }
 
 export async function scanMemoryHealth(projectPath: string): Promise<MemoryHealthReport> {
@@ -102,7 +102,7 @@ export async function scanMemoryHealth(projectPath: string): Promise<MemoryHealt
   const orphans: OrphanMemorySource[] = []
   for (const snapshotNumber of [...snapshots].sort((a, b) => a - b)) {
     if (snapshotNumber >= 0 && chapterNumbers.has(snapshotNumber)) continue
-    if (snapshotNumber < 0 && outlineNumbers.has(snapshotNumber)) continue
+    if (snapshotNumber < 0 && outlineNumbers.numbers.has(snapshotNumber)) continue
     // 大纲的记忆也可能挂在正数编号上（大纲→章纲→章节共用编号），所以正数编号
     // 只有在"既不是现有章节、也不是现有大纲"时才算孤儿。
     orphans.push({
@@ -116,7 +116,7 @@ export async function scanMemoryHealth(projectPath: string): Promise<MemoryHealt
     scannedAt: Date.now(),
     snapshotCount: snapshots.length,
     chapterCount: chapterNumbers.size,
-    outlineCount: outlineNumbers.size,
+    outlineCount: outlineNumbers.count,
     orphans,
   }
 }

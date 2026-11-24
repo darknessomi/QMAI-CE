@@ -1,3 +1,4 @@
+import { resolveOutlineIngestIdentity } from "./outline-ingest-utils"
 import { withMemoryWriteLock } from "./memory-cleanup-policy"
 import { normalizePath } from "@/lib/path-utils"
 import { deleteFile, fileExists, listDirectory, readFile, writeFileAtomic } from "@/commands/fs"
@@ -28,22 +29,9 @@ const pendingChapterCleanups = new Map<string, Map<number, PendingChapterCleanup
 let cleanupTimer: ReturnType<typeof setTimeout> | null = null
 let cleanupWorker: Promise<void> | null = null
 
-export function getOutlineSnapshotNumberFromPath(outlinePath: string): number {
-  const normalizedPath = normalizePath(outlinePath)
-  const fileName = normalizedPath.split("/").pop() ?? "outline"
-  const outlineName = fileName.replace(/\.\w+$/, "")
-  let hash = 0
-  for (let i = 0; i < outlineName.length; i += 1) {
-    hash = ((hash << 5) - hash + outlineName.charCodeAt(i)) | 0
-  }
-  return -(Math.abs(hash % 999) + 1)
-}
+export { getOutlineSnapshotNumberFromPath } from "./outline-ingest-utils"
 
-function getChapterSnapshotNumberFromDeletedSource(input: DeleteNovelSourceMemoryInput): number | null {
-  if (input.kind === "outline") {
-    return getOutlineSnapshotNumberFromPath(input.pagePath)
-  }
-
+function getDeletedChapterNumber(input: DeleteNovelSourceMemoryInput): number | null {
   const frontmatterNumber = input.content?.match(/^chapter_number:\s*(\d+)\s*$/m)?.[1]
   if (frontmatterNumber) {
     const parsed = Number.parseInt(frontmatterNumber, 10)
@@ -271,7 +259,9 @@ export async function deleteNovelSourceMemory(
   projectPath: string,
   input: DeleteNovelSourceMemoryInput,
 ): Promise<void> {
-  const snapshotNumber = getChapterSnapshotNumberFromDeletedSource(input)
+  const snapshotNumber = input.kind === "outline"
+    ? (await resolveOutlineIngestIdentity(projectPath, input.pagePath)).chapterNumber
+    : getDeletedChapterNumber(input)
   if (snapshotNumber === null) return
 
   if (input.kind === "chapter") {

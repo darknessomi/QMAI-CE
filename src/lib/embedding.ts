@@ -1,3 +1,4 @@
+import { wikiEmbeddingId, wikiEmbeddingTitle } from "./embedding-page-id"
 /**
  * Embedding pipeline — standard RAG flow.
  *
@@ -710,11 +711,6 @@ function chunkOptions(cfg: EmbeddingConfig) {
   }
 }
 
-function pageTitleFromMarkdown(content: string, fallback: string): string {
-  const titleMatch = content.match(/^---\n[\s\S]*?^title:\s*["']?(.+?)["']?\s*$/m)
-  return titleMatch ? titleMatch[1].trim() : fallback
-}
-
 interface WikiPageRef {
   id: string
   path: string
@@ -762,8 +758,8 @@ async function listWikiPages(projectPath: string): Promise<WikiPageRef[]> {
     for (const node of nodes) {
       if (node.is_dir && node.children) walk(node.children)
       else if (!node.is_dir && node.name.endsWith(".md")) {
-        const id = node.name.replace(/\.md$/, "")
-        if (!STRUCTURAL_PAGE_IDS.has(id)) files.push({ id, path: node.path })
+        const id = wikiEmbeddingId(projectPath, node.path)
+        if (id && !STRUCTURAL_PAGE_IDS.has(node.name.slice(0, -3))) files.push({ id, path: node.path })
       }
     }
   }
@@ -773,7 +769,7 @@ async function listWikiPages(projectPath: string): Promise<WikiPageRef[]> {
   for (const file of files) {
     try {
       const content = await readFile(file.path)
-      const title = pageTitleFromMarkdown(content, file.id)
+      const title = wikiEmbeddingTitle(content, file.path.split("/").pop()!.slice(0, -3))
       pages.push({
         id: file.id,
         path: file.path,
@@ -1192,6 +1188,7 @@ export async function embedAllPages(
       }
 
       const configHash = embeddingConfigFingerprint(cfg)
+      await invoke("vector_prepare_page_ids", { projectPath: pp })
       const manifest = await readEmbeddingManifest(pp)
       const pageHashes: Record<string, string> = {}
       for (const page of pages) pageHashes[page.id] = page.hash

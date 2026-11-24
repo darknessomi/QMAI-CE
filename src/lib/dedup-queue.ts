@@ -34,7 +34,9 @@ export interface DedupTask {
   group: DuplicateGroup
   canonicalSlug: string
   modelId?: string
-  status: "pending" | "processing" | "done" | "failed"
+  /** 新版创建或由作者明确继续的任务，可在下次启动时恢复。 */
+  autoResume?: true
+  status: "pending" | "processing" | "done" | "failed" | "awaiting_resume"
   addedAt: number
   error: string | null
   retryCount: number
@@ -44,6 +46,8 @@ export interface DedupTask {
 
 let queue: DedupTask[] = []
 let processing = false
+let restoring: Promise<void> | undefined
+let bindingVersion = 0
 let currentProjectId = ""
 let currentProjectPath = ""
 let currentAbortController: AbortController | null = null
@@ -156,6 +160,7 @@ export async function enqueueMerge(
     group,
     canonicalSlug,
     modelId: modelId?.trim() || undefined,
+    autoResume: true,
     status: "pending",
     addedAt: Date.now(),
     error: null,
@@ -186,6 +191,8 @@ export async function retryTask(taskId: string): Promise<void> {
   task = queue.find((t) => t.id === taskId)
   if (!task || task.projectId !== currentProjectId) return
 
+  if (task.status !== "awaiting_resume" && task.status !== "failed") return
+  task.autoResume = true
   task.status = "pending"
   task.error = null
   task.retryCount = 0
@@ -245,7 +252,9 @@ export function getMergeLogs(): readonly string[] {
  * resume), then clear in-memory state.
  */
 export async function pauseQueue(): Promise<void> {
-  if (!currentProjectId || !currentProjectPath) return
+  const version = bindingVersion
+  if (restoring) await restoring
+  if (version !== bindingVersion || !currentProjectId || !currentProjectPath) return
 
   const pausedProjectPath = currentProjectPath
 
@@ -264,6 +273,7 @@ export async function pauseQueue(): Promise<void> {
   }
 
   await saveQueue(pausedProjectPath)
+  if (version !== bindingVersion) return
 
   queue = []
   currentProjectId = ""
@@ -279,7 +289,7 @@ export async function ensureQueueActive(
   projectPath: string,
 ): Promise<void> {
   const pp = normalizePath(projectPath)
-  if (currentProjectId === projectId && currentProjectPath === pp) return
+  if (currentProjectId === projectId && currentProjectPath === pp) return restoring
   await restoreQueue(projectId, projectPath)
 }
 
@@ -293,6 +303,14 @@ export async function restoreQueue(
   projectPath: string,
 ): Promise<void> {
   const pp = normalizePath(projectPath)
+  if (currentProjectId === projectId && currentProjectPath === pp && restoring) return restoring
+  const pending = loadProjectQueue(projectId, pp, ++bindingVersion)
+  restoring = pending
+  try { await pending } finally { if (restoring === pending) restoring = undefined }
+}
+
+async function loadProjectQueue(projectId: string, pp: string, version: number): Promise<void> {
+  currentAbortController?.abort()
   queue = []
   processing = false
   currentAbortController = null
@@ -300,7 +318,7 @@ export async function restoreQueue(
   currentProjectPath = pp
 
   const saved = await loadQueue(pp, projectId)
-  if (saved.length === 0) return
+  if (version !== bindingVersion || saved.length === 0) return
 
   const mine = saved.filter((t) => t.projectId === projectId)
   if (mine.length !== saved.length) {
@@ -311,7 +329,9 @@ export async function restoreQueue(
 
   let restored = 0
   for (const task of mine) {
-    if (task.status === "processing") {
+    if (!task.autoResume && (task.status === "pending" || task.status === "processing")) {
+      task.status = "awaiting_resume"
+    } else if (task.status === "processing") {
       task.status = "pending"
       restored++
     }
@@ -319,6 +339,7 @@ export async function restoreQueue(
 
   queue = mine
   await saveQueue(pp)
+  if (version !== bindingVersion) return
 
   const pending = queue.filter((t) => t.status === "pending").length
   const failed = queue.filter((t) => t.status === "failed").length
@@ -345,7 +366,7 @@ async function processNext(projectId: string): Promise<void> {
 
   const registryPath = await getProjectPathById(projectId)
   const pp = registryPath ? normalizePath(registryPath) : ""
-  if (currentProjectId !== projectId) return
+  if (currentProjectId !== projectId || processing || !queue.includes(next) || next.status !== "pending") return
 
   if (!pp) {
     next.status = "failed"
@@ -358,7 +379,7 @@ async function processNext(projectId: string): Promise<void> {
   processing = true
   next.status = "processing"
   await saveQueue(pp)
-  if (currentProjectId !== projectId) return
+  if (currentProjectId !== projectId || !queue.includes(next) || next.status !== "processing") return
 
   const state = useWikiStore.getState()
   const llmConfig = next.modelId?.trim()
@@ -412,9 +433,8 @@ async function processNext(projectId: string): Promise<void> {
     await removeGroupFromDedupScanCache(pp, next.group.slugs).catch((err) => {
       console.error("[Dedup Queue] failed to update scan cache after merge:", err)
     })
+    if (currentProjectId !== projectId || !queue.includes(next) || next.status !== "processing") return
     removeMergedDedupGroupFromSession(next.group.slugs)
-
-    if (currentProjectId !== projectId) return
 
     currentAbortController = null
     currentMergeProgress = null
@@ -428,7 +448,7 @@ async function processNext(projectId: string): Promise<void> {
     console.log(`[Dedup Queue] Done: ${next.group.slugs.join(",")}`)
     notifyMergeComplete(completedTask)
   } catch (err) {
-    if (currentProjectId !== projectId) return
+    if (currentProjectId !== projectId || !queue.includes(next) || next.status !== "processing") return
     currentAbortController = null
     currentMergeProgress = null
     const message = err instanceof Error ? err.message : String(err)

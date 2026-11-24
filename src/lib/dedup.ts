@@ -29,11 +29,8 @@
  */
 
 import { parseFrontmatter } from "./frontmatter"
-import {
-  parseFrontmatterArray,
-  mergeArrayFieldsIntoContent,
-  writeFrontmatterArray,
-} from "./sources-merge"
+import { mergeArrayFieldsIntoContent } from "./sources-merge"
+import { createMergeRedirect, inheritedRelated, rewriteIndexLinks, rewritePageLinks } from "./dedup-links"
 
 // ──────────────────────────────────────────────────────────────────
 // Types
@@ -52,6 +49,7 @@ export interface EntitySummary {
    *  to ~200 chars to keep the detector prompt small. */
   description?: string
   tags: string[]
+  aliases?: string[]
 }
 
 export interface DuplicateGroup {
@@ -123,6 +121,7 @@ export function extractEntitySummary(
   const title = stringField(frontmatter.title) ?? slugFromPath(pathRelativeToProject)
   const description = stringField(frontmatter.description) ?? firstBodyParagraph(body)
   const tags = arrayField(frontmatter.tags)
+  const aliases = arrayField(frontmatter.aliases)
   return {
     slug: slugFromPath(pathRelativeToProject),
     path: pathRelativeToProject,
@@ -130,6 +129,7 @@ export function extractEntitySummary(
     title,
     description: description ? truncate(description, 200) : undefined,
     tags,
+    ...(aliases.length ? { aliases } : {}),
   }
 }
 
@@ -227,16 +227,18 @@ export async function detectDuplicateGroups(
   )
 
   return parsed
-    .map((g) => ({ ...g, slugs: g.slugs.filter((s) => validSlugs.has(s)) }))
+    .map((g) => ({ ...g, slugs: [...new Set(g.slugs.filter((s) => validSlugs.has(s)))] }))
     .filter((g) => g.slugs.length >= 2)
-    .filter((g) => !notDupSet.has(normalizeGroupKey(g.slugs)))
+    .filter((g) => !notDupSet.has(normalizeGroupKey(g.slugs)) &&
+      !g.slugs.some((slug, i) => g.slugs.slice(i + 1).some((other) => notDupSet.has(normalizeGroupKey([slug, other])))))
 }
 
 function buildDetectorUserMessage(summaries: EntitySummary[]): string {
   const lines = summaries.map((s) => {
     const tagPart = s.tags.length > 0 ? ` [${s.tags.join(", ")}]` : ""
+    const aliasPart = s.aliases?.length ? ` aliases=${JSON.stringify(s.aliases)}` : ""
     const descPart = s.description ? ` — ${s.description}` : ""
-    return `- type=${s.type}, slug=${s.slug}, title=${JSON.stringify(s.title)}${tagPart}${descPart}`
+    return `- type=${s.type}, slug=${s.slug}, title=${JSON.stringify(s.title)}${tagPart}${aliasPart}${descPart}`
   })
   return `## Wiki pages to scan (${summaries.length} entries)\n\n${lines.join("\n")}\n\nReturn duplicate groups as JSON only.`
 }
@@ -245,22 +247,17 @@ function buildDetectorUserMessage(summaries: EntitySummary[]): string {
  * Tolerant JSON extraction. The LLM might wrap output in code
  * fences (\`\`\`json), prepend "Sure, here you go:", or trail
  * with a polite "Let me know if...". Pull the first {…} block
- * with balanced braces and parse it. Returns [] for any failure
- * — the caller treats "no duplicates found" identically to "LLM
- * output garbled".
+ * with balanced braces and parse it. An invalid reply cannot confirm a clean scan.
  */
 function parseDetectorResponse(raw: string): DuplicateGroup[] {
-  const jsonText = extractFirstJsonObject(raw)
-  if (!jsonText) return []
   let parsed: unknown
   try {
-    parsed = JSON.parse(jsonText)
+    parsed = JSON.parse(extractFirstJsonObject(raw) ?? "")
   } catch {
-    return []
+    throw new Error("查重模型未返回完整 JSON，本次扫描未完成")
   }
-  if (!parsed || typeof parsed !== "object") return []
-  const groupsRaw = (parsed as { groups?: unknown }).groups
-  if (!Array.isArray(groupsRaw)) return []
+  const groupsRaw = (parsed as { groups?: unknown } | null)?.groups
+  if (!Array.isArray(groupsRaw)) throw new Error("查重模型缺少 groups 列表，本次扫描未完成")
 
   const out: DuplicateGroup[] = []
   for (const g of groupsRaw) {
@@ -332,7 +329,7 @@ const MERGER_SYSTEM_PROMPT = `你是一个维基维护助手。你将收到几�
 - Frontmatter：保留标准字段（type, title, created, updated, tags, related, sources）。调用方会在之后用确定性合并覆盖 sources / tags / related / updated 字段——你的任务是生成合理的正文和合理的 frontmatter 结构。
 - 选择最具描述性的标题。如果输入使用了不同语言，优先选择与正文内容多数语言匹配的语言。`
 
-const FIELDS_TO_UNION = ["sources", "tags", "related"] as const
+const FIELDS_TO_UNION = ["sources", "tags", "aliases"] as const
 
 /**
  * Compute everything needed to merge a confirmed duplicate group:
@@ -366,6 +363,11 @@ export async function mergeDuplicateGroup(
   const userMessage = buildMergerUserMessage(req.group)
   const llmOutput = await llmCall(MERGER_SYSTEM_PROMPT, userMessage, options.signal)
 
+  const parsed = parseFrontmatter(llmOutput)
+  if (!parsed.frontmatter || !parsed.body.trim()) {
+    throw new Error("模型未返回完整的合并文件（文件头及正文），原文件已保留")
+  }
+
   // 2. Frontmatter union (deterministic post-processing of LLM output).
   //    For each unioned field, fold every input page's values into
   //    the LLM output via mergeArrayFieldsIntoContent.
@@ -383,15 +385,14 @@ export async function mergeDuplicateGroup(
   // 4. Cross-reference rewrites: every other wiki page that mentions
   //    a non-canonical slug needs its wikilinks / related entries
   //    rewritten to the canonical.
-  const slugRedirects = new Map<string, string>()
-  for (const page of req.group) {
-    if (page.slug !== req.canonicalSlug) {
-      slugRedirects.set(page.slug, req.canonicalSlug)
-    }
-  }
+  const removedPaths = req.group.filter(page => page.slug !== req.canonicalSlug).map(page => page.path)
+  const redirect = createMergeRedirect(removedPaths, canonical.path, [...req.group, ...req.otherWikiPages].map(p => p.path))
+  merged = rewritePageLinks(merged, redirect, inheritedRelated(req.group))
   const rewrites: MergeResult["rewrites"] = []
   for (const page of req.otherWikiPages) {
-    const rewritten = rewriteCrossReferences(page.content, slugRedirects)
+    const rewritten = /^(?:wiki|QM)\/index\.md$/.test(page.path)
+      ? rewriteIndexMd(page.content, redirect)
+      : rewritePageLinks(page.content, redirect)
     if (rewritten !== page.content) {
       rewrites.push({ path: page.path, newContent: rewritten })
     }
@@ -442,56 +443,6 @@ function buildMergerUserMessage(
   ].join("\n")
 }
 
-/**
- * Rewrite cross-references to merged-away slugs throughout one
- * page's content. Three forms get rewritten:
- *
- *   1. `[[old-slug]]` and `[[old-slug|alias]]` in the body
- *      — replace just the target portion, keep alias if present.
- *   2. `related: [..., old-slug, ...]` (inline form) — substitute
- *      old-slug with canonical inside the array, then dedup.
- *   3. `related:\n  - old-slug` (block form) — same substitution.
- *
- * `wiki/index.md`-style listings of files are out of scope here —
- * the caller handles index regeneration separately.
- */
-function rewriteCrossReferences(
-  content: string,
-  slugRedirects: Map<string, string>,
-): string {
-  let out = content
-
-  // 1. Wikilinks in the body — both [[slug]] and [[slug|alias]].
-  for (const [oldSlug, newSlug] of slugRedirects) {
-    const escaped = escapeRegex(oldSlug)
-    const re = new RegExp(`\\[\\[${escaped}(\\|[^\\]]+)?\\]\\]`, "g")
-    out = out.replace(re, (_match, alias) => `[[${newSlug}${alias ?? ""}]]`)
-  }
-
-  // 2. & 3. `related` field — re-parse and rewrite.
-  const existing = parseFrontmatterArray(out, "related")
-  if (existing.length > 0) {
-    const rewritten = existing.map((s) => slugRedirects.get(s) ?? s)
-    // Deduplicate (case-insensitive, first-seen casing wins)
-    const seen = new Set<string>()
-    const unique: string[] = []
-    for (const s of rewritten) {
-      const k = s.toLowerCase()
-      if (seen.has(k)) continue
-      seen.add(k)
-      unique.push(s)
-    }
-    if (
-      unique.length !== existing.length ||
-      unique.some((s, i) => s !== existing[i])
-    ) {
-      out = writeFrontmatterArray(out, "related", unique)
-    }
-  }
-
-  return out
-}
-
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 }
@@ -518,25 +469,12 @@ function defaultToday(): string {
   return new Date().toISOString().slice(0, 10)
 }
 
-// ──────────────────────────────────────────────────────────────────
-// Index rewriter — wiki/index.md-specific
-// ──────────────────────────────────────────────────────────────────
-
-/**
- * Remove entries for merged-away slugs from `wiki/index.md`.
- * Index files are typically formatted as bullet / link lists
- * grouped by section. This is a CONSERVATIVE rewriter:
- *   - Removes any whole line that contains a markdown link or
- *     wikilink to a merged-away slug.
- *   - Preserves all other content verbatim (other sections,
- *     intros, the canonical entry).
- * The caller (UI) shows the user a diff before writing so any
- * over-removal is visible.
- */
+/** Existing slug-only callers remove entries. Merges pass a path-aware redirect. */
 export function rewriteIndexMd(
   content: string,
-  removedSlugs: Set<string>,
+  removedSlugs: Set<string> | ReturnType<typeof createMergeRedirect>,
 ): string {
+  if (typeof removedSlugs === "function") return rewriteIndexLinks(content, removedSlugs)
   if (removedSlugs.size === 0) return content
   const lines = content.split("\n")
   const out: string[] = []

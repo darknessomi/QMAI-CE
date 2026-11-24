@@ -148,7 +148,7 @@ function App() {
     if (!isCurrentProject(proj)) return
 
     try {
-      const { restoreQueue: restoreDedupQueue } = await import("@/lib/dedup-queue")
+      const { ensureQueueActive: restoreDedupQueue } = await import("@/lib/dedup-queue")
       await restoreDedupQueue(proj.id, proj.path)
     } catch (err) {
       console.error("恢复去重队列失败:", err)
@@ -158,7 +158,7 @@ function App() {
 
     try {
       const {
-        restoreForeshadowingCleanupQueue,
+        ensureForeshadowingCleanupQueueActive: restoreForeshadowingCleanupQueue,
       } = await import("@/lib/foreshadowing-cleanup-queue")
       await restoreForeshadowingCleanupQueue(proj.id, proj.path)
     } catch (err) {
@@ -656,6 +656,13 @@ function App() {
     await resetProjectState()
     await initializeProjectContextCache(proj.path)
 
+    if (isTauri()) {
+      try {
+        await invoke("vector_prepare_page_ids", { projectPath: proj.path })
+      } catch (err) {
+        console.warn("本地向量索引升级将在下次访问时重试", err)
+      }
+    }
     setProject(proj)
     useWikiStore.getState().clearTransientTaskState()
     // 默认开启小说模式

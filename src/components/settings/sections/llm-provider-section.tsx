@@ -16,6 +16,8 @@ import { invoke } from "@tauri-apps/api/core"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { useWikiStore, type ProviderOverride, type ReasoningConfig, type ReasoningMode, type SavedModel } from "@/stores/wiki-store"
+import { modelOffersReasoningMode, openAiReasoningMode } from "@/lib/openai-model-capabilities"
+import type { LlmConfig } from "@/stores/wiki-store"
 import { LLM_PRESETS, type LlmPreset } from "../llm-presets"
 import { ContextSizeSelector } from "../context-size-selector"
 import { OutputTokensSelector } from "../output-tokens-selector"
@@ -729,6 +731,7 @@ function PresetRow({
 
           {preset.provider !== "cursor-cli" && preset.provider !== "antigravity-cli" && (
             <ReasoningControls
+              modelConfig={resolvedConfig}
               value={reasoning}
               onChange={(next) => onChange(withOutputRoomForReasoning(next, maxOutputTokens))}
               onModeChange={onReasoningModeChange}
@@ -811,7 +814,9 @@ export function ReasoningControls({
   onChange,
   onModeChange,
   alwaysThinks = false,
+  modelConfig,
 }: {
+  modelConfig?: LlmConfig
   value: ReasoningConfig
   onChange: (value: ReasoningConfig) => void
   onModeChange: (mode: ReasoningMode) => void
@@ -825,6 +830,7 @@ export function ReasoningControls({
     { value: "low", label: t("settings.sections.llm.reasoning.low") },
     { value: "medium", label: t("settings.sections.llm.reasoning.medium") },
     { value: "high", label: t("settings.sections.llm.reasoning.high") },
+    { value: "xhigh", label: t("settings.sections.llm.reasoning.xhigh") },
     { value: "max", label: t("settings.sections.llm.reasoning.max") },
     { value: "custom", label: t("settings.sections.llm.reasoning.custom") },
   ]
@@ -833,8 +839,8 @@ export function ReasoningControls({
     <div className="space-y-2">
       <Label>{t("settings.sections.llm.reasoning.title")}</Label>
       <div className="flex flex-wrap gap-1.5">
-        {modes.map((m) => {
-          const active = value.mode === m.value
+        {modes.filter((m) => modelOffersReasoningMode(modelConfig, m.value)).map((m) => {
+          const active = (modelConfig ? openAiReasoningMode(modelConfig, value.mode) : value.mode) === m.value
           return (
             <button
               key={m.value}
@@ -851,7 +857,7 @@ export function ReasoningControls({
           )
         })}
       </div>
-      {value.mode === "custom" && (
+      {value.mode === "custom" && modelOffersReasoningMode(modelConfig, "custom") && (
         <div className="flex items-center gap-2">
           <Input
             type="number"

@@ -15,6 +15,7 @@ export const REASONING_DEPTH_STEPS = [
   "low",
   "medium",
   "high",
+  "xhigh",
   "max",
 ] as const satisfies readonly ReasoningMode[]
 

@@ -1,3 +1,4 @@
+import { wikiEmbeddingId } from "../embedding-page-id"
 import { createDirectory, deleteFile, fileExists, listDirectory, readFile, writeFileAtomic } from "@/commands/fs"
 import { isPathInside, normalizePath } from "@/lib/path-utils"
 import { streamChat } from "@/lib/llm-client"
@@ -279,7 +280,7 @@ function report(onLog: Log | undefined, message: string): void {
 async function invalidateVectors(projectPath: string, paths: string[], communities: string[], onLog?: Log): Promise<void> {
   if (!await fileExists(`${normalizePath(projectPath)}/.qmai/lancedb`)) return
   const { removePageEmbeddingStrict, embedPage } = await import("@/lib/embedding")
-  const ids = new Set(paths.filter((path) => path.endsWith(".md")).map((path) => path.split("/").pop()!.replace(/\.md$/, "")))
+  const ids = new Set(paths.map((path) => wikiEmbeddingId(projectPath, path)).filter((id): id is string => id !== null))
   for (const path of communities) ids.add(`community:${path.split("/").pop()!.replace(/\.json$/, "")}`)
   const pending = [...ids]
   report(onLog, `正在清除旧向量 0/${pending.length}。每 32 页会压缩一次索引，这一步数字会短暂停住，并不是卡住。`)
@@ -289,16 +290,16 @@ async function invalidateVectors(projectPath: string, paths: string[], communiti
   }
   const config = useWikiStore.getState().embeddingConfig
   if (config.enabled && config.model) {
-    const pages = [...new Set(paths)].filter((path) => path.includes("/wiki/") && path.endsWith(".md"))
+    const pages = [...new Set(paths)].filter((path) => wikiEmbeddingId(projectPath, path) !== null)
     for (let index = 0; index < pages.length; index++) {
       const path = pages[index]
       if (!await fileExists(path)) continue
-      const id = path.split("/").pop()!.replace(/\.md$/, "")
+      const id = wikiEmbeddingId(projectPath, path)!
       const content = await readFile(path)
       const title = parseFrontmatter(content).frontmatter?.title
       report(onLog, `正在重建向量 ${index + 1}/${pages.length}：${id}`)
       try {
-        if (!await embedPage(projectPath, id, typeof title === "string" ? title : id, content, config)) throw new Error("嵌入未完成")
+        if (!await embedPage(projectPath, id, typeof title === "string" ? title : path.split("/").pop()!.slice(0, -3), content, config)) throw new Error("嵌入未完成")
       } catch {
         onLog?.(`警告：旧向量已清除，但页面「${id}」重新索引失败，尚未完成的页面请在向量设置中重建索引。来源及文档已同步。`)
         return

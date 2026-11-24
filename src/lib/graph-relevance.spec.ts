@@ -7,7 +7,7 @@ vi.mock("@/commands/fs", () => ({
 }))
 
 import { listDirectory, readFile } from "@/commands/fs"
-import { buildRetrievalGraph, clearGraphCache } from "./graph-relevance"
+import { buildRetrievalGraph, clearGraphCache, getRelatedNodes } from "./graph-relevance"
 
 const mockedListDirectory = vi.mocked(listDirectory)
 const mockedReadFile = vi.mocked(readFile)
@@ -68,4 +68,30 @@ test("does not reuse graph cache across projects with the same data version", as
   expect([...first.nodes.values()][0]?.title).toBe("Project A Node")
   expect([...second.nodes.values()][0]?.title).toBe("Project B Node")
   expect(mockedListDirectory).toHaveBeenCalledTimes(2)
+})
+
+test("别名冲突保留目录中第一个候选，精确匹配及直接关系排序仍独立", async () => {
+  const ids = ["Crown Gate", "Crown-Gate", "远航", "独立页"]
+  mockedListDirectory.mockResolvedValue(ids.map((id) => ({
+    name: `${id}.md`, path: `/Project/wiki/entities/${id}.md`, is_dir: false,
+  })))
+  mockedReadFile.mockImplementation(async (path) => {
+    const text = path.endsWith("/远航.md")
+      ? "- [[CROWN  GATE|城门]] — 合作\n- [[Crown-Gate]] — 位于"
+      : ""
+    return `---\ntype: entity\n---\n${text}`
+  })
+
+  const graph = await buildRetrievalGraph("/Project")
+  const source = graph.nodes.get("远航")!
+  expect([...source.outLinks]).toEqual(["Crown Gate", "Crown-Gate"])
+  expect(source.relationEdges).toEqual([
+    { target: "Crown Gate", relation: "ALLY_OF" },
+    { target: "Crown-Gate", relation: "LOCATED_AT" },
+  ])
+  expect(graph.nodes.get("Crown Gate")!.inLinks.has("远航")).toBe(true)
+  expect(graph.nodes.get("Crown-Gate")!.inLinks.has("远航")).toBe(true)
+  expect(getRelatedNodes("远航", graph).map(({ node }) => node.id)).toEqual([
+    "Crown Gate", "Crown-Gate", "独立页",
+  ])
 })

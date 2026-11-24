@@ -144,15 +144,17 @@ export function resolveRelatedSlug(
   wikiRoot: string,
   fallbackTree?: FileNode[],
 ): string | null {
-  if (ref.includes("/")) {
-    const projectRoot = wikiRoot.replace(/\/wiki$/, "")
-    const target = `${projectRoot}/${ref}`
-    const found = findInTreeByPath(lookup, target, fallbackTree)
-    return found && found.includes(`${wikiRoot}/`) ? found : null
+  const slug = unwrapWikilink(ref.trim()).slug.split("#", 1)[0].trim()
+    .replace(/\\/g, "/").replace(/^\.\//, "")
+  if (!slug || /[\u0000-\u001f\u007f]/u.test(slug) || /^[A-Za-z]:\//.test(slug)
+    || slug.split("/").some(part => !part || part === "." || part === "..")) return null
+  const filename = slug.endsWith(".md") ? slug : `${slug}.md`
+  const root = wikiRoot.replace(/\\/g, "/").replace(/\/$/, "")
+  if (slug.includes("/")) {
+    const relative = filename.replace(/^(?:wiki|QM)\//, "")
+    return findInTreeByPath(lookup, `${root}/${relative}`, fallbackTree)
   }
-
-  const filename = ref.endsWith(".md") ? ref : `${ref}.md`
-  return findInTreeByName(lookup, filename, `${wikiRoot}/`, fallbackTree)
+  return findInTreeByName(lookup, filename, `${root}/`, fallbackTree)
 }
 
 /**
