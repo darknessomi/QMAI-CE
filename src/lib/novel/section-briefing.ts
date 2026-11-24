@@ -3,11 +3,15 @@
  * 根据本章细纲，从追踪数据中筛选出本节所需的角色状态、伏笔信息和世界观约束
  */
 
+import { matchesPersonaName } from "./persona-skill-context"
+import { loadPersonaSkillIndex } from "./persona-skill-store"
+import { normalizePersonaName } from "./persona-skill-types"
 import { readContextMd } from "./tracking-files"
 import { loadCharacterStates } from "./character-state"
 import { loadForeshadowingTracker } from "./foreshadowing-tracker"
 import {
-  buildRelevantCharacterBriefs,
+  selectRelevantCharacterBriefs,
+  type OutlineCharacterBrief,
   buildRelevantForeshadowing,
   capOutlineSourcesToBudget,
   loadOutlineDocumentIndex,
@@ -20,7 +24,6 @@ import {
   selectBriefingItems,
 } from "./item-category"
 
-const RELEVANT_CHARACTER_BRIEFS_MAX_CHARS = 8_000
 const RELEVANT_FORESHADOWING_MAX_CHARS = 6_000
 const RELEVANT_ITEMS_MAX_CHARS = 4_000
 
@@ -115,15 +118,16 @@ function extractForeshadowingHints(chapterOutlineContent: string): string[] {
  * @param projectPath - 项目路径
  * @param chapterNumber - 当前章节号
  * @param chapterOutlineContent - 本章细纲文本内容
- * @returns 格式化的「本节速记」Markdown 文本，无可筛选内容时返回空字符串
+ * @returns 本节速记和候选人物小传。组装写作上下文时再与最新的人物档案合并。
  */
 export async function buildSectionBriefing(
   projectPath: string,
-  chapterNumber: number,
+  chapterNumber: number | undefined,
   chapterOutlineContent: string,
   task = "",
-): Promise<string> {
+): Promise<{ text: string; characterBriefs: OutlineCharacterBrief[] }> {
   const sections: string[] = []
+  let characterBriefs: OutlineCharacterBrief[] = []
   const trimmedOutline = chapterOutlineContent.trim()
   const matchingText = [task, trimmedOutline].filter(Boolean).join("\n")
 
@@ -161,19 +165,16 @@ export async function buildSectionBriefing(
   }
 
   try {
-    const outlineIndex = await loadOutlineDocumentIndex(projectPath)
-    const characterBriefs = capOutlineSourcesToBudget(
-      buildRelevantCharacterBriefs(outlineIndex, matchingText),
-      RELEVANT_CHARACTER_BRIEFS_MAX_CHARS,
-    )
-    if (characterBriefs) {
-      sections.push("### 相关人物小传")
-      sections.push(characterBriefs)
-      sections.push("")
-    }
+    const [outlineIndex, personas] = await Promise.all([
+      loadOutlineDocumentIndex(projectPath),
+      loadPersonaSkillIndex(projectPath),
+    ])
+    const query = normalizePersonaName(matchingText)
+    const matchedPeople = personas.skills.filter((meta) => matchesPersonaName(query, [meta.characterName, ...meta.aliases]))
+    characterBriefs = await selectRelevantCharacterBriefs(outlineIndex, matchingText, matchedPeople)
 
     const outlineForeshadowing = capOutlineSourcesToBudget(
-      buildRelevantForeshadowing(outlineIndex, chapterNumber, matchingText),
+      chapterNumber ? buildRelevantForeshadowing(outlineIndex, chapterNumber, matchingText) : "",
       RELEVANT_FORESHADOWING_MAX_CHARS,
     )
     if (outlineForeshadowing) {
@@ -182,6 +183,8 @@ export async function buildSectionBriefing(
       sections.push("")
     }
   } catch {}
+
+  if (!chapterNumber) return { text: sections.join("\n").trimEnd(), characterBriefs }
 
   // ── 2. 筛选相关伏笔 ────────────────────────────────
   const fStore = await loadForeshadowingTracker(projectPath)
@@ -283,11 +286,5 @@ export async function buildSectionBriefing(
     }
   }
 
-  if (sections.length === 0) return ""
-
-  return [
-    "## 本节速记",
-    "",
-    ...sections,
-  ].join("\n")
+  return { text: sections.join("\n").trimEnd(), characterBriefs }
 }

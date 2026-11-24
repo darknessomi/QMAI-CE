@@ -1,3 +1,4 @@
+import { confirmAction } from "@/lib/confirm-action"
 ﻿import { useState, useCallback, useEffect, useMemo } from "react"
 import { useTranslation } from "react-i18next"
 import i18n from "@/i18n"
@@ -205,9 +206,9 @@ export function ReviewView({
   const openNovelReviewActionItem = useCallback(async (item: NovelReviewActionItem, highlight = false) => {
     try {
       const content = await readFile(item.targetPath)
-      setSelectedFile(item.targetPath)
+      if (!(await setActiveView("wiki"))) return
+      if (!(await setSelectedFile(item.targetPath))) return
       setFileContent(content)
-      setActiveView("wiki")
       if (highlight) {
         const anchor = findReviewRewriteAnchors(content, [item.evidence, item.secondaryEvidence])[0]
         if (anchor) {
@@ -481,9 +482,9 @@ export function ReviewView({
       .find((text) => text && latestMarkdown.includes(text))
       || firstBackup.replacementText
 
-    setSelectedFile(firstBackup.targetPath)
+    if (!(await setActiveView("wiki"))) return
+    if (!(await setSelectedFile(firstBackup.targetPath))) return
     setFileContent(latestMarkdown)
-    setActiveView("wiki")
     setPendingEditorHighlight({
       path: firstBackup.targetPath,
       text: highlightText,
@@ -587,7 +588,7 @@ export function ReviewView({
 
   const handleDeleteHistory = useCallback(async (entry: GenerationHistoryEntry) => {
     if (!project) return
-    const confirmed = window.confirm(t("novel.history.deleteConfirm"))
+    const confirmed = await confirmAction(t("novel.history.deleteConfirm"))
     if (!confirmed) return
     await deleteGenerationHistoryEntry(project.path, entry.filePath)
     setExpandedHistoryId((current) => current === entry.id ? null : current)
@@ -708,9 +709,9 @@ export function ReviewView({
       for (const path of candidates) {
         try {
           const content = await readFile(path)
-          useWikiStore.getState().setSelectedFile(path)
+          if (!(await useWikiStore.getState().setActiveView("wiki"))) return
+          if (!(await useWikiStore.getState().setSelectedFile(path))) return
           useWikiStore.getState().setFileContent(content)
-          useWikiStore.getState().setActiveView("wiki")
           break
         } catch {
         }

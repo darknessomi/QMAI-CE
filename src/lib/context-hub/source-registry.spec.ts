@@ -46,6 +46,7 @@ describe("ContextSourceRegistry", () => {
   it("scans direct .qmai files and skips the retired simulation directory", async () => {
     const calls: Array<[string, unknown]> = []
     const writingStyle = file("E:/Novel/.qmai/writing-style.json", 1)
+    const personaIndex = file("E:/Novel/.qmai/persona-skills/index.json", 1)
     const simulation = file("E:/Novel/.qmai/simulations/latest.json", 1)
 
     const result = await scanProjectContextFiles("E:/Novel", {
@@ -53,12 +54,13 @@ describe("ContextSourceRegistry", () => {
       listDirectory: vi.fn(async (path, options) => {
         calls.push([path, options])
         if (path === "E:/Novel/.qmai") return [writingStyle]
+        if (path === "E:/Novel/.qmai/persona-skills") return [personaIndex, file(path + "/sightings.json", 1)]
         if (path === "E:/Novel/.qmai/simulations") return [simulation]
         return []
       }),
     })
 
-    expect(result).toEqual([writingStyle])
+    expect(result).toEqual([writingStyle, personaIndex])
     expect(calls).toContainEqual(["E:/Novel/.qmai", { includeHidden: true, maxDepth: 1 }])
     expect(calls.some(([path]) => path === "E:/Novel/.qmai/simulations")).toBe(false)
     expect(calls).toContainEqual(["E:/Novel/.qmai/retrieval", { maxDepth: 30 }])

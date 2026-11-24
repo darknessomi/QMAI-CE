@@ -1,3 +1,4 @@
+import { confirmAction } from "@/lib/confirm-action"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
 import {
@@ -432,7 +433,7 @@ export function ForeshadowingCleanupTool() {
             ? "delete"
             : "abandon")
       if (resolvedAction === "delete") {
-        const ok = window.confirm(
+        const ok = await confirmAction(
           t("settings.sections.maintenance.foreshadowing.deleteAllConfirm", {
             defaultValue: `将永久删除这 ${entry.issue.ids.length} 条伏笔（先备份）。是否继续？`,
             count: entry.issue.ids.length,
@@ -486,12 +487,12 @@ export function ForeshadowingCleanupTool() {
   const handleRebuild = useCallback(async () => {
     if (!project) return
     if (
-      !window.confirm(
+      !(await confirmAction(
         t("settings.sections.maintenance.foreshadowing.rebuildConfirm", {
           defaultValue:
             "将从全部章节快照重新生成伏笔追踪器（会先备份）。修完解析问题后重建，可自动纠正错误的「未回收」状态。是否继续？",
         }),
-      )
+      ))
     ) {
       return
     }
@@ -541,12 +542,12 @@ export function ForeshadowingCleanupTool() {
   const handleDeleteInvalid = useCallback(async () => {
     if (!project || invalidSnaps.length === 0) return
     if (
-      !window.confirm(
+      !(await confirmAction(
         t("settings.sections.maintenance.foreshadowing.deleteInvalidConfirm", {
           defaultValue: `将删除 ${invalidSnaps.length} 个 chapterNumber≤0 的异常快照文件。是否继续？`,
           count: invalidSnaps.length,
         }),
-      )
+      ))
     ) {
       return
     }
@@ -598,7 +599,7 @@ export function ForeshadowingCleanupTool() {
 
       const deleteIds = noise.flatMap((e) => e.issue.ids)
       const abandonIds = stale.flatMap((e) => e.issue.ids)
-      const ok = window.confirm(
+      const ok = await confirmAction(
         t("settings.sections.maintenance.foreshadowing.bulkCleanConfirm", {
           defaultValue:
             "将删除噪声 {{noise}} 条，并把失效 {{stale}} 条标记为已放弃（先备份，一次写入）。是否继续？",

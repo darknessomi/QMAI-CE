@@ -1,4 +1,5 @@
 import { normalizePath } from "@/lib/path-utils"
+import { withProjectLock } from "@/lib/project-mutex"
 import { sanitizeAiHtml } from "./ai-html-safety"
 import type { CharacterSaveDraft } from "./character-save-extractor"
 import { cleanNextStepArtifacts } from "./outline-next-step"
@@ -7,7 +8,7 @@ import { stripOutlineFrontmatter } from "./outline-markdown"
 import { stripThoughtDumpFromText } from "@/lib/thought-dump"
 import { pickVolumeOutlineDataForRequest, renderVolumeOutlineMarkdown } from "./volume-outline-template"
 import { extractChapterOutlineData, renderChapterOutlineMarkdown } from "./chapter-outline-template"
-import { pickCharacterProfileFromText, renderCharacterProfileForContent, renderCharacterProfileMarkdown } from "./character-profile-template"
+import { characterProfileDataFromMarkdown, pickCharacterProfileFromText, renderCharacterProfileForContent, renderCharacterProfileMarkdown } from "./character-profile-template"
 import { extractFactionProfiles } from "./faction-profile-template"
 import { extractPowerProfiles } from "./power-system-template"
 import { extractGoldenFingerProfiles } from "./golden-finger-template"
@@ -44,6 +45,8 @@ export interface OutlineSaveRequest {
   referencedSkills: string[]
   sourceIntent: string
   content: string
+  /** 已确认的草稿身份；文件名可以由用户修改，也可能在保存时因重名而改变。 */
+  character?: { name: string; roleType: string }
   /** 可选：自包含 HTML 版本（如卷纲折叠树），保存时落盘为同名 .html 文件 */
   htmlContent?: string
   /** 可选：结构化数据（如卷纲 volumeOutlineData 的 JSON），保存时落盘为同名 .json 伴生文件，供章纲等后续环节做交叉校验 */
@@ -86,7 +89,14 @@ interface OutlineSaveRequestParseResult {
   eventOutlineRejectionCount: number
 }
 
+export interface SavedOutlineSource {
+  request: OutlineSaveRequest
+  /** 相对于大纲目录的实际主文件路径。优先 Markdown，仅存 HTML 时指向 HTML。 */
+  relativePath: string
+}
+
 interface OutlineSaveRequestSaveResult {
+  savedSources: SavedOutlineSource[]
   saved: Array<{
     path: string
     fileName: string
@@ -818,7 +828,14 @@ export function parseOutlineSaveRequests(text: string): OutlineSaveRequestParseR
       const keep = Boolean(markdown)
         && looksLikeProfileBody(request.content, sectionHeadingsOf("characterBriefs"))
         && outlineBodyCoversData(request.content, markdown)
-      if (markdown && !keep) request = { ...request, content: markdown }
+      if (profile) {
+        const identity = characterProfileDataFromMarkdown(markdown) ?? profile
+        request = {
+          ...request,
+          character: { name: identity.name, roleType: identity.roleType ?? "" },
+          content: keep ? request.content : markdown,
+        }
+      }
     }
     /*
      * 其余七类设定（势力 / 力量 / 金手指 / 背景 / 地理 / 地点 / 伏笔）同样只收结构化数据，
@@ -958,6 +975,7 @@ export function characterDraftsToSaveRequests(
         {
           targetFolder: "人物小传",
           fileName: draft.fileName,
+          character: { name: draft.characterName, roleType: draft.roleType },
           fileType: "character" as const,
           writeMode: "create" as const,
           referencedSkills: ["JueseSkill/character-design"],
@@ -1079,29 +1097,22 @@ async function readPreviousOutlineContent(
   }
 }
 
-async function resolveUniquePath(
+async function resolveUniqueFileName(
   fs: Pick<OutlineSaveRequestFs, "fileExists">,
   targetDir: string,
-  fileName: string,
-): Promise<{ path: string; fileName: string }> {
-  const first = `${targetDir}/${fileName}`
-  if (!(await fs.fileExists(first))) return { path: first, fileName }
-
-  const extensionIndex = fileName.lastIndexOf(".")
-  const stem = extensionIndex > 0 ? fileName.slice(0, extensionIndex) : fileName
-  const extension = extensionIndex > 0 ? fileName.slice(extensionIndex) : ""
-  for (let index = 2; index <= 99; index++) {
-    const candidateName = `${stem}-${index}${extension}`
-    const candidatePath = `${targetDir}/${candidateName}`
-    if (!(await fs.fileExists(candidatePath))) {
-      return { path: candidatePath, fileName: candidateName }
-    }
+  request: OutlineSaveRequest,
+): Promise<string> {
+  const stem = request.fileName.replace(/\.md$/i, "")
+  const suffixes = [request.fileName.slice(stem.length), ".html", ".json"]
+  for (let index = 1; index <= 100; index++) {
+    const candidate = index === 1 ? stem : `${stem}-${index === 100 ? Date.now() : index}`
+    const collisions = await Promise.all(suffixes.map((ext) => fs.fileExists(`${targetDir}/${candidate}${ext}`)))
+    if (!collisions.some(Boolean)) return candidate + suffixes[0]
   }
-  const fallbackName = `${stem}-${Date.now()}${extension}`
-  return { path: `${targetDir}/${fallbackName}`, fileName: fallbackName }
+  throw new Error("同名文件过多，请修改文件名后重新保存。")
 }
 
-export async function saveOutlineSaveRequests(input: {
+type OutlineSaveInput = {
   outlineRoot: string
   requests: OutlineSaveRequest[]
   confirmed?: boolean
@@ -1115,74 +1126,76 @@ export async function saveOutlineSaveRequests(input: {
    * 一个不存在的地方。缺省时安全跳过落版本（不影响保存本身）。
    */
   projectPath?: string
-} & OutlineSaveRequestsHistoryHook & OutlineSaveRequestFs): Promise<OutlineSaveRequestSaveResult> {
+} & OutlineSaveRequestsHistoryHook & OutlineSaveRequestFs
+
+export async function saveOutlineSaveRequests(input: OutlineSaveInput): Promise<OutlineSaveRequestSaveResult> {
   const outlineRoot = normalizePath(input.outlineRoot).replace(/\/+$/, "")
-  const result: OutlineSaveRequestSaveResult = { saved: [], skipped: [], errors: [] }
-  const formats = input.formats ?? { md: true, html: true }
-
+  const result: OutlineSaveRequestSaveResult = { saved: [], savedSources: [], skipped: [], errors: [] }
   for (const request of input.requests) {
-    const targetDir = `${outlineRoot}/${request.targetFolder}`
-    await input.createDirectory(targetDir)
-
-    if (request.writeMode === "replace" || request.writeMode === "patch") {
-      if (!input.confirmed) {
-        result.skipped.push(`已跳过 ${request.fileName}：${request.writeMode} 需要用户明确确认。`)
-        continue
-      }
-      await writeRequestFormats(input, targetDir, request.fileName, request, formats, result)
-      continue
+    const firstFile = result.saved.length
+    try {
+      await withProjectLock(outlineRoot, () =>
+        saveOneOutlineRequest(input, `${outlineRoot}/${request.targetFolder}`, request, result),
+      )
+    } catch (error) {
+      result.errors.push(`${request.fileName}：${error instanceof Error ? error.message : String(error)}`)
     }
-
-    if (request.writeMode === "append") {
-      /*
-       * append 的契约是「追加到文件末尾」（提示词与 skills/SkillHub/AI_OUTLINE_OUTPUT_PROTOCOL.md
-       * 都这么写：适合伏笔记录、角色出场记录、设定更新记录），所以**不论 confirmed 与否**
-       * 都必须先读原文再拼接。
-       *
-       * 旧实现把 confirmed 分支写成 `writeFile(targetPath, content)` —— 那是覆盖写。
-       * 而唯一的调用点（大纲对话保存，outline-chat-panel）恒传 `confirmed: true`，
-       * 于是 append 永远走覆盖分支：用户已有的伏笔台账 / 设定更新记录会被这一轮
-       * 新增的那一小段整个替换掉，旧内容不可恢复（.md 没有版本历史）。
-       *
-       * 只有在「读不到原文」时才退化成纯写入 —— 那是新文件，行为与覆盖写等价。
-       */
-      const targetPath = `${targetDir}/${request.fileName}`
-      const body = stripOutlineFrontmatter(request.content).trim()
-      const exists = await input.fileExists(targetPath)
-      if (formats.md) {
-        if (exists && !input.readFile) {
-          // 文件已存在但读不到原文：宁可不写，也不能用覆盖写把旧内容抹掉
-          result.skipped.push(`已跳过 ${request.fileName}：当前环境缺少追加读取能力。`)
-        } else {
-          const original = exists && input.readFile ? await input.readFile(targetPath) : ""
-          /*
-           * 复用上面已经读到的 `original`，**不再二次 readFile**：
-           * append 本来就必须读原文才能拼接，旧内容已经在这一份手里了。
-           * 再读一次既多一次 IO，也可能读到刚被别的进程改过的内容，
-           * 存下的「历史」就不再是本次真正被追加的那一版。
-           */
-          callBeforeOverwrite(input, outlineVersionNameOf(request.fileName), original)
-          const merged = original
-            ? `${stripOutlineFrontmatter(original).replace(/\s*$/, "\n\n")}${body}\n`
-            : `${body}\n`
-          await input.writeFile(targetPath, merged)
-          result.saved.push({ path: targetPath, fileName: request.fileName, writeMode: request.writeMode })
-        }
-      }
-      if (request.htmlContent && formats.html) {
-        const htmlFileName = request.fileName.replace(/\.md$/i, ".html")
-        const htmlPath = `${targetDir}/${htmlFileName}`
-        await input.writeFile(htmlPath, request.htmlContent)
-        result.saved.push({ path: htmlPath, fileName: htmlFileName, writeMode: request.writeMode })
-      }
-      continue
+    const primary = result.saved[firstFile]
+    if (primary && /\.(?:md|html)$/i.test(primary.fileName)) {
+      result.savedSources.push({ request, relativePath: primary.path.slice(outlineRoot.length + 1) })
     }
+  }
+  return result
+}
 
-    const target = await resolveUniquePath(input, targetDir, request.fileName)
-    await writeRequestFormats(input, targetDir, target.fileName, request, formats, result)
+async function saveOneOutlineRequest(
+  input: OutlineSaveInput,
+  targetDir: string,
+  request: OutlineSaveRequest,
+  result: OutlineSaveRequestSaveResult,
+): Promise<void> {
+  const formats = input.formats ?? { md: true, html: true }
+  await input.createDirectory(targetDir)
+
+  if (request.writeMode === "replace" || request.writeMode === "patch") {
+    if (!input.confirmed) {
+      result.skipped.push(`已跳过 ${request.fileName}：${request.writeMode} 需要用户明确确认。`)
+      return
+    }
+    await writeRequestFormats(input, targetDir, request.fileName, request, formats, result)
+    return
   }
 
-  return result
+  if (request.writeMode === "append") {
+    // 即使用户确认了追加，也须保留原文并为覆盖前的版本留存历史。
+    const targetPath = `${targetDir}/${request.fileName}`
+    const body = stripOutlineFrontmatter(request.content).trim()
+    const exists = await input.fileExists(targetPath)
+    if (formats.md) {
+      if (exists && !input.readFile) {
+        // 文件已存在但读不到原文：宁可不写，也不能用覆盖写把旧内容抹掉
+        result.skipped.push(`已跳过 ${request.fileName}：当前环境缺少追加读取能力。`)
+      } else {
+        const original = exists && input.readFile ? await input.readFile(targetPath) : ""
+        callBeforeOverwrite(input, outlineVersionNameOf(request.fileName), original)
+        const merged = original
+          ? `${stripOutlineFrontmatter(original).replace(/\s*$/, "\n\n")}${body}\n`
+          : `${body}\n`
+        await input.writeFile(targetPath, merged)
+        result.saved.push({ path: targetPath, fileName: request.fileName, writeMode: request.writeMode })
+      }
+    }
+    if (request.htmlContent && formats.html) {
+      const htmlFileName = request.fileName.replace(/\.md$/i, ".html")
+      const htmlPath = `${targetDir}/${htmlFileName}`
+      await input.writeFile(htmlPath, request.htmlContent)
+      result.saved.push({ path: htmlPath, fileName: htmlFileName, writeMode: request.writeMode })
+    }
+    return
+  }
+
+  const fileName = await resolveUniqueFileName(input, targetDir, request)
+  await writeRequestFormats(input, targetDir, fileName, request, formats, result)
 }
 
 async function writeRequestFormats(
@@ -1199,7 +1212,7 @@ async function writeRequestFormats(
   if (formats.md) {
     /*
      * 覆盖前留版本：这一支处理的是 replace / patch（以及 create 落到同名文件时的
-     * 唯一路径解析）。`writeMode === "create"` 落到的是 `resolveUniquePath` 挑出的
+     * 唯一路径解析）。`writeMode === "create"` 落到的是 `resolveUniqueFileName` 挑出的
      * **不重名**路径，通常没有旧内容可存；真有同名文件时读到的旧内容照样值得留一份。
      *
      * 只对 `.md` 主文件落版本：`.html` / `.json` 是伴生文件，能从同一个请求

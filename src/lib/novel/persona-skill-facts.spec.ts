@@ -184,6 +184,22 @@ describe("syncPersonaSkillChapterFacts — 真实落盘", () => {
     io.files.clear()
   })
 
+  it("章节只给出重名时跳过两份档案，给出专属别名时只更新对应人物", async () => {
+    io.files.set(indexFile, JSON.stringify({ version: 1, skills: [
+      meta({ id: "甲", aliases: ["小林"] }), meta({ id: "乙", aliases: ["林师傅"] }),
+    ] }))
+    const first = `${project}/.qmai/persona-skills/甲/SKILL.md`
+    const second = `${project}/.qmai/persona-skills/乙/SKILL.md`
+    io.files.set(first, "# 甲")
+    io.files.set(second, "# 乙")
+    await syncPersonaSkillChapterFacts(project, source({ characters: ["林清越"], characterStateChanges: ["林清越:右肩受伤"] }))
+    expect(io.files.get(first)).toBe("# 甲")
+    expect(io.files.get(second)).toBe("# 乙")
+    await syncPersonaSkillChapterFacts(project, source({ characters: ["林师傅"], characterStateChanges: ["林师傅:右肩受伤"] }))
+    expect(io.files.get(first)).toBe("# 甲")
+    expect(io.files.get(second)).toContain("右肩受伤")
+  })
+
   it("把四段写进 SKILL.md，且不动 updatedAt", async () => {
     io.files.set(indexFile, JSON.stringify({ version: 1, skills: [meta()] }))
     io.files.set(

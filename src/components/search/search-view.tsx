@@ -334,9 +334,9 @@ export function SearchView({ onClose, onOpenFile }: SearchViewProps) {
           return
         }
         const content = await readFile(path)
-        setActiveView("wiki")
+        if (!(await setActiveView("wiki"))) return
         setSearchPanelOpen(false)
-        setSelectedFile(path)
+        if (!(await setSelectedFile(path))) return
         setFileContent(content)
         onClose?.()
       } catch (err) {
@@ -399,10 +399,10 @@ export function SearchView({ onClose, onOpenFile }: SearchViewProps) {
         return
       }
       const content = await readFile(openPath)
-      setActiveView("wiki")
+      if (!(await setActiveView("wiki"))) return
       setSearchPanelOpen(false)
+      if (!(await setSelectedFile(openPath))) return
       setPendingScrollImageSrc(scrollTarget)
-      setSelectedFile(openPath)
       setFileContent(content)
       setLightbox(null)
       onClose?.()

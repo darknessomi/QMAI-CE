@@ -142,9 +142,9 @@ describe("DataSourceCacheAdapter", () => {
 
     await expect(harness.adapter.load(source, context, directLoad)).resolves.toEqual(layered)
     expect(directLoad).toHaveBeenCalledOnce()
-    expect(harness.storage.readArtifact).toHaveBeenCalledWith(expect.stringMatching(/^data-source:outline:v3:/))
+    expect(harness.storage.readArtifact).toHaveBeenCalledWith(expect.stringMatching(/^data-source:outline:v4:/))
     expect(harness.storage.writeArtifact).toHaveBeenCalledWith(
-      expect.stringMatching(/^data-source:outline:v3:/),
+      expect.stringMatching(/^data-source:outline:v4:/),
       expect.objectContaining({ sourceName: "outline", scope: "chapter", value: layered }),
     )
   })

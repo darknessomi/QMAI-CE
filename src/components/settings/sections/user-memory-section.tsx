@@ -1,3 +1,4 @@
+import { confirmAction } from "@/lib/confirm-action"
 import { useEffect, useMemo, useState } from "react"
 import { Download, Eraser, Pencil, Plus, ThumbsDown, ThumbsUp, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -88,8 +89,8 @@ export function UserMemorySection() {
     URL.revokeObjectURL(url)
   }
 
-  const clearAll = () => {
-    if (!window.confirm("确定清空全部用户记忆吗？此操作会删除自动规则、手动规则和学习记录，无法撤销。")) return
+  const clearAll = async () => {
+    if (!(await confirmAction("确定清空全部用户记忆吗？此操作会删除自动规则、手动规则和学习记录，无法撤销。"))) return
     clearGlobalUserMemoryConfig()
     setConfig(loadGlobalUserMemoryConfig())
   }
@@ -103,9 +104,9 @@ export function UserMemorySection() {
     setEditor(null)
   }
 
-  const remove = (rule: UserMemoryRule) => {
-    if (!window.confirm(`删除用户记忆“${rule.rule}”？删除后，相同自动规则不会从原来源再次生成。`)) return
-    persist(deleteUserMemoryRule(config, rule.id))
+  const remove = async (rule: UserMemoryRule) => {
+    if (!(await confirmAction(`删除用户记忆“${rule.rule}”？删除后，相同自动规则不会从原来源再次生成。`))) return
+    persist(deleteUserMemoryRule(loadGlobalUserMemoryConfig(), rule.id))
   }
   const feedback = (rule: UserMemoryRule, sentiment: "positive" | "negative") => {
     persist(governUserMemoryConfig(applyUserMemoryFeedback(config, [rule.id], sentiment)))

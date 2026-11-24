@@ -203,6 +203,8 @@ pub fn run() {
             commands::fs::copy_directory,
             commands::fs::preprocess_file,
             commands::fs::delete_file,
+            commands::fs::move_path_if_absent,
+            commands::fs::remove_empty_directory,
             commands::fs::find_related_wiki_pages,
             commands::fs::create_directory,
             commands::fs::file_exists,

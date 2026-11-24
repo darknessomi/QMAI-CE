@@ -9,7 +9,8 @@ import { listDirectory, readFile } from "@/commands/fs"
 import {
   buildOutlineContext,
   buildOutlineContextLayers,
-  buildRelevantCharacterBriefs,
+  selectRelevantCharacterBriefs,
+  renderCharacterBriefs,
   buildRelevantForeshadowing,
   buildVolumeContext,
   capOutlineSourcesToBudget,
@@ -249,7 +250,7 @@ describe("outline context index", () => {
 
     const index = await loadOutlineDocumentIndex("/book")
     const outline = buildOutlineContext(index, 8)
-    const characters = buildRelevantCharacterBriefs(index, "本章由林岚入城")
+    const characters = renderCharacterBriefs(await selectRelevantCharacterBriefs(index, "本章由林岚入城"), new Map())
     const foreshadowing = buildRelevantForeshadowing(index, 8, "处理古钥匙伏笔")
 
     expect(outline).toContain("总主线")

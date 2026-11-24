@@ -795,8 +795,8 @@ function CitedReferencesPanel({
       if (rawPath) {
         try {
           const content = await readFile(rawPath);
+          if (!(await setSelectedFile(rawPath))) return
           setPendingScrollImageSrc(imageUrlToAbsolute(firstUrl, pp));
-          setSelectedFile(rawPath);
           setFileContent(content);
           console.log(`[refs:image-jump] ${firstUrl} → raw source ${rawPath}`);
           return;
@@ -809,8 +809,8 @@ function CitedReferencesPanel({
       // view there.
       try {
         const content = await readFile(`${pp}/${fallbackPath}`);
+        if (!(await setSelectedFile(`${pp}/${fallbackPath}`))) return
         setPendingScrollImageSrc(firstUrl);
-        setSelectedFile(`${pp}/${fallbackPath}`);
         setFileContent(content);
       } catch (err) {
         console.warn(`[refs:image-jump] fallback also failed:`, err);
@@ -1445,9 +1445,9 @@ function WikiLink({
     if (!resolvedPath.current) return;
     try {
       const content = await readFile(resolvedPath.current);
-      setSelectedFile(resolvedPath.current);
-      setFileContent(content);
-      setActiveView("wiki");
+      if (!(await setActiveView("wiki"))) return
+      if (!(await setSelectedFile(resolvedPath.current))) return
+      setFileContent(content)
     } catch {
       // ignore
     }

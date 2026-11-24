@@ -164,7 +164,7 @@ describe("DeAiBatchReviewDialog", () => {
     expect(mobile?.querySelector('[aria-label="选择审核章节"]')).not.toBeNull()
   })
 
-  it("章节切换与逐章确认、重新生成、取消只传当前章", () => {
+  it("章节切换与逐章确认、重新生成、取消只传当前章", async () => {
     const props = render()
     act(() => button("第二章").click())
     expect(props.onSelectChapter).toHaveBeenCalledWith("chapter-2")
@@ -172,7 +172,7 @@ describe("DeAiBatchReviewDialog", () => {
     act(() => button("确认当前章").click())
     act(() => button("重新生成").click())
     vi.spyOn(window, "confirm").mockReturnValue(true)
-    act(() => button("取消当前章").click())
+    await act(async () => button("取消当前章").click())
 
     expect(props.onConfirm).toHaveBeenCalledWith("task-a", "chapter-1", "\u7b2c\u4e00\u7ae0\u5019\u9009")
     expect(props.onRegenerate).toHaveBeenCalledWith("task-a", "chapter-1")

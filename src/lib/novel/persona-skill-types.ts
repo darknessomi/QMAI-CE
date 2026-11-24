@@ -8,21 +8,6 @@ export type PersonaSkillTier = "major" | "minor"
 export type PersonaSkillStatus = "active" | "dormant" | "archived"
 export type PersonaSkillMode = "create" | "refine"
 
-/**
- * 建档/落盘时抽取的字段：**一律是全部 5 个**，与档位无关。
- *
- * 这是刻意的分工：档位（major/minor）决定的是**注入写正文时给几段**
- * （见 `renderPersonaSkillBlock`），而不是「学多少」。原因有两条：
- * 1. 用户要的是「第一章角色一出现，他的 skill 基本就成型了」。提示词如果只问
- *    2 个字段，模型连另外 3 个都不会产 —— 卡片永远缺 3 格，只能等后续章节补，
- *    而那正是用户觉得「不像档案」的地方。
- * 2. 学习成本与字段数**无关**：整章所有人物合并成一次 LLM 请求，多写 3 个字段
- *    不多花一次调用；真正稀缺的是写正文时的上下文预算，那一层已经由档位守住了。
- *
- * 所以别把这里改成按档位取值 —— 那会把「省注入」和「省学习」混为一谈。
- * 定义在 PERSONA_MAJOR_FIELDS 之后，避免 TDZ。
- */
-
 /** 定位 → 档位。定位取自 wiki/characters/角色-<定位>-<名>.md 的文件名。 */
 export const PERSONA_MAJOR_ROLE_TYPES = ["主角", "男主", "女主", "反派", "导师"] as const
 export const PERSONA_MINOR_ROLE_TYPES = ["男配", "女配", "配角", "盟友"] as const
@@ -69,32 +54,13 @@ export const PERSONA_SKILL_HISTORY_KEEP = 5
 export const PERSONA_INJECT_MAX_SKILLS = 12
 export const PERSONA_INJECT_CHAR_BUDGET = 4000
 export const PERSONA_INJECT_FIELD_CHARS = 260
-/**
- * 性格标签的注入预算。
- *
- * 为什么单独给它一份小预算、而不是并进 PERSONA_INJECT_FIELD_CHARS：
- * 性格是人物 Skill 的写作指令，
- * 它必须**最靠前**出现；但一个人物多占 20 字，12 人同场就是 240 字，
- * 所以条数与字数都要硬夹住，不能吃 PERSONA_INJECT_CHAR_BUDGET 的余量。
- */
+/** 性格在演技段最前展示，同时受标签数、字数和整段预算限制。 */
 export const PERSONA_INJECT_PERSONALITY_MAX_TAGS = 4
 export const PERSONA_INJECT_PERSONALITY_MAX_CHARS = 20
 /** 双向包含匹配的最小长度：单字称呼（如单姓「林」）会污染匹配，只允许精确相等。 */
 export const PERSONA_MIN_SUBSTRING_MATCH_CHARS = 2
 
-/**
- * SKILL.md 的字段名就是「## 标题」；数组顺序就是注入顺序。
- *
- * 这 5 个是设计规格 07 节批准的「演技」字段 —— 一律回答「这一场该怎么演他」，
- * 都是正文生成当场就要用的东西。设计原文还列了「分类 · 摘要」两项，已删：
- * 人物名/定位/档位/出场次数由注入区块的标题行给出，整份 SKILL.md 压缩摘要
- * 又单独跟着注入，再加两个字段纯属重复占预算。
- *
- * 也刻意不装「关系网 / 成长轨迹」这类深度材料 —— 那些归研究文件的
- * 「关键关系」「动机与弧光」「禁忌与误区」，只给绿勾人物生成（D6）。
- * 字段表一旦装了它们，研究文件就白生成了，注入预算还会被非绿勾人物占满。
- * 加字段前先确认它不属于研究文件那一档。
- */
+/** 主要人物的演技字段。字段名对应 SKILL.md 的二级标题，顺序即写作注入顺序。 */
 export const PERSONA_MAJOR_FIELDS = [
   "怎么说话",
   "怎么想",
@@ -104,37 +70,10 @@ export const PERSONA_MAJOR_FIELDS = [
 ] as const
 /** 次要人物只给两条（设计 07 节）：这两条在 major 表里也有，必须是它的子集。 */
 export const PERSONA_MINOR_FIELDS = ["怎么说话", "怎么判断"] as const
-/**
- * 建档/落盘时抽取的**演技**字段：**一律是全部 5 个**，与档位无关。
- *
- * 这是刻意的分工：档位（major/minor）决定的是**注入写正文时给几段**
- * （见 `renderPersonaSkillBlock`），而不是「学多少」。原因有两条：
- * 1. 用户要的是「第一章角色一出现，他的 skill 基本就成型了」。提示词如果只问
- *    2 个字段，模型连另外 3 个都不会产 —— 卡片永远缺 3 格，只能等后续章节补，
- *    而那正是用户觉得「不像档案」的地方。
- * 2. 学习成本与字段数**无关**：整章所有人物合并成一次 LLM 请求，多写 3 个字段
- *    不多花一次调用；真正稀缺的是写正文时的上下文预算，那一层已经由档位守住了。
- *
- * 所以别把这里改成按档位取值 —— 那会把「省注入」和「省学习」混为一谈。
- */
+/** 所有角色建档和学习时保存全部五项演技字段，生成正文时按档位选取。 */
 export const PERSONA_STORED_FIELDS = PERSONA_MAJOR_FIELDS
 
-/**
- * 档案字段：界面「档案」页签的结构化内容，与演技字段一起写进 SKILL.md。
- *
- * 与 `PERSONA_MAJOR_FIELDS` 的分工（别混为一谈）：
- * - **档案字段**回答「他是谁、他在哪一方、他长什么样、他要什么」——给**人**读，
- *   也给人改。它不参与写正文的注入预算，所以不占 `PERSONA_INJECT_CHAR_BUDGET`。
- * - **演技字段**回答「这一场该怎么演他」——给**模型**读，按档位裁剪后注入。
- *
- * 为什么档案字段不能塞进 `PERSONA_MAJOR_FIELDS`：那张表是注入字段表，
- * 每加一项就从每个出场人物的注入预算里切走一块，而「外貌 / 背景 / 成长轨迹」
- * 对「这一场怎么演」几乎没有边际收益。反过来，档案页签需要它们 ——
- * 用户点开一个人，看到的应该是一份能当资料查的档案，而不是五个抽象标签。
- *
- * ⚠️ 这张表里的名字就是 SKILL.md 的 `## 标题`，改名等于让老档案整段读不出来。
- * 顺序即界面顺序，也是 SKILL.md 里的渲染顺序。
- */
+/** 档案页和 SKILL.md 共用这些字段名与顺序。写作时性格进入演技段，其余事实与作者小传合并。 */
 export const PERSONA_PROFILE_FIELDS = [
   "性别",
   "年龄",
@@ -149,20 +88,7 @@ export const PERSONA_PROFILE_FIELDS = [
   "备注",
 ] as const
 
-/**
- * 由「提取记忆」自动维护的**动态区块**：当前状态 / 出场组织 / 认知变化 / 关系变化。
- *
- * 与档案字段的根本区别是**谁写**：
- * - 档案字段（性别、外貌…）由模型在章节学习时产出；
- * - 动态区块由 `persona-skill-facts.ts` 从章节快照（`ChapterSnapshot`）直接映射，
- *   **不调模型、不花 token、不进提示词**。因为组织、状态、认知、关系变化
- *   在快照里本来就有结构化数据（`organizations` / `characterStateChanges` /
- *   `knowledgeChanges` / `relationshipChanges`），让模型再写一遍既贵又会与
- *   记忆中心的权威数据打架。
- *
- * 也刻意不进注入字段表：这些都是「当前处境」，不是「这一场怎么演他」；
- * 状态每章都变，注入进去等于让上下文逐章漂移。
- */
+/** 记忆提取从章节快照直接更新这些字段。写作时它们与该人物的小传事实共用预算。 */
 export const PERSONA_LIVE_FIELDS = ["当前状态", "出场组织", "认知变化", "关系变化"] as const
 
 /**
@@ -226,7 +152,10 @@ export interface PersonaSkillMeta {
   tier: PersonaSkillTier
   /** 绿勾：用户手动点亮的「重要人物」，一票否决自动分档。 */
   pinned: boolean
+  /** 章节学习和重要标记决定的自动状态，手动分组期间也会继续更新。 */
   status: PersonaSkillStatus
+  /** 作者指定的分组。缺省时使用自动状态。 */
+  manualStatus?: PersonaSkillStatus
   firstChapter: number
   lastChapter: number
   appearanceCount: number
@@ -242,10 +171,7 @@ export interface PersonaSkillMeta {
    * 删大纲连带删角色时 `manual` 永不连带删除 —— 用户亲手建的东西不能被一次删除带走。
    */
   origin: "manual" | "auto"
-  /**
-   * 连接值：引用该角色的大纲文件名（不是路径）。
-   * 判「是否仍被别的大纲引用」只认这份列表，所以它必须持久化、必须去重。
-   */
+  /** 引用该角色的文件相对于 wiki/outlines 的路径。旧版条目可能只有文件名。 */
   outlineRefs: string[]
   /**
    * 冻结点：这份档案停在哪一章。`dormant` 时不再随大纲更新。
@@ -265,12 +191,18 @@ export interface PersonaSkillIndex {
   skills: PersonaSkillMeta[]
 }
 
+export function getEffectivePersonaStatus(meta: PersonaSkillMeta): PersonaSkillStatus {
+  return meta.manualStatus ?? meta.status
+}
+
 /**
  * sightings.json 只装「还没有档案的人物」的出场计数，用来判断有没有到门槛。
  * 一旦建档就把它从这里移走 —— 所以这个文件的规模是「配角池」，不是全库。
  */
 export interface PersonaSkillSighting {
   characterName: string
+  /** 退回前的身份和列表位置。位置计入已暂存于候选池的人物。 */
+  previousProfile?: { id: string; position: number; pinned: boolean; manualStatus?: PersonaSkillStatus }
   aliases: string[]
   roleType: string
   appearanceCount: number

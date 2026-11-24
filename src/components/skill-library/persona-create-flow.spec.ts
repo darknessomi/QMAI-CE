@@ -15,7 +15,6 @@ const sidebar = readFileSync(resolve(__dirname, "../layout/sidebar-panel.tsx"), 
 const uitestDir = readFileSync(resolve(__dirname, "../uitest/ui-test-directory.tsx"), "utf8")
 const unified = readFileSync(resolve(__dirname, "unified-skill-library-view.tsx"), "utf8")
 const view = readFileSync(resolve(__dirname, "persona-skill-view.tsx"), "utf8")
-const learning = readFileSync(resolve(__dirname, "../../lib/novel/persona-skill-learning.ts"), "utf8")
 
 describe("新建人物角色：打开完整界面", () => {
   it("大纲菜单有「新建人物角色」入口", () => {
@@ -25,7 +24,7 @@ describe("新建人物角色：打开完整界面", () => {
 
   it("点它切到人物 Skill 整窗视图并请求新建模式", () => {
     expect(sidebar).toContain('setActiveView("personaSkillLibrary")')
-    expect(sidebar).toContain("setPersonaSkillCreateRequested(true)")
+    expect(sidebar).toContain('setPersonaOutlinePane({ mode: "create" })')
   })
 
   it("不再走大纲的内联取名流程（那是只填名字的输入框）", () => {
@@ -38,10 +37,9 @@ describe("新建人物角色：打开完整界面", () => {
     expect(pendingAt).toBeGreaterThan(personaAt)
   })
 
-  it("人物页有新建表单，并消费一次性意图", () => {
+  it("人物页用统一焦点打开新建表单", () => {
     expect(view).toContain("PersonaPersonalityCreateForm")
-    expect(view).toContain("personaSkillCreateRequested")
-    expect(view).toContain("setPersonaSkillCreateRequested(false)")
+    expect(view).toContain('personaOutlinePane?.mode === "create"')
   })
 })
 
@@ -65,13 +63,5 @@ describe("人物入口：移出技能库后在大纲侧找得到", () => {
     expect(tabsBlock).not.toContain("人物 Skill")
     expect(tabsBlock).toContain("去AI味技能")
     expect(tabsBlock).toContain("收藏")
-  })
-})
-
-describe("建档产出投影文件", () => {
-  it("createPersonaSkillByUser 会调用 projectPersonaToOutline", () => {
-    const fnStart = learning.indexOf("export async function createPersonaSkillByUser")
-    const fnBody = learning.slice(fnStart, fnStart + 2600)
-    expect(fnBody).toContain("projectPersonaToOutline(pp, id)")
   })
 })

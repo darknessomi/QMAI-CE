@@ -28,15 +28,17 @@ describe("人物数据变更必须在左右两端同步", () => {
     expect(store).toMatch(/bumpPersonaDataVersion:\s*\(\)\s*=>/)
   })
 
-  it("左栏的 reload 依赖版本号", () => {
-    expect(tree).toContain("personaDataVersion")
-    expect(tree).toMatch(/\},\s*\[reload,\s*refreshKey,\s*personaDataVersion\]\)/)
+  it("左右栏共用按版本刷新的档案与候选读取", () => {
+    const hook = readFileSync(resolve(process.cwd(), "src/components/skill-library/use-persona-skill-state.ts"), "utf8")
+    expect(tree).toContain("usePersonaSkillState(projectPath, refreshKey)")
+    expect(view).toContain("usePersonaSkillState(projectPath)")
+    expect(hook).toContain("state.personaDataVersion")
+    expect(hook).toContain("[projectPath, refreshKey, version]")
   })
 
   it("左栏自己的写操作会 bump", () => {
     expect(tree).toContain("bumpPersonaDataVersion()")
-    // 标记重要 / 建档 / 删除 都要通知
-    for (const fn of ["handleToggleImportant", "handlePromote", "handleDeleteCandidate", "handleDeletePersona"]) {
+    for (const fn of ["handlePromote", "handleDeleteCandidate", "handleDeletePersona"]) {
       expect(tree, fn).toContain(`async function ${fn}`)
     }
   })
@@ -94,11 +96,10 @@ describe("人物数据变更必须在左右两端同步", () => {
   })
 
   it("建档成功后离开预览卡、直接打开新档案", () => {
-    expect(view).toContain("setCandidateFocus(null)")
     const promoteHandler = view.slice(
       view.indexOf("async function handlePromote"),
       view.indexOf("async function handlePromote") + 1600,
     )
-    expect(promoteHandler).toContain("setSelectedId(created.id)")
+    expect(promoteHandler).toContain('setPersonaOutlinePane({ mode: "persona", id: created.id })')
   })
 })

@@ -1,4 +1,4 @@
-import { isTauri } from "@/lib/platform"
+import { confirmAction } from "@/lib/confirm-action"
 import { toast } from "@/lib/toast"
 import { createElement } from "react"
 import { createRoot } from "react-dom/client"
@@ -34,13 +34,8 @@ export async function confirmModelAction(message: string, title = "模型配置�
   if (confirming) return false
   confirming = true
   try {
-    if (isTauri()) {
-      const { confirm } = await import("@tauri-apps/plugin-dialog")
-      return await confirm(message, { title, kind: "warning", okLabel: "继续", cancelLabel: "取消" })
-    }
-    return (await window.confirm(message)) === true
-  } catch {
-    toast.error("无法打开模型操作确认框，本次操作已取消。请重试，尚未保存的输入仍保留。")
-    return false
+    return await confirmAction(message, title, () => {
+      toast.error("无法打开模型操作确认框，本次操作已取消。请重试，尚未保存的输入仍保留。")
+    })
   } finally { confirming = false }
 }

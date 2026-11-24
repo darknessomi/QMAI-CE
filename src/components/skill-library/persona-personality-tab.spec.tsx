@@ -55,8 +55,7 @@ describe("PersonaPersonalityTab（T2 精简版：无题材包）", () => {
   it("显示已选条数与字数预算", async () => {
     await render({ tags: ["毒舌", "嘴硬心软"] })
     expect(host.textContent).toContain("2 / 4 条")
-    // 「毒舌」(2) + 「嘴硬心软」(4) = 6 字
-    expect(host.textContent).toContain("6 / 20 字")
+    expect(host.textContent).toContain("7 / 20 字") // 写入提示词的「毒舌、嘴硬心软」含一个顿号。
   })
 
   it("题材预制包已移除：不再出现「套用」按钮与题材名", async () => {

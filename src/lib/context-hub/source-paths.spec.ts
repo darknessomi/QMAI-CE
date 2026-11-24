@@ -15,6 +15,7 @@ describe("context source paths", () => {
     ["E:/Novel/wiki/entities/林默.md", "entity"],
     ["E:/Novel/wiki/settings/world.md", "setting"],
     ["E:/Novel/.qmai/novel/snapshots/001.snapshot.json", "snapshot"],
+    ["E:/Novel/.qmai/persona-skills/index.json", "entity"],
     ["E:/Novel/.qmai/novel/cognition-state.json", "entity"],
     ["E:/Novel/.qmai/novel/character-states.json", "entity"],
     ["E:/Novel/.qmai/novel/foreshadowing-tracker.json", "memory"],

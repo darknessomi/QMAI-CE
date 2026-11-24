@@ -16,13 +16,14 @@ vi.mock("@/commands/fs", () => ({
 }))
 
 import {
-  applyPersonaKeep,
-  detachOutlineRef,
-  detachOutlineRefFromSkills,
+  outlineSourceRefs,
+  resolvePersonaOutlineRef,
+  updatePersonaOutlineRefs,
+  renamePersonaOutlineFolderRefs,
   planPersonaDetach,
-  planPersonaKeep,
   removePersonaFromIndex,
 } from "./persona-outline-detach"
+import { buildProjectPathIndexFromTree } from "@/lib/wiki-page-resolver"
 import { loadPersonaSkillIndex } from "./persona-skill-store"
 import type { PersonaSkillMeta } from "./persona-skill-types"
 
@@ -42,20 +43,20 @@ function meta(overrides: Partial<PersonaSkillMeta> & { characterName: string }):
 
 describe("planPersonaDetach", () => {
   it("手工建档的角色永不连带移除", () => {
-    const plan = planPersonaDetach({ outlineFileName: OUTLINE, skills: [meta({ characterName: "A", origin: "manual" })] })
+    const plan = planPersonaDetach({ refs: [OUTLINE], skills: [meta({ characterName: "A", origin: "manual" })] })
     expect(plan.removals).toEqual([])
     expect(plan.kept).toEqual([{ characterName: "A", reason: "manual" }])
   })
 
   it("绿勾角色永不连带移除", () => {
-    const plan = planPersonaDetach({ outlineFileName: OUTLINE, skills: [meta({ characterName: "B", pinned: true })] })
+    const plan = planPersonaDetach({ refs: [OUTLINE], skills: [meta({ characterName: "B", pinned: true })] })
     expect(plan.removals).toEqual([])
     expect(plan.kept).toEqual([{ characterName: "B", reason: "pinned" }])
   })
 
   it("仍被其他大纲引用时保留，并给出其他引用", () => {
     const plan = planPersonaDetach({
-      outlineFileName: OUTLINE,
+      refs: [OUTLINE],
       skills: [meta({ characterName: "C", outlineRefs: [OUTLINE, "章纲-第3章.md"] })],
     })
     expect(plan.removals).toEqual([])
@@ -63,20 +64,20 @@ describe("planPersonaDetach", () => {
   })
 
   it("auto + 未绿勾 + 仅被这一份引用 → 可移除", () => {
-    const plan = planPersonaDetach({ outlineFileName: OUTLINE, skills: [meta({ characterName: "D" })] })
-    expect(plan.removals).toEqual(["D"])
+    const plan = planPersonaDetach({ refs: [OUTLINE], skills: [meta({ characterName: "D" })] })
+    expect(plan.removals).toEqual([{ id: "D", characterName: "D" }])
     expect(plan.kept).toEqual([])
   })
 
   it("未引用这份大纲的角色既不移除也不列为保留", () => {
-    const plan = planPersonaDetach({ outlineFileName: OUTLINE, skills: [meta({ characterName: "E", outlineRefs: [] })] })
+    const plan = planPersonaDetach({ refs: [OUTLINE], skills: [meta({ characterName: "E", outlineRefs: [] })] })
     expect(plan.removals).toEqual([])
     expect(plan.kept).toEqual([])
   })
 
   it("混合场景：一次分拣清楚谁删谁留", () => {
     const plan = planPersonaDetach({
-      outlineFileName: OUTLINE,
+      refs: [OUTLINE],
       skills: [
         meta({ characterName: "手建", origin: "manual" }),
         meta({ characterName: "重点", pinned: true }),
@@ -84,30 +85,8 @@ describe("planPersonaDetach", () => {
         meta({ characterName: "可删" }),
       ],
     })
-    expect(plan.removals).toEqual(["可删"])
+    expect(plan.removals).toEqual([{ id: "可删", characterName: "可删" }])
     expect(plan.kept.map((item) => item.reason)).toEqual(["manual", "pinned", "referenced"])
-  })
-})
-
-describe("planPersonaKeep", () => {
-  it("解引用 + 冻结 asOfChapter + 转 dormant", () => {
-    const patches = planPersonaKeep({
-      outlineFileName: OUTLINE,
-      skills: [meta({ characterName: "F", id: "F", lastChapter: 7 })],
-    })
-    expect(patches).toEqual([{ id: "F", outlineRefs: [], status: "dormant", asOfChapter: 7 }])
-  })
-
-  it("从没学过的角色保留原有 asOfChapter（不硬造 0）", () => {
-    const patches = planPersonaKeep({
-      outlineFileName: OUTLINE,
-      skills: [meta({ characterName: "G", id: "G", lastChapter: 0, asOfChapter: null })],
-    })
-    expect(patches[0].asOfChapter).toBeNull()
-  })
-
-  it("未引用该大纲的角色不产生补丁", () => {
-    expect(planPersonaKeep({ outlineFileName: OUTLINE, skills: [meta({ characterName: "H", outlineRefs: [] })] })).toEqual([])
   })
 })
 
@@ -126,57 +105,73 @@ describe("removePersonaFromIndex", () => {
   })
 })
 
-describe("applyPersonaKeep", () => {
-  it("只改补丁命中的角色", () => {
-    const skills = [meta({ characterName: "A", id: "A" }), meta({ characterName: "B", id: "B" })]
-    const next = applyPersonaKeep(skills, [{ id: "A", outlineRefs: [], status: "dormant", asOfChapter: 4 }])
-    expect(next[0].status).toBe("dormant")
-    expect(next[0].outlineRefs).toEqual([])
-    expect(next[1].status).toBe("active")
-    expect(next[1].outlineRefs).toEqual([OUTLINE])
+describe("同名大纲与旧书引用", () => {
+  const folder = `${project}/wiki/outlines/`
+  const path = `${folder}甲/${OUTLINE}`
+  const file = { name: OUTLINE, path, is_dir: false }
+
+  it("只有旧文件名在本书大纲中唯一时才复用该引用", () => {
+    const index = buildProjectPathIndexFromTree([file, { ...file, path: `${project}/wiki/chapters/${OUTLINE}` }])
+    expect(outlineSourceRefs(project, path, index)).toEqual([`甲/${OUTLINE}`, OUTLINE])
+    expect(resolvePersonaOutlineRef(project, OUTLINE, index)).toBe(path)
+    const duplicate = buildProjectPathIndexFromTree([file, { ...file, path: `${folder}乙/${OUTLINE}` }])
+    expect(outlineSourceRefs(project, path, duplicate)).toEqual([`甲/${OUTLINE}`])
+    expect(resolvePersonaOutlineRef(project, OUTLINE, duplicate)).toBeUndefined()
+    expect(resolvePersonaOutlineRef(project, `甲/${OUTLINE}`, duplicate)).toBe(path)
   })
 })
 
-describe("detachOutlineRef", () => {
+describe("updatePersonaOutlineRefs", () => {
   beforeEach(() => io.files.clear())
+  function seed(skills: PersonaSkillMeta[]) {
+    io.files.set(indexFile, JSON.stringify({ version: 1, skills }))
+  }
 
-  it("落盘：被删大纲的引用从 index 里消失", async () => {
-    io.files.set(indexFile, JSON.stringify({
-      version: 1,
-      skills: [meta({ characterName: "林清越", outlineRefs: [OUTLINE, "章纲-第3章.md"] })],
-    }))
-    expect(await detachOutlineRef(project, OUTLINE)).toEqual(["林清越"])
-    const skills = (await loadPersonaSkillIndex(project)).skills
-    expect(skills[0].outlineRefs).toEqual(["章纲-第3章.md"])
+  it("整体改名更新所有相对路径、唯一旧文件名，保留其他同名目录", async () => {
+    const root = `${project}/wiki/outlines`
+    seed([meta({ characterName: "清越", outlineRefs: ["旧/子/隐藏于树的小传.html", "唯一.md", "旧名/记事.md"] })])
+    const previous = buildProjectPathIndexFromTree([{ name: "唯一.md", path: `${root}/旧/唯一.md`, is_dir: false }])
+    await renamePersonaOutlineFolderRefs(project, `${root}/旧`, `${root}/新`, previous)
+    expect((await loadPersonaSkillIndex(project)).skills[0].outlineRefs).toEqual([
+      "新/子/隐藏于树的小传.html", "新/唯一.md", "旧名/记事.md",
+    ])
   })
 
-  it("只解引用，不动角色状态与来源", async () => {
-    io.files.set(indexFile, JSON.stringify({ version: 1, skills: [meta({ characterName: "林清越" })] }))
-    await detachOutlineRef(project, OUTLINE)
-    const skill = (await loadPersonaSkillIndex(project)).skills[0]
-    expect(skill.status).toBe("active")
-    expect(skill.origin).toBe("auto")
+  it("移除文件前新出现的引用或重要标记会阻止连带移除，未确认的人也保留", async () => {
+    seed([meta({ characterName: "移除" }), meta({ characterName: "共用", outlineRefs: [OUTLINE, "另一份.md"] }),
+      meta({ characterName: "重点", pinned: true }), meta({ characterName: "新增" })])
+    await updatePersonaOutlineRefs(project, [OUTLINE], { remove: ["移除", "共用", "重点"] })
+    const { skills } = await loadPersonaSkillIndex(project)
+    expect(skills.map((item) => item.characterName)).toEqual(["共用", "重点", "新增"])
+    expect(skills.map((item) => item.outlineRefs)).toEqual([["另一份.md"], [], []])
   })
 
-  it("没有引用时返回空，且不写盘", async () => {
-    io.files.set(indexFile, JSON.stringify({ version: 1, skills: [meta({ characterName: "A", outlineRefs: [] })] }))
-    const before = io.files.get(indexFile)
-    expect(await detachOutlineRef(project, OUTLINE)).toEqual([])
-    expect(io.files.get(indexFile)).toBe(before)
+  it("连带移除仅作用于已确认的档案编号，同名的手建、未确认和新加入的档案保留", async () => {
+    const name = "布什"
+    const selected = meta({ id: "乔治·布什", characterName: name })
+    const protectedProfile = meta({ id: name, characterName: name, origin: "manual" })
+    const plan = planPersonaDetach({ refs: [OUTLINE], skills: [selected, protectedProfile] })
+    seed([selected, protectedProfile, meta({ id: "新档案", characterName: name })])
+    await updatePersonaOutlineRefs(project, [OUTLINE], { remove: plan.removals.map((item) => item.id) })
+    expect((await loadPersonaSkillIndex(project)).skills.map(({ id, outlineRefs }) => [id, outlineRefs]))
+      .toEqual([[name, []], ["新档案", []]])
   })
 
-  it("空文件名直接返回", async () => {
-    expect(await detachOutlineRef(project, "   ")).toEqual([])
+  it("选择保留时仅冻结失去唯一来源的自动人物", async () => {
+    seed([meta({ characterName: "自动", lastChapter: 7 }), meta({ characterName: "手建", origin: "manual" })])
+    await updatePersonaOutlineRefs(project, [OUTLINE], { keepDormant: true })
+    expect((await loadPersonaSkillIndex(project)).skills).toMatchObject([
+      { outlineRefs: [], status: "dormant", asOfChapter: 7 },
+      { outlineRefs: [], status: "active" },
+    ])
   })
-})
 
-describe("detachOutlineRefFromSkills", () => {
-  it("只摘掉被删大纲的引用，别的引用原样保留", () => {
-    const plan = detachOutlineRefFromSkills(
-      [meta({ characterName: "林清越", outlineRefs: [OUTLINE, "章纲-第3章.md"] })],
-      OUTLINE,
-    )
-    expect(plan.changed).toEqual(["林清越"])
-    expect(plan.next.get("林清越")).toEqual(["章纲-第3章.md"])
+  it("移动或改名同时替换旧文件名和相对路径，已有新引用只留一条", async () => {
+    const from = `甲/${OUTLINE}`
+    const to = `乙/${OUTLINE}`
+    seed([meta({ characterName: "角色", outlineRefs: [OUTLINE, from, to] })])
+    await updatePersonaOutlineRefs(project, [from, OUTLINE], { replacement: to })
+    expect((await loadPersonaSkillIndex(project)).skills[0].outlineRefs).toEqual([to])
+    expect(await updatePersonaOutlineRefs(project, [from])).toBe(false)
   })
 })

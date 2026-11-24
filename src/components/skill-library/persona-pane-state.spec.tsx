@@ -19,8 +19,6 @@ const storeState = {
   personaOutlinePane: null as null | { mode: string; id?: string },
   setPersonaOutlinePane: vi.fn(),
   setPersonaSkillLibraryDraftDirty: vi.fn(),
-  personaSkillCreateRequested: false,
-  setPersonaSkillCreateRequested: vi.fn(),
   llmConfig: {},
   novelConfig: {},
 }
@@ -32,8 +30,7 @@ vi.mock("@/stores/wiki-store", () => {
 })
 
 vi.mock("@/lib/novel/persona-skill-store", () => ({
-  loadPersonaSkillIndex: vi.fn(async () => ({ version: 1, skills: [] })),
-  loadPersonaSightings: vi.fn(async () => ({ version: 1, sightings: [] })),
+  loadPersonaSkillState: vi.fn(async () => ({ index: { version: 1, skills: [] }, sightings: { version: 1, sightings: [] } })),
   listPersonaSkillRevisions: vi.fn(async () => []),
   readPersonaSkillDocument: vi.fn(async () => ""),
   readPersonaSkillResearch: vi.fn(async () => ({})),

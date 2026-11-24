@@ -12,8 +12,9 @@
  * 这里提供的是**改名/移动**场景要用的搬运，以及一个显式的直接删除工具。
  */
 
-import { deleteFile, fileExists, readFile, writeFile } from "@/commands/fs"
+import { deleteFile, fileExists, movePathIfAbsent, writeFileAtomic } from "@/commands/fs"
 import { normalizePath } from "@/lib/path-utils"
+import type { FileNode } from "@/types/wiki"
 
 /** 大纲 .md 可能带的伴生扩展名。 */
 export const OUTLINE_COMPANION_EXTENSIONS = ["html", "json"] as const
@@ -24,6 +25,17 @@ export function outlineCompanionPaths(mdPath: string): string[] {
   if (!/\.md$/i.test(normalized)) return []
   const stem = normalized.replace(/\.md$/i, "")
   return OUTLINE_COMPANION_EXTENSIONS.map((extension) => `${stem}.${extension}`)
+}
+
+/** 在搜索、计数前按真实同级目录识别独立 HTML。 */
+export function outlineDocumentNodes(nodes: FileNode[], isProjection: (path: string) => boolean): FileNode[] {
+  const markdownStems = new Set(nodes.filter((node) => !node.is_dir && /\.md$/i.test(node.name))
+    .map((node) => node.name.replace(/\.md$/i, "")))
+  return nodes.flatMap((node) => {
+    if (node.is_dir) return [{ ...node, children: outlineDocumentNodes(node.children ?? [], isProjection) }]
+    if (/\.md$/i.test(node.name)) return isProjection(node.path) ? [] : [node]
+    return /\.html$/i.test(node.name) && !markdownStems.has(node.name.replace(/\.html$/i, "")) ? [node] : []
+  })
 }
 
 /** 直接删除伴生文件，返回实际删掉的个数。 */
@@ -41,30 +53,34 @@ export async function deleteOutlineCompanions(mdPath: string): Promise<number> {
   return deleted
 }
 
-/**
- * 改名/移动：把伴生文件搬到新主名旁边，再删掉旧的。
- *
- * 用「读内容 → 写新路径 → 删旧文件」而不是复制接口：集中在一个地方处理，
- * 也不会在目标已存在时误覆盖（目标存在就跳过，交给用户后续重新生成）。
- */
-export async function moveOutlineCompanions(sourceMdPath: string, destMdPath: string): Promise<number> {
-  const sources = outlineCompanionPaths(sourceMdPath)
-  const destinations = outlineCompanionPaths(destMdPath)
-  let moved = 0
-  for (let index = 0; index < sources.length; index += 1) {
-    const source = sources[index]
-    const destination = destinations[index]
-    if (!source || !destination) continue
-    if (!(await fileExists(source))) continue
-    try {
-      if (!(await fileExists(destination))) {
-        await writeFile(destination, await readFile(source))
-      }
-      await deleteFile(source)
-      moved += 1
-    } catch (error) {
-      console.warn("[outline-companions] 搬移伴生文件失败:", source, "→", destination, error)
-    }
+/** 连同角色卡 HTML、卷纲 JSON 搬运；任一目标冲突时保留双方原文。 */
+export async function moveOutlineDocument(
+  source: string,
+  destination: string,
+  renamedContent?: string,
+): Promise<Array<{ source: string; destination: string }>> {
+  const from = [...outlineCompanionPaths(source), source]
+  const to = [...outlineCompanionPaths(destination), destination]
+  const collisions = await Promise.all(to.map(fileExists))
+  if (collisions.some(Boolean)) {
+    throw new Error("目标目录已有同名大纲或伴生文件。")
   }
-  return moved
+  const moved: number[] = []
+  try {
+    for (let index = 0; index < from.length; index++) {
+      if (from[index] !== source && !(await fileExists(from[index]))) continue
+      await movePathIfAbsent(from[index], to[index])
+      moved.push(index)
+    }
+    if (renamedContent !== undefined) await writeFileAtomic(destination, renamedContent)
+    return moved.map((index) => ({ source: from[index], destination: to[index] }))
+  } catch (error) {
+    const remaining: string[] = []
+    for (const index of moved.reverse()) {
+      try { await movePathIfAbsent(to[index], from[index]) }
+      catch { remaining.push(to[index]) }
+    }
+    if (remaining.length) throw new Error(`移动中断，以下文件保留在新位置：${remaining.join("、")}`)
+    throw error
+  }
 }

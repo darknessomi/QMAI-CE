@@ -145,11 +145,17 @@ describe("来源删除与派生文件同步", () => {
   it("同步人物 Skill 动态事实，迟到的后台学习也不能恢复已删认知", async () => {
     fs.files.set("/project/.qmai/persona-skills/index.json", JSON.stringify({ version: 1, skills: [{ id: "林默", characterName: "林默", aliases: [], roleType: "主角", tier: "major", status: "active", firstChapter: 1, lastChapter: 2, appearanceCount: 2, createdChapter: 1, lastLearnedChapter: 2, skillRevision: 1, pinned: false, editedByUser: false, hasResearch: false, updatedAt: "" }] }))
     const path = "/project/.qmai/persona-skills/林默/SKILL.md"
+    const projection = "/project/wiki/outlines/人物小传/林默.md"
+    fs.files.set(projection, "---\ngenerated-from: persona-skill\npersona-id: 林默\n---\n旧的噪声投影\n")
     fs.files.set(path, "# 林默\n\n## 当前状态\n\n第 1 章：状态噪声\n\n## 认知变化\n\n- 第 1 章：知道认知噪声\n\n## 作者备注\n\n自定义文字\n")
     const scan = await scanFixture()
     await applyMemoryCleanup("/project", scan, scan.issues)
     expect(fs.files.get(path)).not.toContain("噪声")
     expect(fs.files.get(path)).toContain("自定义文字")
+    expect(fs.files.get(projection)).not.toContain("噪声")
+    await undoLastMemoryCleanup("/project")
+    expect(fs.files.get(projection)).toContain("知道认知噪声")
+    await applyMemoryCleanup("/project", scan, scan.issues)
     await syncPersonaSkillChapterFacts("/project", source(1))
     expect(fs.files.get(path)).not.toContain("噪声")
   })

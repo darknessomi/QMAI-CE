@@ -226,7 +226,7 @@ describe("PluginCenterView：添加入口", () => {
     expect(host.querySelector('[data-plugins-manual="true"]')).not.toBeNull()
   })
 
-  it("点击唯一的「添加插件」打开对话框，对话框内可切换 GitHub / 本地目录", async () => {
+  it("两种安装来源下均可从添加弹窗打开自定义插件教程", async () => {
     await render()
     const add = host.querySelector('[data-plugins-manual="true"]') as HTMLButtonElement | null
     expect(add).not.toBeNull()
@@ -238,9 +238,18 @@ describe("PluginCenterView：添加入口", () => {
 
     const dialog = document.querySelector('[role="dialog"]')
     expect(dialog).not.toBeNull()
-    // 两种模式在对话框内部切换，不需要页头再给一个下拉
-    expect(dialog?.textContent).toContain("GitHub")
-    expect(dialog?.textContent).toContain("本地目录")
+    const guideUrl = "https://github.com/darknessomi/QMAI-CE/blob/main/docs/plugins/getting-started.md"
+    using openWindow = vi.spyOn(window, "open").mockReturnValue(null)
+    for (const mode of ["url", "local"]) {
+      const modeButton = dialog?.querySelector<HTMLButtonElement>(`[data-add-plugin-mode="${mode}"]`)
+      await act(async () => modeButton?.click())
+      expect(modeButton?.getAttribute("aria-pressed")).toBe("true")
+      const link = dialog?.querySelector<HTMLAnchorElement>(`a[href="${guideUrl}"]`)
+      expect(link?.textContent).toBe("自定义插件教程")
+      link?.click()
+      expect(openWindow).toHaveBeenLastCalledWith(guideUrl, "_blank", "noopener,noreferrer")
+      openWindow.mockClear()
+    }
   })
 
   it("点击同一个入口只打开一个对话框（不会叠两个）", async () => {

@@ -1,3 +1,4 @@
+import { confirmAction } from "@/lib/confirm-action"
 import { useEffect, useState } from "react"
 import { FolderOpen, Plus, BookOpen, RectangleVertical } from "lucide-react"
 import type { WikiProject } from "@/types/wiki"
@@ -212,7 +213,7 @@ export function UiTestShelf({
     const prompt = exists
       ? `确定将“${project.name}”移入系统回收站？`
       : `“${project.name}”的目录已经不存在，确定从书架移除？`
-    if (!window.confirm(prompt)) return
+    if (!(await confirmAction(prompt))) return
     try {
       if (exists) await moveProjectToSystemTrash(project.path)
       await removeProjectRecords(project.path)

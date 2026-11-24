@@ -66,6 +66,14 @@ describe("setAiExcluded：写盘只碰这一行", () => {
     expect(isAiExcludedContent(next)).toBe(true)
   })
 
+  it("旧投影的裸 ID 破坏 YAML 时，工具、目录和预览仍能读取和切换排除状态", () => {
+    const legacy = "---\ngenerated-from: persona-skill\npersona-id: @Q\ngenerated-at: 2026-11-20T00:00:00Z\n---\n# @Q"
+    const excluded = setAiExcluded(legacy, true)
+    expect(isAiExcludedContent(excluded)).toBe(true)
+    expect(isAiExcludedContent(setAiExcluded(excluded, false))).toBe(false)
+    expect(setAiExcluded(excluded, false)).toBe(legacy)
+  })
+
   it("重复选中不会写出第二行（幂等）", () => {
     const once = setAiExcluded(CHAPTER, true)
     expect(setAiExcluded(once, true)).toBe(once)

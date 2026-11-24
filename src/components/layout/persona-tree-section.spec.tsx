@@ -27,8 +27,7 @@ vi.mock("@/stores/wiki-store", () => ({
 }))
 
 vi.mock("@/lib/novel/persona-skill-store", () => ({
-  loadPersonaSkillIndex: (...args: unknown[]) => indexMock(...args),
-  loadPersonaSightings: (...args: unknown[]) => sightingsMock(...args),
+  loadPersonaSkillState: async () => ({ index: await indexMock(), sightings: await sightingsMock() }),
 }))
 
 import { PersonaTreeSection } from "./persona-tree-section"
@@ -48,7 +47,9 @@ beforeEach(() => {
     version: 1,
     skills: [
       { id: "杨寒", characterName: "杨寒", roleType: "主角", status: "active", appearanceCount: 18, pinned: true, aliases: ["Han"], tier: "major" },
-      { id: "杨津艺", characterName: "杨津艺", roleType: "次要", status: "dormant", appearanceCount: 1, pinned: false, aliases: [], tier: "minor", autoUpdate: false },
+      { id: "杨津艺", characterName: "杨津艺", roleType: "次要", status: "dormant", appearanceCount: 1, pinned: false, aliases: ["江城医师"], tier: "minor", autoUpdate: false },
+      { id: "闻修", characterName: "闻修", roleType: "次要", status: "archived", appearanceCount: 2, pinned: false, aliases: ["江城郎中"], tier: "minor" },
+      { id: "许松", characterName: "许松", roleType: "次要", status: "archived", appearanceCount: 1, pinned: false, aliases: [], tier: "minor" },
     ],
   })
   sightingsMock.mockResolvedValue({
@@ -73,7 +74,27 @@ async function openActiveGroup() {
 }
 
 describe("PersonaTreeSection（大纲第一栏的人物小传）", () => {
-  it("按姓名和别名查找两组人物，清空后恢复原来的折叠状态", async () => {
+  it("已建档人物按重要和出场次数排列，候选按最近章排列，同分保留原位", async () => {
+    const skill = (name: string, count: number, pinned = false) => ({
+      id: name, characterName: name, aliases: [], status: "active", appearanceCount: count, pinned,
+    })
+    const sighting = (name: string, lastChapter: number, appearanceCount: number) => ({
+      characterName: name, aliases: [], lastChapter, appearanceCount,
+    })
+    indexMock.mockResolvedValue({ version: 1, skills: [
+      skill("同分乙", 3), skill("高频", 13), skill("重点", 1, true), skill("同分甲", 3),
+    ] })
+    sightingsMock.mockResolvedValue({ version: 1, sightings: [
+      sighting("早期", 2, 5), sighting("新面孔", 10, 1), sighting("近期多次", 10, 2),
+    ] })
+    await render()
+    await openActiveGroup()
+    await act(async () => host.querySelector<HTMLElement>('[data-testid="persona-tree-candidates-toggle"]')!.click())
+    const names = [...host.querySelectorAll(".is-leaf .ui-test-ptree-name")].map((row) => row.textContent)
+    expect(names).toEqual(["重点", "高频", "同分乙", "同分甲", "近期多次", "新面孔", "早期"])
+  })
+
+  it("按姓名和别名跨组查找，清空后恢复原来的折叠状态", async () => {
     await render()
     await openActiveGroup()
     const rowNames = () => [...host.querySelectorAll(".is-leaf .ui-test-ptree-name")].map(row => row.textContent)
@@ -81,6 +102,9 @@ describe("PersonaTreeSection（大纲第一栏的人物小传）", () => {
     expect(rowNames()).toEqual(["杨寒"])
     await render("  hAN ")
     expect(rowNames()).toEqual(["杨寒"])
+    await render("江城")
+    expect(rowNames()).toEqual(["杨津艺", "闻修"])
+    expect([...host.querySelectorAll(".is-group")].map(row => row.textContent)).toEqual(["潜伏角色1", "归档角色1"])
     await render("老韩")
     expect(rowNames()).toEqual(["地下铁门守卫"])
     await act(async () => host.querySelector<HTMLButtonElement>(".is-leaf")!.click())
@@ -88,27 +112,37 @@ describe("PersonaTreeSection（大纲第一栏的人物小传）", () => {
     await render("无人匹配")
     expect(host.querySelector('[role="status"]')?.textContent).toBe("没有找到匹配的人物")
     await render("")
-    expect(rowNames()).toEqual(["杨寒", "杨津艺"])
+    expect(rowNames()).toEqual(["杨寒"])
   })
 
-  it("固定文件夹「人物小传」带锁定图标与总数，活跃/候选都在里面", async () => {
+  it("人物页签直接显示四个一级分组，各组独立计数并默认折叠", async () => {
     await render()
     const section = host.querySelector('[data-testid="persona-tree-section"]')!
-    expect(section).not.toBeNull()
-    expect(section.textContent).toContain("人物小传")
-    expect(section.textContent).toContain("活跃角色")
-    expect(section.textContent).toContain("候选角色")
-    // 2 位活跃 + 1 位候选
-    expect(section.textContent).toContain("3")
+    const groups = [...section.children]
+    expect(groups.map(group => group.textContent)).toEqual(["活跃角色1", "潜伏角色1", "归档角色2", "候选角色1"])
+    expect(groups.every(group => group.getAttribute("aria-expanded") === "false")).toBe(true)
   })
 
-  it("角色节点按索引渲染，潜伏角色带灰点、冻结角色带「冻」标记", async () => {
+  it("各组使用对应的状态颜色，独立显示重要和冻结标记", async () => {
     await render()
     await openActiveGroup()
-    expect(host.querySelector('[data-testid="persona-tree-item-杨寒"]')).not.toBeNull()
+    const active = host.querySelector('[data-testid="persona-tree-item-杨寒"]')!
+    expect(active.getAttribute("data-persona-status")).toBe("active")
+    expect(active.querySelector(".ui-test-ptree-check")).not.toBeNull()
+    expect(host.querySelector('[data-testid="persona-tree-item-杨津艺"]')).toBeNull()
+    await act(async () => host.querySelector<HTMLElement>('[data-testid="persona-tree-dormant-toggle"]')!.click())
     const dormant = host.querySelector('[data-testid="persona-tree-item-杨津艺"]')!
-    expect(dormant.textContent).toContain("杨津艺")
+    expect(dormant.getAttribute("data-persona-status")).toBe("dormant")
     expect(dormant.textContent).toContain("冻")
+  })
+
+  it.each([["杨津艺", "dormant"], ["闻修", "archived"]])("恢复已选人物 %s 时根据异步载入的索引展开对应分组", async (name, group) => {
+    storeState.personaOutlinePane = { mode: "persona", id: name }
+    await render()
+    expect(host.querySelector('[data-testid="persona-tree-active-toggle"]')?.getAttribute("aria-expanded")).toBe("false")
+    expect(host.querySelector(`[data-testid="persona-tree-${group}-toggle"]`)?.getAttribute("aria-expanded")).toBe("true")
+    const row = host.querySelector(`[data-testid="persona-tree-item-${name}"]`)
+    expect(row?.classList.contains("is-on")).toBe(true)
   })
 
   it("点角色只切中栏内容，不跳整页视图", async () => {
@@ -163,7 +197,7 @@ describe("PersonaTreeSection（大纲第一栏的人物小传）", () => {
     })
     // 菜单内部按下：不应收起
     await act(async () => {
-      const item = host.querySelector<HTMLElement>('[data-testid="persona-tree-menu-important"]')!
+      const item = host.querySelector<HTMLElement>('[data-testid="persona-tree-menu-open"]')!
       item.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }))
     })
     expect(host.querySelector('[data-testid="persona-tree-menu"]')).not.toBeNull()
@@ -174,27 +208,16 @@ describe("PersonaTreeSection（大纲第一栏的人物小传）", () => {
     expect(host.querySelector('[data-testid="persona-tree-menu"]')).toBeNull()
   })
 
-  it("活跃角色右键出菜单：标记重要 / 打开 / 删除", async () => {
+  it("已建档角色右键只提供打开和删除，状态与重要人物由档案顶栏处理", async () => {
     await render()
     await openActiveGroup()
     const row = host.querySelector<HTMLElement>('[data-testid="persona-tree-item-杨寒"]')!
     await act(async () => {
       row.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 10, clientY: 20 }))
     })
-    expect(host.querySelector('[data-testid="persona-tree-menu-important"]')).not.toBeNull()
-    expect(host.querySelector('[data-testid="persona-tree-menu-open"]')).not.toBeNull()
-    expect(host.querySelector('[data-testid="persona-tree-menu-delete-persona"]')).not.toBeNull()
-  })
-
-  it("点「人物小传」只折叠，不导航到任何视图", async () => {
-    await render()
-    const folder = host.querySelector<HTMLElement>('[data-testid="persona-tree-folder"]')!
-    expect(folder.getAttribute("aria-expanded")).toBe("true")
-    await act(async () => folder.click())
-    // 折叠了
-    expect(folder.getAttribute("aria-expanded")).toBe("false")
-    // 但没有触发任何导航
-    expect(storeState.setPersonaOutlinePane).not.toHaveBeenCalled()
+    const menu = host.querySelector('[data-testid="persona-tree-menu"]')!
+    expect([...menu.querySelectorAll("button")].map((item) => item.textContent?.trim())).toEqual(["打开档案", "删除角色"])
+    expect(menu.querySelector("select")).toBeNull()
   })
 
   it("点「活跃角色」整行切换展开/折叠", async () => {
@@ -208,6 +231,7 @@ describe("PersonaTreeSection（大纲第一栏的人物小传）", () => {
     await act(async () => toggle.click())
     expect(toggle.getAttribute("aria-expanded")).toBe("false")
     expect(host.querySelector('[data-testid="persona-tree-item-杨寒"]')).toBeNull()
+    expect(storeState.setPersonaOutlinePane).not.toHaveBeenCalled()
   })
 
   it("候选角色默认折叠，展开后才出现名字", async () => {

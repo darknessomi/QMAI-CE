@@ -269,9 +269,9 @@ export function DashboardView({ headerActions }: DashboardViewProps = {}) {
   const openDashboardItem = useCallback(async (item: DashItem, highlight = false) => {
     const resolved = await resolveDashboardItemTarget(item)
     if (!resolved) return null
-    setSelectedFile(resolved.path)
+    if (!(await setActiveView("wiki"))) return null
+    if (!(await setSelectedFile(resolved.path))) return null
     setFileContent(resolved.content)
-    setActiveView("wiki")
     if (highlight) {
       const anchor = findChapterSelectionByEvidence(resolved.content, [item.evidence, item.secondaryEvidence])
       if (anchor) {
@@ -529,9 +529,9 @@ export function DashboardView({ headerActions }: DashboardViewProps = {}) {
     const latestMarkdown = await readFile(backup.targetPath).catch(() => "")
     if (!latestMarkdown) return
 
-    setSelectedFile(backup.targetPath)
+    if (!(await setActiveView("wiki"))) return
+    if (!(await setSelectedFile(backup.targetPath))) return
     setFileContent(latestMarkdown)
-    setActiveView("wiki")
     setPendingEditorHighlight({
       path: backup.targetPath,
       text: backup.replacementText,

@@ -94,6 +94,6 @@ describe("「插件」视图的导航接线", () => {
 
     // 3) 停用/卸载的职责从 PluginSection 转移到本页，但卸载必须先确认（不可逆动作）
     expect(source).toContain("pluginsApi.disable(")
-    expect(source).toContain("window.confirm")
+    expect(source).toContain("await confirmAction(")
   })
 })

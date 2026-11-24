@@ -3,9 +3,8 @@ use std::io::Write;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// Atomically replace `destination` with a sibling temporary file.
 #[cfg(windows)]
-pub fn replace_file_atomically(temp: &Path, destination: &Path) -> Result<(), String> {
+fn move_path_windows(source: &Path, destination: &Path, replace: bool) -> Result<(), String> {
     use std::os::windows::ffi::OsStrExt;
 
     #[link(name = "Kernel32")]
@@ -15,23 +14,71 @@ pub fn replace_file_atomically(temp: &Path, destination: &Path) -> Result<(), St
 
     const MOVEFILE_REPLACE_EXISTING: u32 = 0x1;
     const MOVEFILE_WRITE_THROUGH: u32 = 0x8;
-    let existing: Vec<u16> = temp.as_os_str().encode_wide().chain(Some(0)).collect();
-    let new: Vec<u16> = destination.as_os_str().encode_wide().chain(Some(0)).collect();
+    let existing: Vec<u16> = source.as_os_str().encode_wide().chain(Some(0)).collect();
+    let new: Vec<u16> = destination
+        .as_os_str()
+        .encode_wide()
+        .chain(Some(0))
+        .collect();
     let result = unsafe {
         MoveFileExW(
             existing.as_ptr(),
             new.as_ptr(),
-            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+            if replace {
+                MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH
+            } else {
+                MOVEFILE_WRITE_THROUGH
+            },
         )
     };
     if result == 0 {
-        Err(format!(
-            "原子替换文件失败: {}",
-            std::io::Error::last_os_error()
-        ))
+        Err(format!("移动失败：{}", std::io::Error::last_os_error()))
     } else {
         Ok(())
     }
+}
+
+#[cfg(windows)]
+pub fn replace_file_atomically(temp: &Path, destination: &Path) -> Result<(), String> {
+    move_path_windows(temp, destination, true)
+}
+
+#[cfg(windows)]
+pub fn move_path_if_absent(source: &Path, destination: &Path) -> Result<(), String> {
+    move_path_windows(source, destination, false)
+}
+
+// 系统调用同时判定目标不存在并改名，避免先 exists 再 rename 覆盖并发写入。
+#[cfg(any(target_vendor = "apple", target_os = "linux", target_os = "android"))]
+pub fn move_path_if_absent(source: &Path, destination: &Path) -> Result<(), String> {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+    let source = CString::new(source.as_os_str().as_bytes()).map_err(|e| e.to_string())?;
+    let destination =
+        CString::new(destination.as_os_str().as_bytes()).map_err(|e| e.to_string())?;
+    #[cfg(target_vendor = "apple")]
+    let result =
+        unsafe { libc::renamex_np(source.as_ptr(), destination.as_ptr(), libc::RENAME_EXCL) };
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    let result = unsafe {
+        libc::renameat2(
+            libc::AT_FDCWD,
+            source.as_ptr(),
+            libc::AT_FDCWD,
+            destination.as_ptr(),
+            libc::RENAME_NOREPLACE as _,
+        )
+    };
+    if result == 0 {
+        Ok(())
+    } else {
+        Err(format!("移动失败：{}", std::io::Error::last_os_error()))
+    }
+}
+
+#[cfg(not(any(windows, target_vendor = "apple", target_os = "linux", target_os = "android")))]
+pub fn move_path_if_absent(_: &Path, _: &Path) -> Result<(), String> {
+    Err("当前平台不支持安全改名。".to_string())
 }
 
 #[cfg(not(windows))]
@@ -95,6 +142,30 @@ mod tests {
         ));
         fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn move_without_replacement_preserves_complete_folder_and_existing_targets() {
+        let dir = unique_test_dir("move");
+        let source = dir.join("原目录");
+        let target = dir.join("新目录");
+        fs::create_dir_all(source.join(".hidden")).unwrap();
+        fs::write(source.join(".hidden/image"), [0xff, 0x00]).unwrap();
+        fs::write(source.join("小传.html"), "小传").unwrap();
+        fs::create_dir(&target).unwrap();
+        assert!(move_path_if_absent(&source, &target).is_err());
+        fs::remove_dir(&target).unwrap();
+        move_path_if_absent(&source, &target).unwrap();
+        assert_eq!(
+            fs::read(target.join(".hidden/image")).unwrap(),
+            [0xff, 0x00]
+        );
+        assert_eq!(
+            fs::read_to_string(target.join("小传.html")).unwrap(),
+            "小传"
+        );
+        assert!(!source.exists());
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

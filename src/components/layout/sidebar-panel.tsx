@@ -702,7 +702,7 @@ export function SidebarPanel({ onUiTestCloseDirectory, onUiTestRegisterCancel }:
     }
   }
 
-  function beginCreate(request: KnowledgeCreateRequest) {
+  async function beginCreate(request: KnowledgeCreateRequest) {
     if (request.kind === "chapter") {
       void handleCreateNextChapter(request.parentDir)
       return
@@ -710,8 +710,10 @@ export function SidebarPanel({ onUiTestCloseDirectory, onUiTestRegisterCancel }:
     // 人物角色要开「一整块界面」（用户要求：像技能库人物 skill 那样的内容区），
     // 不是一个只填名字的输入框。所以切到人物 Skill 整窗视图并请求它开新建模式。
     if (request.kind === "persona") {
-      useWikiStore.getState().setActiveView("personaSkillLibrary")
-      useWikiStore.getState().setPersonaSkillCreateRequested(true)
+      await useWikiStore.getState().setActiveView("personaSkillLibrary")
+      if (useWikiStore.getState().activeView === "personaSkillLibrary") {
+        useWikiStore.getState().setPersonaOutlinePane({ mode: "create" })
+      }
       return
     }
     if (request.kind === "outline" || request.kind === "folder") setOutlineTab("outline")

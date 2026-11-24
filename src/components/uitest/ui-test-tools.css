@@ -548,8 +548,7 @@
   建档与退回都要调模型，期间整页按钮一起禁用。原先没有任何禁用态样式，
   点击静默无效 —— 用户报的「点了没反应」有一部分就出在这里。
 */
-.ui-test-root .ui-test-skills-action:disabled,
-.ui-test-root .ui-test-persona-pin:disabled {
+.ui-test-root .ui-test-skills-action:disabled {
   opacity: 0.45;
   cursor: progress;
 }
@@ -1428,43 +1427,6 @@
   .ui-test-root [data-ui="interface-skins"] .ui-test-interface-swatch { height: 48px; }
   .ui-test-root [data-ui="interface-fields"] .ui-test-interface-row { grid-template-columns: minmax(0, 1fr); gap: 12px; }
   .ui-test-root [data-ui="interface-compatibility"] .ui-test-interface-compatibility-hint { display: block; margin-left: 0; }
-}
-
-/* 人物 Skill：绿勾 = 重要人物（D6）；勾选状态必须是「绿 + 对号」两重编码，不只靠颜色。 */
-.ui-test-root .ui-test-persona-pin {
-  flex-shrink: 0;
-  display: grid;
-  place-items: center;
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  border: 1.5px solid color-mix(in srgb, var(--ui-ink) 22%, transparent);
-  border-radius: 6px;
-  background: transparent;
-  cursor: pointer;
-}
-
-.ui-test-root .ui-test-persona-pin:hover {
-  border-color: #3f8f5a;
-}
-
-.ui-test-root .ui-test-persona-pin::after {
-  content: "";
-  width: 9px;
-  height: 5px;
-  border-left: 2px solid transparent;
-  border-bottom: 2px solid transparent;
-  transform: rotate(-45deg);
-}
-
-.ui-test-root .ui-test-persona-pin.is-on {
-  border-color: #3f8f5a;
-  background: #3f8f5a;
-}
-
-.ui-test-root .ui-test-persona-pin.is-on::after {
-  border-left-color: #fff;
-  border-bottom-color: #fff;
 }
 
 .ui-test-root .ui-test-persona-editor {
@@ -2539,15 +2501,6 @@
   }
 }
 
-/* 叶子节点（角色）缩进 */
-.ui-test-root .ui-test-ptree-row.is-leaf {
-  padding-left: 30px;
-}
-
-.ui-test-root .ui-test-ptree-children > .ui-test-ptree-row.is-group {
-  padding-left: 12px;
-}
-
 .ui-test-root .ui-test-ptree-toggle {
   display: grid;
   place-items: center;
@@ -2571,10 +2524,6 @@
   height: 13px;
   flex-shrink: 0;
   color: var(--ui-muted);
-}
-
-.ui-test-root .ui-test-ptree-row.is-folder .ui-test-ptree-ico {
-  color: var(--ui-accent);
 }
 
 .ui-test-root .ui-test-ptree-name {
@@ -2601,22 +2550,6 @@
   color: var(--ui-muted);
   font-size: 0.6875rem;
   font-variant-numeric: tabular-nums;
-}
-
-.ui-test-root .ui-test-ptree-dot {
-  width: 6px;
-  height: 6px;
-  flex-shrink: 0;
-  border-radius: 50%;
-  background: #5f9b74;
-}
-
-.ui-test-root .ui-test-ptree-dot.is-idle {
-  background: #c2b184;
-}
-
-.ui-test-root .ui-test-ptree-dot.is-candidate {
-  background: color-mix(in srgb, var(--ui-ink) 24%, transparent);
 }
 
 .ui-test-root .ui-test-ptree-star {
@@ -2704,24 +2637,13 @@
   font-weight: 500;
 }
 
-.ui-test-root .ui-test-ptree-row.is-folder {
-  font-weight: 600;
-}
-
 .ui-test-root .ui-test-ptree-row.is-group,
 .ui-test-root .ui-test-ptree-row.is-candidate {
   color: var(--ui-muted);
 }
 
-.ui-test-root .ui-test-ptree-children {
-  background: linear-gradient(var(--ui-line), var(--ui-line)) 16px center / 1px calc(100% - 10px) no-repeat;
-}
-.ui-test-root .ui-test-ptree-children > .ui-test-ptree-row.is-group {
-  padding-inline-start: 26px;
-}
-
 .ui-test-root .ui-test-ptree-row.is-leaf {
-  padding-inline-start: 52px;
+  padding-inline-start: 30px;
 }
 
 .ui-test-root .ui-test-ptree-toggle {
@@ -2747,10 +2669,6 @@
   width: 15px;
   height: 15px;
   color: var(--ui-muted);
-}
-
-.ui-test-root .ui-test-ptree-row.is-folder .ui-test-ptree-ico {
-  color: var(--ui-accent);
 }
 
 .ui-test-root .ui-test-ptree-name {
@@ -2781,20 +2699,18 @@
   font-variant-numeric: tabular-nums;
 }
 
+.ui-test-root .ui-test-ptree-row[data-persona-status="active"] { --persona-status-color: #5f9b74; }
+.ui-test-root .ui-test-ptree-row[data-persona-status="dormant"] { --persona-status-color: #c49d45; }
+.ui-test-root .ui-test-ptree-row[data-persona-status="archived"] { --persona-status-color: var(--ui-muted); }
+.ui-test-root .ui-test-ptree-row[data-persona-status="candidates"] { --persona-status-color: color-mix(in srgb, var(--ui-ink) 35%, transparent); }
+
+.ui-test-root .ui-test-ptree-row.is-group .ui-test-ptree-ico { color: var(--persona-status-color); }
 .ui-test-root .ui-test-ptree-dot {
   flex-shrink: 0;
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: #5f9b74;
-}
-
-.ui-test-root .ui-test-ptree-dot.is-idle {
-  background: #c2b184;
-}
-
-.ui-test-root .ui-test-ptree-dot.is-candidate {
-  background: color-mix(in srgb, var(--ui-ink) 26%, transparent);
+  background: var(--persona-status-color);
 }
 
 .ui-test-root .ui-test-ptree-star {
@@ -2841,14 +2757,13 @@
 }
 /* 中栏人物面板的关闭按钮：贴在右上角，不占布局高度 */
 
-/* ===== 人物档案顶栏：极简 =====
-   只留名字与显示形式切换。出场次数 / 定位 / 章节这些档案页里都有，
-   摆在顶栏只会把一条栏挤成一字一行（用户实测）。 */
+/* 人物档案顶栏 */
 .ui-test-root .ui-test-gbar {
   display: flex;
   align-items: center;
   gap: 12px;
-  flex-wrap: nowrap;
+  row-gap: 6px;
+  flex-wrap: wrap;
   flex-shrink: 0;
   padding: 8px 16px;
   border-bottom: 1px solid var(--ui-line);
@@ -2872,6 +2787,7 @@
   gap: 10px;
   flex-shrink: 0;
   margin-left: auto;
+  max-width: 100%;
 }
 
 .ui-test-root .ui-test-gbar-right > * {
@@ -2879,7 +2795,9 @@
 }
 
 /* 自动保存提示：平时不占视觉重量，只有写盘那一瞬间出现 */
-.ui-test-root .ui-test-gbar-autosave {
+.ui-test-root .ui-test-gbar-right > .ui-test-gbar-autosave {
+  flex-shrink: 1;
+  overflow-wrap: anywhere;
   min-width: 4.5em;
   color: var(--ui-muted);
   font-size: 0.7rem;
@@ -2913,11 +2831,8 @@
   min-width: 0;
 }
 
-@media (max-width: 1100px) {
-  
-  .ui-test-root .ui-test-gbar-autosave {
-    display: none;
-  }
+.ui-test-root .ui-test-gbar-autosave:empty {
+  display: none;
 }
 
 /* ===== 档案页：分组卡片 + 最多两列 =====
@@ -3494,26 +3409,32 @@
   font-size: 0.75rem;
   line-height: 1.7;
 }
-/* 顶栏「移入候选角色」：与绿勾同行，样式低调，避免抢了保存/切换的视觉重量 */
-.ui-test-root .ui-test-gbar-demote {
+/* 人物状态与重要人物标记并列。 */
+.ui-test-root .ui-test-gbar-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   flex-shrink: 0;
-  padding: 3px 9px;
+  color: var(--ui-muted);
+  font-size: 0.7rem;
+}
+
+.ui-test-root .ui-test-gbar-status select {
+  padding: 3px 5px;
   border: 1px solid var(--ui-line);
   border-radius: 7px;
   background: transparent;
-  color: var(--ui-muted);
-  font-size: 0.7rem;
-  font-family: inherit;
-  white-space: nowrap;
+  color: inherit;
+  font: inherit;
   cursor: pointer;
 }
 
-.ui-test-root .ui-test-gbar-demote:hover:not(:disabled) {
+.ui-test-root .ui-test-gbar-status select:hover:not(:disabled) {
   border-color: color-mix(in srgb, var(--ui-accent) 42%, var(--ui-line));
   color: var(--ui-ink);
 }
 
-.ui-test-root .ui-test-gbar-demote:disabled {
+.ui-test-root .ui-test-gbar-status select:disabled {
   opacity: .5;
   cursor: default;
 }
@@ -3525,14 +3446,4 @@
   font-size: 0.8125rem;
   line-height: 1.9;
   text-align: center;
-}
-/* 潜伏 / 归档标识：它们仍然有档案，但已经不算「活跃」 */
-.ui-test-root .ui-test-ptree-state {
-  flex-shrink: 0;
-  padding: 0 5px;
-  border-radius: 4px;
-  background: color-mix(in srgb, var(--ui-ink) 8%, transparent);
-  color: var(--ui-muted);
-  font-size: 0.5625rem;
-  line-height: 1.6;
 }

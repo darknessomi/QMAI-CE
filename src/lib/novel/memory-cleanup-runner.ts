@@ -19,6 +19,7 @@ import { collectMemoryRecords, snapshotsInCleanupScope, MEMORY_CLEANUP_SYSTEM, p
 import { memoryAppearanceSubject, planMemoryCleanupRules, type MemoryCleanupRuleOptions, type MemoryCleanupRulePlan } from "./memory-cleanup-rules"
 import { buildPersonaChapterFacts, mergeLiveLines } from "./persona-skill-facts"
 import { applyPersonaProfileEdits, splitPersonaSkillDocument } from "./persona-skill-profile"
+import { projectPersonaToOutline } from "./persona-projection-writer"
 import { loadPersonaSkillIndexStrict, personaSkillDocumentPath, personaSkillIndexPath, personaSkillLockKey, savePersonaSkillIndex, withPersonaSkillLock } from "./persona-skill-store"
 import { PERSONA_LIVE_SECTION_LIMITS } from "./persona-skill-types"
 
@@ -249,6 +250,22 @@ async function restoreFiles(projectPath: string, backup: CleanupBackup): Promise
   }
 }
 
+/** 已提交的清理和撤销共用。只刷新备份里实际变动的档案对应的既有投影。 */
+async function refreshChangedPersonaOutlines(projectPath: string, files: BackupFile[]): Promise<void> {
+  const changed = new Set(files.filter(file => file.path.startsWith(".qmai/persona-skills/") && file.path.endsWith("/SKILL.md"))
+    .map(file => `${normalizePath(projectPath)}/${file.path}`))
+  if (!changed.size) return
+  try {
+    const index = await loadPersonaSkillIndexStrict(projectPath)
+    for (const meta of index?.skills ?? []) {
+      const path = personaSkillDocumentPath(projectPath, meta.id)
+      if (changed.has(path)) await projectPersonaToOutline(projectPath, meta, await readFile(path), true)
+    }
+  } catch (error) {
+    console.warn("记忆清理后的人物小传投影未同步", error)
+  }
+}
+
 async function rebuildPersonaFacts(projectPath: string, snapshots: ChapterSnapshot[], changed: Set<number>, fields: Set<MemoryField>): Promise<void> {
   if (!fields.has("knowledgeChanges") && !fields.has("characterStateChanges")) return
   const index = await loadPersonaSkillIndexStrict(projectPath)
@@ -401,6 +418,7 @@ export async function applyMemoryCleanup(projectPath: string, scan: MemoryCleanu
       backup.files = backup.files.filter((file) => mutated.has(`${normalizePath(projectPath)}/${file.path}`))
       await writeFileAtomic(`${dir}/backup.json`, JSON.stringify(backup))
       await writeFileAtomic(lastPath(projectPath), JSON.stringify({ dir }))
+      await refreshChangedPersonaOutlines(projectPath, backup.files)
       clearGraphCache(); useWikiStore.getState().bumpDataVersion()
       onLog?.(`已从来源删除 ${remove.size} 条，完成 JSON、Markdown、检索索引和缓存同步。`)
       return remove.size
@@ -473,6 +491,7 @@ export async function undoLastMemoryCleanup(projectPath: string, onLog?: Log): P
       if (fingerprintText(JSON.stringify(current)) !== file.after) throw new Error("清理后文件已有新变化，不能覆盖恢复。备份已保留。")
     }
     await restoreFiles(projectPath, backup)
+    await refreshChangedPersonaOutlines(projectPath, backup.files)
     const paths = backup.files.map((f) => `${normalizePath(projectPath)}/${f.path}`)
     let indexError: unknown = null
     try { await invalidateVectors(projectPath, paths, paths.filter((path) => path.includes("/.qmai/novel/community-summaries/")), onLog) }

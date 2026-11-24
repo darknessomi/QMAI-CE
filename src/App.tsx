@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core"
 import { getMigrationView, MigrationReturned, restoreDesktopMigration, setMigrationShelfReturn } from "@/lib/novel-migration"
 import { useState, useEffect, useRef } from "react"
 import i18n from "@/i18n"
-import { useWikiStore } from "@/stores/wiki-store"
+import { discardProjectSkillDrafts, useWikiStore } from "@/stores/wiki-store"
 import { useReviewStore } from "@/stores/review-store"
 import { isTauri, pickDirectory } from "@/lib/platform"
 import { useChatStore } from "@/stores/chat-store"
@@ -19,7 +19,6 @@ import { flushPendingChapterSave } from "@/lib/chapter-save-flush"
 import { confirmAppQuit } from "@/components/uitest/models/model-draft-guard"
 import { restoreUiTestWorkspace, readUiTestWorkspacePreference } from "@/lib/ui-test-workspace-preferences"
 import { UiTestShell } from "@/components/uitest/ui-test-shell"
-import { PersonaSkillCompletionDialog } from "@/components/skill-library/persona-skill-completion-dialog"
 import { restoreImportedUiPreferences } from "@/lib/imported-ui-preferences"
 import { formatAppTitle } from "@/lib/app-title"
 import { resetProjectState } from "@/lib/reset-project-state"
@@ -717,6 +716,7 @@ function App() {
   }
 
   async function handleSwitchProject() {
+    if (!(await discardProjectSkillDrafts())) return
     // Clear all per-project state BEFORE flipping back to the welcome screen
     // so old data cannot leak in via any async render pass.
     await resetProjectState()
@@ -749,7 +749,6 @@ function App() {
         onSwitchProject={handleSwitchProject}
         onProjectOpened={handleProjectOpened}
       />
-      <PersonaSkillCompletionDialog />
       <MemoryMaintenanceReminder />
     </>
   )

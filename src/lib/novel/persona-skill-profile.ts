@@ -27,6 +27,8 @@
  */
 import {
   PERSONA_DOCUMENT_FIELDS,
+  PERSONA_INJECT_PERSONALITY_MAX_CHARS,
+  PERSONA_INJECT_PERSONALITY_MAX_TAGS,
   PERSONA_PROFILE_FIELDS,
   PERSONA_SUPPLEMENT_HEADING,
 } from "./persona-skill-types"
@@ -260,6 +262,24 @@ export function parsePersonalitySection(sectionBody: string): ParsedPersonalityS
     ? tagLine.slice(PERSONALITY_TAG_LINE_PREFIX.length).split(/[、,，]/).map((tag) => tag.trim()).filter(Boolean)
     : []
   return { tags, raw: "" }
+}
+
+/** 写作提示词与界面预览共用同一份性格摘录，标签只按整条保留。 */
+export function formatPersonaPersonalityForWriting(sectionText: string): string {
+  const { tags, raw } = parsePersonalitySection(sectionText)
+  if (tags.length === 0) {
+    const text = raw.replace(/\s*\n\s*/g, " ")
+    return text.length <= PERSONA_INJECT_PERSONALITY_MAX_CHARS
+      ? text
+      : `${text.slice(0, PERSONA_INJECT_PERSONALITY_MAX_CHARS - 1)}…`
+  }
+  let result = ""
+  for (const tag of tags.slice(0, PERSONA_INJECT_PERSONALITY_MAX_TAGS)) {
+    const next = result ? `${result}、${tag}` : tag
+    if (next.length > PERSONA_INJECT_PERSONALITY_MAX_CHARS) break
+    result = next
+  }
+  return result
 }
 
 export function renderPersonalitySection(input: { tags: readonly string[]; raw?: string }): string {

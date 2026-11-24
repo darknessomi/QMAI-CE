@@ -90,6 +90,7 @@ function dynamicFragments(input: ComposeContextInput, expanded: boolean): Contex
     { title: "本节简报", text: pack.sectionBriefing ?? "", required: true, layer: "dynamic" },
     { title: "上一章结尾", text: pack.previousChapterEnding, layer: "dynamic" },
     { title: "人物当前状态", text: pack.characterStates, layer: "dynamic" },
+    { title: "人物档案", text: pack.personaSkills ?? "", layer: "dynamic" },
     { title: "伏笔状态", text: pack.foreshadowingStates, layer: "dynamic" },
     { title: "最近摘要", text: pack.recentSummaries.slice(-3).join("\n"), layer: "dynamic" },
     { title: "修订要求", text: pack.revisionDirectives, layer: "dynamic" },

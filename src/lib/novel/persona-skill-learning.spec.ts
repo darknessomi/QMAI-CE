@@ -50,7 +50,6 @@ vi.mock("@/lib/has-usable-llm", () => ({ hasUsableLlm: () => true }))
 const storeMock = vi.hoisted(() => ({
   providerConfigs: [] as unknown[],
   setPersonaSkillLearningError: vi.fn(),
-  setPersonaSkillCompletion: vi.fn(),
 }))
 
 vi.mock("@/stores/wiki-store", () => ({
@@ -67,10 +66,11 @@ import {
   mergePersonaFields,
   parsePersonaSkillDrafts,
   regeneratePersonaSkillResearch,
+  promotePersonaSightingLocal,
   renderPersonaSkillDocument,
   __resetPersonaSkillRoundsForTesting,
 } from "./persona-skill-learning"
-import { __resetPersonaSkillLocksForTesting } from "./persona-skill-store"
+import { __resetPersonaSkillLocksForTesting, setPersonaSkillStatus } from "./persona-skill-store"
 
 const project = "C:/project"
 const indexFile = `${project}/.qmai/persona-skills/index.json`
@@ -723,7 +723,7 @@ describe("regeneratePersonaSkillResearch", () => {
 
     const ok = await regeneratePersonaSkillResearch({
       projectPath: project,
-      characterName: "沈砚",
+      id: "沈砚",
       llmConfig,
     })
 
@@ -737,7 +737,7 @@ describe("regeneratePersonaSkillResearch", () => {
   it("查无此人时返回 false，且不调模型", async () => {
     const ok = await regeneratePersonaSkillResearch({
       projectPath: project,
-      characterName: "查无此人",
+      id: "查无此人",
       llmConfig,
     })
     expect(ok).toBe(false)
@@ -755,7 +755,7 @@ describe("regeneratePersonaSkillResearch", () => {
     )
 
     await expect(
-      regeneratePersonaSkillResearch({ projectPath: project, characterName: "沈砚", llmConfig }),
+      regeneratePersonaSkillResearch({ projectPath: project, id: "沈砚", llmConfig }),
     ).resolves.toBe(false)
     expect(readIndex()!.skills[0].hasResearch).toBe(false)
   })
@@ -773,7 +773,7 @@ describe("regeneratePersonaSkillResearch", () => {
     )
 
     await expect(
-      regeneratePersonaSkillResearch({ projectPath: project, characterName: "沈砚", llmConfig }),
+      regeneratePersonaSkillResearch({ projectPath: project, id: "沈砚", llmConfig }),
     ).resolves.toBe(false)
     expect(streamChatMock).not.toHaveBeenCalled()
     // 旧文件一字未动
@@ -849,6 +849,23 @@ describe("人物 Skill 审查修复：并发保存、确定性记账、回填旧
     expect(shen.lastChapter).toBe(45)
     expect(shen.status).toBe("active")
     expect(shen.appearanceCount).toBe(4)
+  })
+
+  it("学习与长期未出场会更新自动状态，保留手动分组直到作者恢复自动", async () => {
+    seedIndex([
+      { characterName: "沈砚", id: "沈砚", lastChapter: 1, manualStatus: "active" },
+      { characterName: "林清越", id: "林清越", lastChapter: 1, appearanceCount: 3, manualStatus: "archived" },
+    ])
+    reply([{ name: "林清越", fields: { 怎么说话: "照旧。" } }])
+    await learnPersonaSkillsFromChapter({
+      projectPath: project, chapter: { chapterNumber: 45, chapterBody: "林清越进门。", characters: ["林清越"] }, llmConfig,
+    })
+    const [absent, present] = readIndex()!.skills
+    expect(absent).toMatchObject({ status: "archived", manualStatus: "active" })
+    expect(present).toMatchObject({ status: "active", manualStatus: "archived", lastLearnedChapter: 45 })
+    await setPersonaSkillStatus(project, absent.id, null)
+    expect(readIndex()!.skills[0]).toMatchObject({ status: "archived" })
+    expect(readIndex()!.skills[0].manualStatus).toBeUndefined()
   })
 
   it("回填旧章：已归档的人不会因为旧章号被复活", async () => {
@@ -1221,92 +1238,6 @@ describe("模型输出形状容错：模型不会逐字照抄提示词", () => {
   })
 })
 
-/*
- * 「学习完成 → 弹窗」这条接线的**唯一**写入点。
- *
- * 为什么必须单独钉：弹窗组件自己有 5 条用例
- * （`persona-skill-completion-dialog.spec.tsx`），但它们全部是**手工往 store 里塞 state**
- * 再渲染 —— 没有一条覆盖「**谁**把 state 塞进去」。而全仓写这个字段的地方只有
- * 本文件的 `learnPersonaSkillsFromChapter` 一处。
- *
- * 少了这一组，把 `setPersonaSkillCompletion(...)` 那行删掉，整个仓库依然全绿，
- * 而用户侧的表现是「学完了没有任何提示」—— 恰好是这条分支要修的那个观感问题。
- *
- * ⚠️ 这条路径的真实触发要跑一次真实 LLM 摄取（会消耗 API 并写入用户项目），
- * 所以它**只能**在这里钉住，真机验证代价过高。
- */
-describe("人物 Skill 学习完成的弹窗触发", () => {
-  function fullFields() {
-    return {
-      怎么说话: "话少，句子短。",
-      怎么想: "先算代价。",
-      怎么判断: "看人先看底线。",
-      什么不做: "不拿无辜者交换。",
-      知道局限: "救不了所有人。",
-    }
-  }
-
-  function replyRaw(raw: string) {
-    streamChatMock.mockImplementation(
-      async (
-        _config: unknown,
-        _messages: unknown,
-        callbacks: { onToken: (t: string) => void; onDone: () => void },
-      ) => {
-        callbacks.onToken(raw)
-        callbacks.onDone()
-      },
-    )
-  }
-
-  beforeEach(() => {
-    io.files.clear()
-    streamChatMock.mockReset()
-    storeMock.setPersonaSkillCompletion.mockClear()
-    __resetPersonaSkillRoundsForTesting()
-  })
-
-  it("建档成功：把新增的人物名交给弹窗", async () => {
-    roleFile("男主", "林清越")
-    reply([{ name: "林清越", fields: fullFields() }])
-
-    await learnPersonaSkillsFromChapter({
-      projectPath: project,
-      chapter: { chapterNumber: 1, chapterBody: "第一章正文", characters: ["林清越"] },
-      llmConfig,
-    })
-
-    // 先确认这一轮真的写进 index 了：否则下面那条断言可能因为「本轮什么都没做」
-    // 而假绿（比如某天门槛被改大，建档根本没发生）。
-    expect(readIndex()!.skills.map((item) => item.characterName)).toEqual(["林清越"])
-    expect(storeMock.setPersonaSkillCompletion).toHaveBeenCalledTimes(1)
-    const payload = storeMock.setPersonaSkillCompletion.mock.calls[0]?.[0] as
-      | { created: string[]; updated: string[] }
-      | undefined
-    expect(payload?.created).toEqual(["林清越"])
-    expect(payload?.updated).toEqual([])
-  })
-
-  it("解析出草稿但一个字都没落盘：不碰 store（不能弹「生成成功」却一个名字都没有）", async () => {
-    roleFile("男主", "林清越")
-    // 关键：这**不是**「模型没给 JSON」那条更早的返回，而是**确实解析出了 1 条草稿**、
-    // 只是字段名全对不上、渲染成空文档的那条路径。它才真正走到 `written === 0`
-    // 那个分支 —— 也就是下面这条断言唯一能起作用的地方。
-    replyRaw(JSON.stringify({ skills: [{ name: "林清越", fields: { 他喜欢吃辣: "很能吃辣。" } }] }))
-
-    await learnPersonaSkillsFromChapter({
-      projectPath: project,
-      chapter: { chapterNumber: 1, chapterBody: "第一章正文", characters: ["林清越"] },
-      llmConfig,
-    })
-
-    expect(io.files.has(indexFile)).toBe(false)
-    // 同一轮里「学习失败」那条通道必须照常亮起（否则用户什么都看不到）
-    expect(storeMock.setPersonaSkillLearningError).toHaveBeenCalled()
-    expect(storeMock.setPersonaSkillCompletion).not.toHaveBeenCalled()
-  })
-})
-
 describe("demotePersonaSkillToSighting", () => {
   beforeEach(() => {
     // 这个 describe 自己没有清理的话，上一条用例写下的 sightings.json 会留下来，
@@ -1331,7 +1262,7 @@ describe("demotePersonaSkillToSighting", () => {
     ])
     io.files.set(sightingsFile, JSON.stringify({ version: 1, sightings: [] }))
 
-    expect(await demotePersonaSkillToSighting({ projectPath: project, characterName: "小紫" })).toBe(true)
+    expect(await demotePersonaSkillToSighting({ projectPath: project, id: "小紫" })).toBe(true)
 
     // 档案区不再有这个人（否则会同时出现在档案区与候选区）
     expect(readIndex()!.skills).toHaveLength(0)
@@ -1346,14 +1277,83 @@ describe("demotePersonaSkillToSighting", () => {
     expect(sightings[0].lastChapter).toBe(4)
   })
 
+  it("同名档案退回第二份再建档，原编号、顺序和另一份档案都保留", async () => {
+    seedIndex([{ id: "甲", characterName: "布什" }, { id: "乙", characterName: "布什" }])
+    expect(await demotePersonaSkillToSighting({ projectPath: project, id: "乙" })).toBe(true)
+    expect(readIndex()!.skills.map((meta) => meta.id)).toEqual(["甲"])
+    expect(await promotePersonaSightingLocal({ projectPath: project, characterName: "布什" })).toMatchObject({ id: "乙" })
+    expect(readIndex()!.skills.map((meta) => meta.id)).toEqual(["甲", "乙"])
+    expect(readSightings()!.sightings).toEqual([])
+  })
+
   it("没有这张档案时返回 false，一个字节都不写", async () => {
     seedIndex([{ id: "林清越", characterName: "林清越" }])
     const before = io.files.get(indexFile)
 
-    expect(await demotePersonaSkillToSighting({ projectPath: project, characterName: "查无此人" })).toBe(false)
+    expect(await demotePersonaSkillToSighting({ projectPath: project, id: "查无此人" })).toBe(false)
 
     expect(io.files.get(indexFile)).toBe(before)
     expect(io.files.has(sightingsFile)).toBe(false)
+  })
+
+  it.each([["乙", "丙"], ["丙", "乙"]])("连续退回两人，先恢复%s再恢复%s，仍在原位", async (first, second) => {
+    seedIndex(["甲", "乙", "丙"].map((name) => ({
+      id: name, characterName: name, pinned: name === second, manualStatus: name === "乙" ? "archived" : undefined,
+    })))
+    for (const name of ["乙", "丙"]) {
+      expect(await demotePersonaSkillToSighting({ projectPath: project, id: name })).toBe(true)
+    }
+    await createPersonaSkillByUser({ projectPath: project, characterName: "丁", roleType: "", fields: {} })
+    __resetPersonaSkillLocksForTesting()
+    await Promise.all([
+      promotePersonaSightingLocal({ projectPath: project, characterName: first }),
+      createPersonaSkillByUser({ projectPath: project, characterName: second, roleType: "", fields: {} }),
+    ])
+    expect(readIndex()!.skills.map((item) => item.characterName)).toEqual(["甲", "乙", "丙", "丁"])
+    expect(readIndex()!.skills.every((item) => item.status === "active")).toBe(true)
+    expect(readIndex()!.skills[1].manualStatus).toBe("archived")
+    expect(readIndex()!.skills.filter((item) => item.pinned).map((item) => item.characterName)).toEqual([second])
+    expect(readSightings()!.sightings).toEqual([])
+  })
+
+  it("重新建档复用旧编号，同名目录已被其他角色使用也能恢复原文与原位置", async () => {
+    seedIndex([{ id: "小紫", characterName: "另一位" }, { id: "旧编号", characterName: "小紫" }, { id: "末位", characterName: "末位" }])
+    const original = "# 小紫\n\n作者手写的原文。"
+    const root = `${project}/.qmai/persona-skills`
+    io.files.set(`${root}/旧编号/SKILL.md`, original)
+    io.files.set(`${root}/小紫/SKILL.md`, "# 另一位")
+    const options = { projectPath: project, characterName: "小紫" }
+    expect(await demotePersonaSkillToSighting({ projectPath: project, id: "旧编号" })).toBe(true)
+    const restored = await promotePersonaSightingLocal(options)
+    expect(restored).toMatchObject({ id: "旧编号", status: "active" })
+    expect(readIndex()!.skills.map((item) => item.id)).toEqual(["小紫", "旧编号", "末位"])
+    expect(io.files.get(`${root}/旧编号/SKILL.md`)).toBe(original)
+    expect(io.files.get(`${root}/小紫/SKILL.md`)).toBe("# 另一位")
+  })
+
+  it("原编号已被另一个人占用时保留候选及对方档案", async () => {
+    seedIndex([{ id: "旧编号", characterName: "小紫" }])
+    const options = { projectPath: project, characterName: "小紫" }
+    await demotePersonaSkillToSighting({ projectPath: project, id: "旧编号" })
+    seedIndex([{ id: "旧编号", characterName: "另一位" }])
+    const path = `${project}/.qmai/persona-skills/旧编号/SKILL.md`
+    io.files.set(path, "# 另一位")
+    await expect(promotePersonaSightingLocal(options)).rejects.toThrow("编号已被占用")
+    expect(readSightings()!.sightings).toHaveLength(1)
+    expect(io.files.get(path)).toBe("# 另一位")
+  })
+
+  it("章节学习为候选重新建档时也恢复在原位", async () => {
+    seedIndex(["开头", "小紫", "末位"].map((name) => ({ id: name === "小紫" ? "旧编号" : name, characterName: name })))
+    await setPersonaSkillStatus(project, "旧编号", "dormant")
+    await demotePersonaSkillToSighting({ projectPath: project, id: "旧编号" })
+    reply([{ name: "小紫", fields: { 怎么说话: "短句。" } }])
+    await learnPersonaSkillsFromChapter({
+      projectPath: project, chapter: { chapterNumber: 2, chapterBody: "小紫进来了。", characters: ["小紫"] }, llmConfig,
+    })
+    expect(readIndex()!.skills.map((item) => item.id)).toEqual(["开头", "旧编号", "末位"])
+    expect(readIndex()!.skills[1]).toMatchObject({ status: "active", manualStatus: "dormant" })
+    expect(readSightings()!.sightings).toEqual([])
   })
 
   it("候选池里已有同名条目时不重复添加，也不覆盖它的计数", async () => {
@@ -1376,7 +1376,7 @@ describe("demotePersonaSkillToSighting", () => {
       }),
     )
 
-    expect(await demotePersonaSkillToSighting({ projectPath: project, characterName: "小紫" })).toBe(true)
+    expect(await demotePersonaSkillToSighting({ projectPath: project, id: "小紫" })).toBe(true)
 
     const sightings = readSightings()!.sightings as Array<Record<string, unknown>>
     expect(sightings).toHaveLength(1)
@@ -1529,7 +1529,7 @@ describe("createPersonaSkillByUser", () => {
   it("手工建档：origin=manual、outlineRefs 为空、asOfChapter 为 null", async () => {
     await createPersonaSkillByUser({
       projectPath: project, characterName: "林清越", roleType: "男主",
-      fields: { 性别: "男", 年龄: "二十四", 势力组织: "青云宗" }, llmConfig: null,
+      fields: { 性别: "男", 年龄: "二十四", 势力组织: "青云宗" },
     })
     const meta = readIndex()!.skills.find((item) => item.characterName === "林清越")!
     expect(meta.origin).toBe("manual")
@@ -1541,14 +1541,14 @@ describe("createPersonaSkillByUser", () => {
   it("手工建档不调用模型", async () => {
     streamChatMock.mockClear()
     await createPersonaSkillByUser({
-      projectPath: project, characterName: "沈砚", roleType: "反派", fields: { 性别: "男" }, llmConfig: null,
+      projectPath: project, characterName: "沈砚", roleType: "反派", fields: { 性别: "男" },
     })
     expect(streamChatMock).not.toHaveBeenCalled()
   })
 
   it("同名再建不产生第二条档案，改为合并字段", async () => {
-    await createPersonaSkillByUser({ projectPath: project, characterName: "林清越", roleType: "男主", fields: { 性别: "男" }, llmConfig: null })
-    await createPersonaSkillByUser({ projectPath: project, characterName: "林清越", roleType: "男主", fields: { 年龄: "二十四" }, llmConfig: null })
+    await createPersonaSkillByUser({ projectPath: project, characterName: "林清越", roleType: "男主", fields: { 性别: "男" } })
+    await createPersonaSkillByUser({ projectPath: project, characterName: "林清越", roleType: "男主", fields: { 年龄: "二十四" } })
     const skills = readIndex()!.skills.filter((item) => item.characterName === "林清越")
     expect(skills).toHaveLength(1)
     const document = io.files.get(`${project}/.qmai/persona-skills/林清越/SKILL.md`) ?? ""
@@ -1569,13 +1569,97 @@ describe("createPersonaSkillByUser", () => {
     })
     expect(readIndex()!.skills[0].origin).toBe("auto")
 
-    await createPersonaSkillByUser({ projectPath: project, characterName: "林清越", roleType: "男主", fields: { 备注: "手补" }, llmConfig: null })
+    await createPersonaSkillByUser({ projectPath: project, characterName: "林清越", roleType: "男主", fields: { 备注: "手补" } })
     expect(readIndex()!.skills[0].origin).toBe("auto")
+  })
+})
+
+describe("大纲小传与本地候选共用档案", () => {
+  beforeEach(() => io.files.clear())
+
+  it("以别名并发保存同一角色只更新既有 id，保留原文并合并引用", async () => {
+    seedIndex([{ id: "旧编号", aliases: ["阿越"] }])
+    const document = `${project}/.qmai/persona-skills/旧编号/SKILL.md`
+    io.files.set(document, "# 林清越\n\n## 背景\n\n作者原稿\n")
+    const options = { projectPath: project, characterName: "阿越", roleType: "", fields: {}, origin: "auto" as const }
+    await Promise.all(["章纲/一.md", "章纲/二.md"].map(outlineRef => createPersonaSkillByUser({ ...options, outlineRef })))
+    expect(readIndex()!.skills).toHaveLength(1)
+    expect(readIndex()!.skills[0]).toMatchObject({ id: "旧编号", characterName: "林清越", outlineRefs: ["章纲/一.md", "章纲/二.md"] })
+    expect(io.files.get(document)).toContain("作者原稿")
+    expect([...io.files.keys()].some(path => path.includes("/阿越/"))).toBe(false)
+  })
+
+  it("本地建档一次性转移候选资料并保留忽略名单，退回后仍然保留", async () => {
+    const candidate = { characterName: "林清越", aliases: ["阿越"], roleType: "配角", firstChapter: 2, lastChapter: 6, chapters: [2, 6], appearanceCount: 2 }
+    io.files.set(sightingsFile, JSON.stringify({ version: 1, sightings: [candidate], ignored: ["路人"] }))
+    const input = { projectPath: project, characterName: "阿越" }
+    const results = await Promise.all([promotePersonaSightingLocal(input), promotePersonaSightingLocal(input)])
+    expect(results.filter(Boolean)).toHaveLength(1)
+    expect(readIndex()!.skills[0]).toMatchObject({ characterName: "林清越", aliases: ["阿越"], firstChapter: 2, lastChapter: 6, appearanceCount: 2, editedByUser: false, pinned: true })
+    expect(readSightings()).toMatchObject({ sightings: [], ignored: ["路人"] })
+    await demotePersonaSkillToSighting({ projectPath: input.projectPath, id: results.find(Boolean)!.id })
+    expect(readSightings()).toMatchObject({ sightings: [expect.objectContaining({ characterName: "林清越" })], ignored: ["路人"] })
+  })
+
+  it("旧文件名空壳改用真实姓名，保留原 id，实体小传保存后不创建空投影", async () => {
+    const old = "角色-男主-林辰"
+    seedIndex([{ id: old, characterName: old, roleType: "", firstChapter: 0, lastChapter: 0, createdChapter: 0,
+      lastLearnedChapter: 0, editedByUser: true, outlineRefs: [old + ".md"] }])
+    const doc = `${project}/.qmai/persona-skills/${old}/SKILL.md`
+    io.files.set(doc, `# ${old} · 人物 Skill\n`)
+    const input = { projectPath: project, characterName: "林辰", roleType: "男主", fields: {}, origin: "auto" as const,
+      outlineRef: `人物小传/${old}.md`, legacyOutlineName: old, skipProjection: true }
+    await createPersonaSkillByUser(input)
+    await createPersonaSkillByUser({ ...input, outlineRef: "章纲/一.md", legacyOutlineName: undefined, skipProjection: false })
+    expect(readIndex()!.skills).toHaveLength(1)
+    expect(readIndex()!.skills[0]).toMatchObject({ id: old, characterName: "林辰", editedByUser: false, outlineRefs: [input.outlineRef, "章纲/一.md"] })
+    expect(io.files.get(doc)).toBe("# 林辰 · 人物 Skill\n")
+    expect(io.files.has(`${project}/wiki/outlines/人物小传/林辰.md`)).toBe(false)
+  })
+
+  it("只有旧空壳能与已有真名档合并，旧文件和书稿作者的正文均保留", async () => {
+    const old = "角色-反派-林辰"
+    const legacy = { id: old, characterName: old, roleType: "", firstChapter: 0, lastChapter: 0,
+      createdChapter: 0, lastLearnedChapter: 0, editedByUser: true, outlineRefs: [old + ".md"] }
+    const canonical = { id: "林辰", characterName: "林辰", origin: "manual" as const, outlineRefs: ["章纲/初见.md"] }
+    seedIndex([legacy, canonical])
+    const oldPath = `${project}/.qmai/persona-skills/${old}/SKILL.md`
+    const input = { projectPath: project, characterName: "林辰", roleType: "反派", fields: {}, origin: "auto" as const,
+      outlineRef: `人物小传/${old}-2.html`, legacyOutlineName: old, skipProjection: true }
+    io.files.set(oldPath, "# 作者手写的独立资料")
+    await createPersonaSkillByUser(input)
+    expect(readIndex()!.skills).toHaveLength(2)
+    io.files.set(oldPath, `# ${old} · 人物 Skill\n`)
+    await createPersonaSkillByUser(input)
+    expect(readIndex()!.skills).toHaveLength(1)
+    expect(readIndex()!.skills[0].id).toBe("林辰")
+    expect(readIndex()!.skills[0].outlineRefs).toEqual(expect.arrayContaining(["章纲/初见.md", legacy.outlineRefs[0], input.outlineRef]))
+    expect(io.files.get(oldPath)).toBe(`# ${old} · 人物 Skill\n`)
+  })
+
+  it("自动创建的空档案能学习演技字段，已写小传保留 AI 排除设置", async () => {
+    const input = { projectPath: project, characterName: "林清越", roleType: "男主", fields: {}, origin: "auto" as const, outlineRef: "章纲/一.md" }
+    const meta = await createPersonaSkillByUser(input)
+    expect(meta.editedByUser).toBe(false)
+    const target = `${project}/wiki/outlines/人物小传/林清越.md`
+    io.files.set(target, io.files.get(target)!.replace("---\n", "---\nai_exclude: true\n"))
+    // 旧版将这种标题壳误标成手改；对真实手改文档仍沿用保护。
+    const old = readIndex()!
+    old.skills[0].editedByUser = true
+    io.files.set(indexFile, JSON.stringify(old))
+    reply([{ characterName: "林清越", fields: { 怎么说话: "短句" } }])
+    await learnPersonaSkillsFromChapter({ projectPath: project, chapter: { chapterNumber: 1, chapterBody: "一句话", characters: ["林清越"] }, llmConfig })
+    await learnPersonaSkillsFromChapter({ projectPath: project, chapter: { chapterNumber: 2, chapterBody: "又一句", characters: ["林清越"] }, llmConfig })
+    expect(io.files.get(`${project}/.qmai/persona-skills/林清越/SKILL.md`)).toContain("## 怎么说话")
+    expect(io.files.get(target)).toContain("| 怎么说话 | 短句 |")
+    expect(io.files.get(target)).toContain("ai_exclude: true")
   })
 })
 
 describe("自动建档来源标记", () => {
   it("学习建档产出 origin=auto，outlineRefs 为空", async () => {
+    io.files.clear()
+    roleFile("男主", "林清越")
     reply([{
       characterName: "林清越", aliases: [], roleType: "男主", tier: "major", mode: "create",
       fields: { 怎么说话: "短句。", 怎么想: "先看利害。", 怎么判断: "看证据。", 什么不做: "不欺弱。", 知道局限: "不知朝局。" },
@@ -1646,7 +1730,7 @@ describe("手工建档产出投影文件", () => {
     io.files.clear()
     await createPersonaSkillByUser({
       projectPath: project, characterName: "林清越", roleType: "男主",
-      fields: { 性别: "男" }, llmConfig: null,
+      fields: { 性别: "男" },
     })
     const target = `${project}/wiki/outlines/人物小传/林清越.md`
     expect(io.files.has(target)).toBe(true)
@@ -1661,8 +1745,22 @@ describe("手工建档产出投影文件", () => {
     io.files.set(target, "# 用户手写的\n")
     await createPersonaSkillByUser({
       projectPath: project, characterName: "沈砚", roleType: "反派",
-      fields: { 性别: "男" }, llmConfig: null,
+      fields: { 性别: "男" },
     })
     expect(io.files.get(target)).toBe("# 用户手写的\n")
+  })
+
+  it.each(["007", "#7", "@Q"])("刷新本角色的旧字面 ID 投影 %s 并保留排除标记", async (characterName) => {
+    io.files.clear()
+    const target = `${project}/wiki/outlines/人物小传/${characterName}.md`
+    io.files.set(target, [
+      "---", "ai_exclude: true", "generated-from: persona-skill", `persona-id: ${characterName}`,
+      "generated-at: 2026-11-20T00:00:00Z", "---", "", "# 旧投影",
+    ].join("\n"))
+    await createPersonaSkillByUser({ projectPath: project, characterName, roleType: "配角", fields: { 年龄: "二十" } })
+    const md = io.files.get(target)
+    expect(md).toContain(`persona-id: ${JSON.stringify(characterName)}`)
+    expect(md).toContain("ai_exclude: true")
+    expect(md).toContain("| 年龄 | 二十 |")
   })
 })

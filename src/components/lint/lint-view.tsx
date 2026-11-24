@@ -1,3 +1,4 @@
+import { confirmAction } from "@/lib/confirm-action"
 ﻿import { useState, useCallback, useMemo, useEffect } from "react"
 import i18n from "@/i18n"
 import {
@@ -92,7 +93,7 @@ export function LintView() {
 
   const handleDeleteHistory = useCallback(async (entry: GenerationHistoryEntry) => {
     if (!project) return
-    const confirmed = window.confirm(t("novel.history.deleteConfirm"))
+    const confirmed = await confirmAction(t("novel.history.deleteConfirm"))
     if (!confirmed) return
     await deleteGenerationHistoryEntry(project.path, entry.filePath)
     setExpandedHistoryId((current) => current === entry.id ? null : current)
@@ -164,18 +165,18 @@ export function LintView() {
       `${pp}/wiki/${page}`,
       `${pp}/wiki/${page}.md`,
     ]
-    setActiveView("wiki")
+    if (!(await setActiveView("wiki"))) return
     for (const path of candidates) {
       try {
         const content = await readFile(path)
-        setSelectedFile(path)
+        if (!(await setSelectedFile(path))) return
         setFileContent(content)
         return
       } catch {
         // try next
       }
     }
-    setSelectedFile(candidates[0])
+    if (!(await setSelectedFile(candidates[0]))) return
     setFileContent(i18n.t("lint.messages.unableToLoad", { page }))
   }
 
@@ -270,7 +271,7 @@ export function LintView() {
     if (!project) return
     const pp = normalizePath(project.path)
     const pagePath = `${pp}/wiki/${result.page}`
-    const confirmed = window.confirm(t("lint.deleteOrphanConfirm", { page: result.page }))
+    const confirmed = await confirmAction(t("lint.deleteOrphanConfirm", { page: result.page }))
     if (!confirmed) return
 
     try {

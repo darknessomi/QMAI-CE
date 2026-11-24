@@ -23,7 +23,7 @@ import { chapterHasLaterChapter, chapterOrdersFromTree, resolveDraftMemoryHint, 
 import { saveNovelConfig, saveUiBodyFontPx, saveUiBodyLineHeight, saveUiBodyLetterSpacing, saveUiBodyMarginX, saveUiBodySafeBottom } from "@/lib/project-store"
 import { registerPreCloseFlush } from "@/lib/pre-close-flush"
 import { isChapterPage, isFinalChapter, parseChapterMeta, updateChapterStatus, updateChapterTitle } from "@/lib/novel/chapter-meta"
-import { isAiExcluded, setAiExcluded } from "@/lib/novel/ai-exclude"
+import { isAiExcludedContent, setAiExcluded } from "@/lib/novel/ai-exclude"
 import { chapterSnapshotNumbersFrom, chapterSnapshotNumbersFromFileNames, resolveChapterMemoryDotState } from "@/lib/novel/chapter-memory-dot"
 import { resolveChapterDotNumbers } from "@/lib/novel/chapter-utils"
 import { resolveReviewModel } from "@/lib/novel/review-model"
@@ -1202,7 +1202,7 @@ export function PreviewPanel() {
    */
   const aiExcluded = useMemo(() => {
     if (!selectedFile || getFileCategory(selectedFile) !== "markdown") return false
-    return isAiExcluded(parseFrontmatter(fileContent).frontmatter as Record<string, unknown> | null)
+    return isAiExcludedContent(fileContent)
   }, [fileContent, selectedFile])
 
   /**
@@ -1214,7 +1214,7 @@ export function PreviewPanel() {
    */
   const handleToggleAiExclude = useCallback(() => {
     const current = fileContentRef.current
-    const excluded = isAiExcluded(parseFrontmatter(current).frontmatter as Record<string, unknown> | null)
+    const excluded = isAiExcludedContent(current)
     const next = setAiExcluded(current, !excluded)
     if (next === current) return
     handleSave(next, { immediate: true })

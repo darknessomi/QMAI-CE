@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react"
 import { AlertTriangle, FolderOpen, Loader2 } from "lucide-react"
+import { ResourceLink } from "@/components/settings/resource-link"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -242,7 +243,10 @@ export function AddPluginDialog({
             </div>
           ) : null}
 
-          <DialogFooter className="mt-1">
+          <DialogFooter className="mt-1 items-center sm:justify-between">
+            <ResourceLink href="https://github.com/darknessomi/QMAI-CE/blob/main/docs/plugins/getting-started.md">
+              自定义插件教程
+            </ResourceLink>
             <Button
               type="submit"
               data-add-plugin-submit="true"

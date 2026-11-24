@@ -1,3 +1,4 @@
+import { confirmAction } from "@/lib/confirm-action"
 /**
  * 维护工具里的「缓存与孤儿资料」面板。
  *
@@ -58,7 +59,7 @@ export function ContextCacheMaintenance() {
 
   async function handleClear() {
     if (!projectPath) return
-    if (!window.confirm("清空上下文缓存？这是派生数据，删除后会在下次生成时自动重建，不影响大纲与章节内容。")) {
+    if (!(await confirmAction("清空上下文缓存？这是派生数据，删除后会在下次生成时自动重建，不影响大纲与章节内容。"))) {
       return
     }
     setBusy("clear")
@@ -97,7 +98,7 @@ export function ContextCacheMaintenance() {
 
   async function handleClean() {
     if (!projectPath || selected.size === 0) return
-    if (!window.confirm(`清理选中的 ${selected.size} 条孤儿记忆？清理后无法恢复（不会影响现有章节与大纲文件）。`)) {
+    if (!(await confirmAction(`清理选中的 ${selected.size} 条孤儿记忆？清理后无法恢复（不会影响现有章节与大纲文件）。`))) {
       return
     }
     setBusy("clean")

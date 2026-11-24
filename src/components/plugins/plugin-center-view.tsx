@@ -1,3 +1,4 @@
+import { confirmAction } from "@/lib/confirm-action"
 import { useCallback, useEffect, useState } from "react"
 import { LayoutGrid, List, Plus, X } from "lucide-react"
 
@@ -98,7 +99,7 @@ export function PluginCenterView() {
   }
 
   const uninstallPlugin = async (plugin: PluginSummary) => {
-    if (!window.confirm(`确定卸载「${plugin.name || plugin.id}」吗？插件自己的数据会保留。`)) return
+    if (!(await confirmAction(`确定卸载「${plugin.name || plugin.id}」吗？插件自己的数据会保留。`))) return
     setBusyId(plugin.id)
     try {
       await pluginsApi.uninstall(plugin.id, false)

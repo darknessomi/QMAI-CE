@@ -170,7 +170,7 @@ import {
   isCompleteHtmlDocument,
 } from "@/lib/novel/outline-save-request";
 import { pruneVersions, saveVersion } from "@/lib/novel/version-store";
-import { runPersonaSyncSafely, syncPersonaFromOutlineSave } from "@/lib/novel/persona-outline-sync";
+import { syncPersonaFromOutlineSave } from "@/lib/novel/persona-outline-sync";
 import {
   extractVolumeOutlineData,
   getVolumeSkeletonReference,
@@ -2816,7 +2816,8 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
             useWikiStore.getState().setSelectedFile(normalizePath(jumpTarget));
           }
           const names = saveResult.saved.map((item) => item.fileName).join("、");
-          setSaveStatus(`已保存 ${saveResult.saved.length} 个文件：${names}`);
+          const issues = [...saveResult.errors, ...saveResult.skipped].slice(0, 2);
+          setSaveStatus([`已保存 ${saveResult.saved.length} 个文件：${names}`, ...issues].join("；"));
           // 文件已落盘：清掉该会话里过期的校验报告，避免「已保存」旁边还挂着警告。
           const savedConvId = useOutlineChatStore.getState().activeConversationId;
           if (savedConvId) {
@@ -2836,22 +2837,15 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
             }));
           }
           drainNextSaveBatch();
-          // 保存入库 → 抓角色进人物小传（用户拍板：只在保存时抓，不保存不抓）。
-          // 放在跳转与状态更新之后、且不 await：同步要读写项目文件与索引，
-          // 让保存按钮等它会把「保存很快」这个现有体感毁掉。
-          // 失败只影响提示、不影响保存结论，所以整段走永不抛 wrapper。
-          const savedOutlineFileName =
-            normalizePath(saveResult.saved[0].path).split(/[\\/]/).pop() ?? "";
-          void runPersonaSyncSafely(
-            () =>
-              syncPersonaFromOutlineSave({
-                projectPath,
-                outlineFileName: savedOutlineFileName,
-                requests,
-                llmConfig,
-              }),
-            "保存后同步人物小传",
-          );
+          // 文件已落盘；后台关联人物，完成后只刷新仍打开的这本书。
+          void syncPersonaFromOutlineSave({ projectPath, savedSources: saveResult.savedSources })
+            .then((synced) => {
+              const state = useWikiStore.getState();
+              if (synced && state.project && normalizePath(state.project.path) === projectPath) {
+                state.bumpPersonaDataVersion();
+              }
+            })
+            .catch((error) => console.warn("保存后同步人物小传失败：", error));
           return;
         }
         if (saveResult.skipped.length > 0) {
@@ -5652,11 +5646,11 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
             "---",
             "",
             "> 这份大纲来自**引导内置内容**，没有调用模型、没有消耗 Token。",
-            "> 点下方的「保存为大纲」就会真正写进这本书的 `wiki/outlines/`；想改成自己的故事，直接在这段文字上改。",
+            "> 点下方的「保存为大纲」，核对文件名和文件夹后点「确认保存」。保存后就可以在编辑器里修改这份大纲。",
           ].join("\n"),
           timestamp: now + 1,
         })
-        setSaveStatus("已生成示例大纲（未调用模型）。点消息下方的「保存为大纲」写入小说。")
+        setSaveStatus("已生成示例大纲（未调用模型）。点「保存为大纲」选择保存位置。")
         void useOutlineChatStore.getState().saveToDisk()
         return
       }

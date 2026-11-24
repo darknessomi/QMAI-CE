@@ -1,5 +1,6 @@
 import { createDirectory, deleteFile, fileExists, listDirectory, readFile, writeFileAtomic } from "@/commands/fs"
 import { normalizeComparablePath, normalizePath } from "@/lib/path-utils"
+import { projectPersonaToOutline } from "./persona-projection-writer"
 import {
   PERSONA_SKILL_DOCUMENT_FILE,
   PERSONA_SKILL_HISTORY_DIR,
@@ -8,14 +9,16 @@ import {
   PERSONA_SKILL_RESEARCH_DIR,
   PERSONA_SKILL_SIGHTINGS_FILE,
   PERSONA_SKILLS_DIR,
+  normalizePersonaName,
   resolvePersonaTier,
   type PersonaSkillIndex,
   type PersonaSkillMeta,
   type PersonaSkillSighting,
   type PersonaSkillSightings,
+  type PersonaSkillStatus,
 } from "./persona-skill-types"
 
-const UNSAFE_ID_CHARS = /[\\/:*?"<>|\s]/g
+const UNSAFE_ID_CHARS = /[\\/:*?"<>|\s\p{Cc}]/gu
 
 /** 全点号的名字：`.` / `..` 是目录引用，绝不能原样当路径的一段。 */
 const DOTS_ONLY = /^\.+$/
@@ -143,6 +146,10 @@ function asNumber(value: unknown, fallback = 0): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback
 }
 
+function readPersonaStatus(value: unknown): PersonaSkillStatus | undefined {
+  if (value === "active" || value === "dormant" || value === "archived") return value
+}
+
 function sanitizeMeta(raw: unknown): PersonaSkillMeta | null {
   const record = asRecord(raw)
   if (!record) return null
@@ -158,7 +165,8 @@ function sanitizeMeta(raw: unknown): PersonaSkillMeta | null {
     // 档位按真源重算，不听磁盘上的值：拼错的 tier 会被静默「升级」成 major = 全字段注入。
     tier: resolvePersonaTier(roleType, pinned),
     pinned,
-    status: record.status === "dormant" || record.status === "archived" ? record.status : "active",
+    status: readPersonaStatus(record.status) ?? "active",
+    manualStatus: readPersonaStatus(record.manualStatus),
     firstChapter: asNumber(record.firstChapter),
     lastChapter: asNumber(record.lastChapter),
     appearanceCount: asNumber(record.appearanceCount),
@@ -195,8 +203,20 @@ function sanitizeSighting(raw: unknown): PersonaSkillSighting | null {
   if (!record) return null
   const characterName = typeof record.characterName === "string" ? record.characterName.trim() : ""
   if (!characterName) return null
+  let previousProfile: PersonaSkillSighting["previousProfile"]
+  if (record.previousProfile !== undefined) {
+    const previous = asRecord(record.previousProfile)
+    if (!previous || typeof previous.id !== "string" || safeId(previous.id, characterName) !== previous.id
+      || typeof previous.position !== "number" || !Number.isSafeInteger(previous.position) || previous.position < 0
+      || typeof previous.pinned !== "boolean") return null
+    previousProfile = {
+      id: previous.id, position: previous.position, pinned: previous.pinned,
+      manualStatus: readPersonaStatus(previous.manualStatus),
+    }
+  }
   return {
     characterName,
+    ...(previousProfile ? { previousProfile } : {}),
     aliases: asStringArray(record.aliases),
     roleType: typeof record.roleType === "string" ? record.roleType.trim() : "",
     appearanceCount: asNumber(record.appearanceCount, 1),
@@ -264,14 +284,19 @@ export async function savePersonaSkillIndex(projectPath: string, index: PersonaS
   )
 }
 
-export async function loadPersonaSightings(projectPath: string): Promise<PersonaSkillSightings> {
-  const raw = asRecord(await readJsonOrNull(personaSkillSightingsPath(projectPath)))
-  if (!raw || !Array.isArray(raw.sightings)) return { version: 1, sightings: [] }
+export async function loadPersonaSightings(projectPath: string, strict = false): Promise<PersonaSkillSightings> {
+  const path = personaSkillSightingsPath(projectPath)
+  const read = strict ? await readJsonStrict(path) : { missing: false, value: await readJsonOrNull(path) }
+  const raw = asRecord(read.value)
+  if (!raw || !Array.isArray(raw.sightings) || (raw.version !== undefined && raw.version !== 1)) {
+    if (strict && !read.missing) throw new Error(`人物候选记录格式异常，已停止写入：${path}`)
+    return { version: 1, sightings: [] }
+  }
+  const sightings = raw.sightings.map(sanitizeSighting)
+  if (strict && sightings.some(item => !item)) throw new Error(`人物候选记录含有无效条目，已停止写入：${path}`)
   return {
     version: 1,
-    sightings: raw.sightings
-      .map(sanitizeSighting)
-      .filter((item): item is PersonaSkillSighting => item != null),
+    sightings: sightings.filter((item): item is PersonaSkillSighting => item != null),
     ignored: asStringArray(raw.ignored),
   }
 }
@@ -301,6 +326,11 @@ export async function readPersonaSkillDocument(projectPath: string, id: string):
   } catch {
     return ""
   }
+}
+
+export async function readPersonaSkillDocumentForUpdate(projectPath: string, id: string): Promise<string> {
+  const path = personaSkillDocumentPath(projectPath, id)
+  return await fileExists(path) ? readFile(path) : ""
 }
 
 export async function writePersonaSkillDocument(
@@ -445,6 +475,8 @@ export async function restorePersonaSkillRevision(
       ),
     }
     await savePersonaSkillIndex(projectPath, next)
+    const restored = next.skills.find(item => item.id === id)
+    if (restored) await projectPersonaToOutline(projectPath, restored, document, true)
     return { index: next, document }
   })
 }
@@ -494,7 +526,41 @@ export async function updatePersonaSkillIndex(
     const next = mutate(index)
     if (!next) return index
     await savePersonaSkillIndex(projectPath, next)
+    const previousById = new Map(index.skills.map((meta) => [meta.id, meta]))
+    for (const meta of next.skills) {
+      const previous = previousById.get(meta.id)
+      if (!previous || previous.outlineRefs === meta.outlineRefs) continue
+      const document = await readPersonaSkillDocument(projectPath, meta.id)
+      if (document.trim()) await projectPersonaToOutline(projectPath, meta, document, true)
+    }
     return next
+  })
+}
+
+export function setPersonaSkillPinned(projectPath: string, id: string, pinned: boolean): Promise<PersonaSkillIndex> {
+  return updatePersonaSkillIndex(projectPath, (index) => {
+    const meta = index.skills.find((item) => item.id === id)
+    if (!meta || meta.pinned === pinned) return
+    const updated = {
+      ...meta, pinned, tier: resolvePersonaTier(meta.roleType, pinned),
+      status: pinned ? "active" as const : meta.status, updatedAt: new Date().toISOString(),
+    }
+    return { ...index, skills: index.skills.map((item) => item === meta ? updated : item) }
+  })
+}
+
+export function setPersonaSkillStatus(
+  projectPath: string,
+  id: string,
+  status: PersonaSkillStatus | null,
+): Promise<PersonaSkillIndex> {
+  return updatePersonaSkillIndex(projectPath, (index) => {
+    const meta = index.skills.find((item) => item.id === id)
+    if (!meta) throw new Error("人物档案不存在，请刷新人物列表")
+    const manualStatus = status ?? undefined
+    if (meta.manualStatus === manualStatus) return
+    const updated = { ...meta, manualStatus, updatedAt: new Date().toISOString() }
+    return { ...index, skills: index.skills.map((item) => item === meta ? updated : item) }
   })
 }
 
@@ -507,7 +573,7 @@ export async function updatePersonaSightings(
   mutate: (sightings: PersonaSkillSightings) => PersonaSkillSightings | void,
 ): Promise<PersonaSkillSightings> {
   return withPersonaSkillLock(personaSkillLockKey(projectPath), async () => {
-    const sightings = await loadPersonaSightings(projectPath)
+    const sightings = await loadPersonaSightings(projectPath, true)
     const next = mutate(sightings)
     if (!next) return sightings
     await savePersonaSightings(projectPath, next)
@@ -518,6 +584,72 @@ export async function updatePersonaSightings(
 export interface PersonaSkillState {
   index: PersonaSkillIndex
   sightings: PersonaSkillSightings
+}
+
+/** 正名优先。别名证据指向多个角色时，保留歧义，避免写入错误档案。 */
+export function matchingPersonasByName<T extends { characterName: string; aliases: string[] }>(
+  entries: readonly T[], characterName: string, aliases: readonly string[] = [],
+): T[] {
+  const key = normalizePersonaName(characterName)
+  if (!key) return []
+  const direct = entries.filter(item => normalizePersonaName(item.characterName) === key)
+  if (direct.length) return direct
+  const names = new Set([key, ...aliases.map(normalizePersonaName)].filter(Boolean))
+  return entries.filter(item =>
+    [item.characterName, ...item.aliases].some(name => names.has(normalizePersonaName(name))),
+  )
+}
+
+export function findPersonaByName<T extends { characterName: string; aliases: string[] }>(
+  entries: readonly T[], characterName: string, aliases: readonly string[] = [],
+): T | undefined {
+  const matches = matchingPersonasByName(entries, characterName, aliases)
+  return matches.length === 1 ? matches[0] : undefined
+}
+
+/** 旧版可能同时保存档案和候选。统一姓名、出场事实后再移出候选池。 */
+export function reconcileFiledSightings(index: PersonaSkillIndex, pool: PersonaSkillSightings): PersonaSkillState {
+  if (!index.skills.length || !pool.sightings.length) return { index, sightings: pool }
+  const known = new Set(index.skills.flatMap(meta => [meta.characterName, ...meta.aliases]).map(normalizePersonaName))
+  const merged = new Map<string, PersonaSkillMeta>()
+  const remaining = pool.sightings.filter(item => {
+    if (![item.characterName, ...item.aliases].some(name => known.has(normalizePersonaName(name)))) return true
+    const previousId = item.previousProfile?.id
+    const profiles = previousId
+      ? index.skills.filter((meta) => meta.id === previousId)
+      : index.skills
+    const found = findPersonaByName(profiles, item.characterName, item.aliases)
+    if (!found) return true
+    const meta = merged.get(found.id) ?? found
+    const aliases = new Map(meta.aliases.map(alias => [normalizePersonaName(alias), alias]))
+    const nameKey = normalizePersonaName(meta.characterName)
+    for (const alias of [item.characterName, ...item.aliases]) {
+      const key = normalizePersonaName(alias)
+      if (key && key !== nameKey && !aliases.has(key)) aliases.set(key, alias)
+    }
+    const firstChapter = Math.min(meta.firstChapter || Infinity, item.firstChapter || Infinity)
+    const first = Number.isFinite(firstChapter) ? firstChapter : 0
+    const lastChapter = Math.max(meta.lastChapter, item.lastChapter)
+    const appearanceCount = Math.max(meta.appearanceCount, item.appearanceCount)
+    const roleType = meta.roleType || item.roleType
+    if (first !== meta.firstChapter || lastChapter !== meta.lastChapter || appearanceCount !== meta.appearanceCount
+      || roleType !== meta.roleType || aliases.size !== meta.aliases.length) {
+      merged.set(meta.id, { ...meta, aliases: [...aliases.values()], firstChapter: first, lastChapter, appearanceCount,
+        roleType, tier: resolvePersonaTier(roleType, meta.pinned) })
+    }
+    return false
+  })
+  return {
+    index: merged.size ? { ...index, skills: index.skills.map(meta => merged.get(meta.id) ?? meta) } : index,
+    sightings: remaining.length === pool.sightings.length ? pool : { ...pool, sightings: remaining },
+  }
+}
+
+export function loadPersonaSkillState(projectPath: string): Promise<PersonaSkillState> {
+  return withPersonaSkillLock(personaSkillLockKey(projectPath), async () => {
+    const [index, pool] = await Promise.all([loadPersonaSkillIndex(projectPath), loadPersonaSightings(projectPath)])
+    return reconcileFiledSightings(index, pool)
+  })
 }
 
 /**
@@ -537,15 +669,12 @@ export async function updatePersonaSkillState(
 ): Promise<PersonaSkillState> {
   return withPersonaSkillLock(personaSkillLockKey(projectPath), async () => {
     const index = (await loadPersonaSkillIndexStrict(projectPath)) ?? { version: 1, skills: [] }
-    const sightings = await loadPersonaSightings(projectPath)
-    const patch = mutate({ index, sightings })
-    if (!patch) return { index, sightings }
-    if (patch.index) await savePersonaSkillIndex(projectPath, patch.index)
-    if (patch.sightings) await savePersonaSightings(projectPath, patch.sightings)
-    return {
-      index: patch.index ?? index,
-      sightings: patch.sightings ?? sightings,
-    }
+    const sightings = await loadPersonaSightings(projectPath, true)
+    const state = reconcileFiledSightings(index, sightings)
+    const next = { ...state, ...mutate(state) }
+    if (next.index !== index) await savePersonaSkillIndex(projectPath, next.index)
+    if (next.sightings !== sightings) await savePersonaSightings(projectPath, next.sightings)
+    return next
   })
 }
 
@@ -562,26 +691,30 @@ export async function updatePersonaSkillState(
 export async function savePersonaSkillDocumentByUser(
   projectPath: string,
   id: string,
-  content: string,
+  edit: string | ((previous: string, meta: PersonaSkillMeta) => string),
+  newRoleType?: string,
 ): Promise<PersonaSkillIndex> {
   return withPersonaSkillLock(personaSkillLockKey(projectPath), async () => {
     const index = (await loadPersonaSkillIndexStrict(projectPath)) ?? { version: 1, skills: [] }
     const meta = index.skills.find((item) => item.id === id)
-    const previous = await readPersonaSkillDocument(projectPath, id)
-    if (meta && previous.trim() && previous !== content) {
+    if (!meta) throw new Error("人物档案不存在，请刷新人物列表")
+    const previous = await readPersonaSkillDocumentForUpdate(projectPath, id)
+    const content = typeof edit === "string" ? edit : edit(previous, meta)
+    if (previous.trim() && previous !== content) {
       await snapshotPersonaSkillRevision(projectPath, id, meta.skillRevision, previous)
     }
     await writePersonaSkillDocument(projectPath, id, content)
-    const updatedAt = new Date().toISOString()
+    const roleType = newRoleType?.trim() ?? meta.roleType
+    const updated = {
+      ...meta, roleType, tier: resolvePersonaTier(roleType, meta.pinned), editedByUser: true,
+      skillRevision: meta.skillRevision + 1, updatedAt: new Date().toISOString(),
+    }
     const next: PersonaSkillIndex = {
       version: 1,
-      skills: index.skills.map((item) =>
-        item.id === id
-          ? { ...item, editedByUser: true, skillRevision: item.skillRevision + 1, updatedAt }
-          : item,
-      ),
+      skills: index.skills.map(item => item.id === id ? updated : item),
     }
     await savePersonaSkillIndex(projectPath, next)
+    await projectPersonaToOutline(projectPath, updated, content, true)
     return next
   })
 }

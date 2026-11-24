@@ -79,7 +79,7 @@ export function TrashPanel() {
       }
       bumpDataVersion()
       if (result.item.kind !== "history") {
-        setActiveView("wiki")
+        if (!(await setActiveView("wiki"))) return
         setSelectedFile(result.restoredPath)
       }
     } catch (err) {

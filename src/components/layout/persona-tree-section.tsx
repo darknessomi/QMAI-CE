@@ -1,34 +1,14 @@
-/**
- * 大纲第一栏里的「人物小传」区段。
- *
- * ── 为什么单独一个组件，而没有塞进 KnowledgeTree ──
- * `KnowledgeTree` 是**磁盘文件树**（一次 listDirectory 出来的真实目录/文件），
- * 而人物的真源在 `.qmai/persona-skills/`，候选更是只存在于 `sightings.json`，
- * 磁盘上根本没有对应文件。硬把虚拟节点插进文件树，会让
- * 「树 = 磁盘」这条不变量破掉（展开/折叠、删除、拖拽全都按路径工作）。
- * 所以这里是**独立的一段**，数据来自 persona-skill 索引与候选池。
- *
- * ── 交互约定（用户拍板） ──
- * · 左键：活跃角色 → 中栏打开档案；候选角色**左键不做事**（它没有档案可开）。
- * · 右键：候选 → 「建档 / 删除」；活跃 → 「标记重要 / 打开 / 删除」。
- *   候选没有档案，所以它的一切操作只能靠右键菜单与建档；这也是为什么
- *   以前点候选「没反应」——它本来就没有可打开的东西。
- * · 新建入口统一走顶部「新建」菜单，区段里不再放按钮（避免两个入口打架）。
- */
-import { useCallback, useEffect, useState } from "react"
-import { Check, ChevronDown, ChevronRight, FolderLock, Trash2, User, UserPlus, Users } from "lucide-react"
+import { confirmAction } from "@/lib/confirm-action"
+import { Fragment, useCallback, useEffect, useState } from "react"
+import { Check, ChevronDown, ChevronRight, Trash2, User, UserPlus, Users } from "lucide-react"
 import {
   deletePersonaSighting,
   promotePersonaSightingLocal,
 } from "@/lib/novel/persona-skill-learning"
-import { removePersonaFromProject } from "@/lib/novel/persona-outline-detach"
+import { deleteFiledPersona } from "@/components/skill-library/delete-filed-persona"
+import { usePersonaSkillState } from "@/components/skill-library/use-persona-skill-state"
 import {
-  loadPersonaSkillIndex,
-  loadPersonaSightings,
-  updatePersonaSkillIndex,
-} from "@/lib/novel/persona-skill-store"
-import {
-  resolvePersonaTier,
+  getEffectivePersonaStatus,
   type PersonaSkillMeta,
   type PersonaSkillSighting,
 } from "@/lib/novel/persona-skill-types"
@@ -42,42 +22,40 @@ interface PersonaTreeSectionProps {
 
 type MenuState =
   | { kind: "candidate"; name: string; x: number; y: number }
-  | { kind: "active"; id: string; name: string; pinned: boolean; x: number; y: number }
+  | { kind: "filed"; id: string; name: string; x: number; y: number }
   | null
+
+const GROUPS = [
+  { key: "active", label: "活跃角色" },
+  { key: "dormant", label: "潜伏角色" },
+  { key: "archived", label: "归档角色" },
+  { key: "candidates", label: "候选角色" },
+] as const
+type GroupKey = typeof GROUPS[number]["key"]
 
 export function PersonaTreeSection({ refreshKey = 0, searchQuery = "" }: PersonaTreeSectionProps) {
   const projectPath = useWikiStore((s) => s.project?.path)
   const personaOutlinePane = useWikiStore((s) => s.personaOutlinePane)
   const setPersonaOutlinePane = useWikiStore((s) => s.setPersonaOutlinePane)
-  /** 任何人物数据变更都会 +1：左栏据此重读，避免与档案页显示不一致。 */
-  const personaDataVersion = useWikiStore((s) => s.personaDataVersion)
   const bumpPersonaDataVersion = useWikiStore((s) => s.bumpPersonaDataVersion)
-
-  const [skills, setSkills] = useState<PersonaSkillMeta[]>([])
-  const [candidates, setCandidates] = useState<PersonaSkillSighting[]>([])
-  const [folderExpanded, setOpen] = useState(true)
-  const [activeExpanded, setActiveOpen] = useState(false)
-  const [candidatesExpanded, setCandidatesOpen] = useState(false)
+  const { index, sightings } = usePersonaSkillState(projectPath, refreshKey)
+  const skills = index.skills
+  const candidates = sightings.sightings
+  const [expanded, setExpanded] = useState<Partial<Record<GroupKey, boolean>>>({})
   const [menu, setMenu] = useState<MenuState>(null)
   const [busy, setBusy] = useState(false)
+  const revealSelectedRow = useCallback((row: HTMLButtonElement | null) => {
+    row?.scrollIntoView?.({ block: "nearest" })
+  }, [])
 
-  const reload = useCallback(async () => {
-    if (!projectPath) {
-      setSkills([])
-      setCandidates([])
-      return
-    }
-    const [index, sightings] = await Promise.all([
-      loadPersonaSkillIndex(projectPath).catch(() => ({ version: 1 as const, skills: [] })),
-      loadPersonaSightings(projectPath).catch(() => ({ version: 1 as const, sightings: [] })),
-    ])
-    setSkills(index.skills)
-    setCandidates(sightings.sightings)
-  }, [projectPath])
-
+  const currentId = personaOutlinePane?.mode === "persona" ? personaOutlinePane.id : null
+  const currentCandidate = personaOutlinePane?.mode === "candidate" ? personaOutlinePane.name : null
+  const currentPersona = currentId ? skills.find((meta) => meta.id === currentId) : undefined
+  const focusedGroup = currentCandidate ? "candidates" : currentPersona && getEffectivePersonaStatus(currentPersona)
   useEffect(() => {
-    void reload()
-  }, [reload, refreshKey, personaDataVersion])
+    if (!focusedGroup) return
+    setExpanded((previous) => previous[focusedGroup] ? previous : { ...previous, [focusedGroup]: true })
+  }, [personaOutlinePane, focusedGroup])
 
   /*
    * 点空白处收起菜单。
@@ -110,9 +88,11 @@ export function PersonaTreeSection({ refreshKey = 0, searchQuery = "" }: Persona
     if (!projectPath) return
     setBusy(true)
     try {
-      await promotePersonaSightingLocal({ projectPath, characterName: name })
-      await reload()
+      const created = await promotePersonaSightingLocal({ projectPath, characterName: name })
       bumpPersonaDataVersion()
+      if (useWikiStore.getState().project?.path !== projectPath) return
+      if (created) setPersonaOutlinePane({ mode: "persona", id: created.id })
+      else window.alert(`「${name}」已不在候选列表中，人物列表已刷新。`)
     } catch (err) {
       // 左栏没有消息区：失败必须显式告知，否则又是「点了没反应」。
       console.error("[PersonaTree] 建档失败:", err)
@@ -125,17 +105,13 @@ export function PersonaTreeSection({ refreshKey = 0, searchQuery = "" }: Persona
 
   async function handleDeleteCandidate(name: string) {
     if (!projectPath) return
-    const confirmed = window.confirm(
-      `确定删除候选人物「${name}」吗？\n\n之后提取记忆也不会再把它加回候选区。`,
-    )
-    if (!confirmed) {
-      setMenu(null)
-      return
-    }
     setBusy(true)
     try {
+      const confirmed = await confirmAction(
+        `确定删除候选人物「${name}」吗？\n\n之后提取记忆也不会再把它加回候选区。`,
+      )
+      if (!confirmed) return
       await deletePersonaSighting({ projectPath, characterName: name })
-      await reload()
       bumpPersonaDataVersion()
     } catch (err) {
       console.error("[PersonaTree] 删除候选失败:", err)
@@ -146,54 +122,14 @@ export function PersonaTreeSection({ refreshKey = 0, searchQuery = "" }: Persona
     }
   }
 
-  async function handleDeletePersona(name: string) {
+  async function handleDeletePersona(id: string, name: string) {
     if (!projectPath) return
-    const confirmed = window.confirm(
-      `确定从人物列表删除「${name}」吗？\n\n档案文件仍会保留在项目里，不会删盘。`,
-    )
-    if (!confirmed) {
-      setMenu(null)
-      return
-    }
     setBusy(true)
     try {
-      await removePersonaFromProject(projectPath, [name])
-      setPersonaOutlinePane(null)
-      await reload()
-      bumpPersonaDataVersion()
+      await deleteFiledPersona(projectPath, id, name, skills.some((person) => person.id !== id && person.characterName === name))
     } catch (err) {
       console.error("[PersonaTree] 删除角色失败:", err)
       window.alert(`「${name}」删除失败：${err instanceof Error ? err.message : String(err)}`)
-    } finally {
-      setBusy(false)
-      setMenu(null)
-    }
-  }
-
-  /** 标记 / 取消「重要人物」：绿勾。重要人物才会生成研究文件。 */
-  async function handleToggleImportant(id: string, pinned: boolean) {
-    if (!projectPath) return
-    setBusy(true)
-    try {
-      await updatePersonaSkillIndex(projectPath, (current) => ({
-        version: 1,
-        skills: current.skills.map((item) =>
-          item.id === id
-            ? {
-                ...item,
-                pinned,
-                tier: resolvePersonaTier(item.roleType, pinned),
-                status: pinned ? ("active" as const) : item.status,
-                updatedAt: new Date().toISOString(),
-              }
-            : item,
-        ),
-      }))
-      await reload()
-      bumpPersonaDataVersion()
-    } catch (err) {
-      console.error("[PersonaTree] 标记重要失败:", err)
-      window.alert(`标记「重要人物」失败：${err instanceof Error ? err.message : String(err)}`)
     } finally {
       setBusy(false)
       setMenu(null)
@@ -204,150 +140,80 @@ export function PersonaTreeSection({ refreshKey = 0, searchQuery = "" }: Persona
   const searching = Boolean(keyword)
   const matchesName = (person: PersonaSkillMeta | PersonaSkillSighting) =>
     person.characterName.toLowerCase().includes(keyword) || person.aliases.some(alias => alias.toLowerCase().includes(keyword))
-  const visibleSkills = searching ? skills.filter(matchesName) : skills
-  const visibleCandidates = searching ? candidates.filter(matchesName) : candidates
-  const total = visibleSkills.length + visibleCandidates.length
-  const open = searching || folderExpanded
-  const activeOpen = searching || activeExpanded
-  const candidatesOpen = searching || candidatesExpanded
-  const currentId = personaOutlinePane?.mode === "persona" ? personaOutlinePane.id : null
+  const members: Record<GroupKey, Array<PersonaSkillMeta | PersonaSkillSighting>> = {
+    active: [], dormant: [], archived: [], candidates: searching ? candidates.filter(matchesName) : candidates,
+  }
+  for (const person of skills) {
+    if (!searching || matchesName(person)) members[getEffectivePersonaStatus(person)].push(person)
+  }
 
-  if (searching && total === 0) {
+  if (searching && GROUPS.every(({ key }) => members[key].length === 0)) {
     return <p role="status" className="px-2 py-4 text-center text-xs text-muted-foreground">没有找到匹配的人物</p>
   }
 
   return (
     <div data-testid="persona-tree-section" className="ui-test-ptree">
-      {/* 固定文件夹 */}
-      {/* 整行就是一个折叠开关：和卷纲 / 地点库这些文件夹一致，点名字只展开收起，不导航。 */}
-      <button
-        type="button"
-        className="ui-test-ptree-row is-folder"
-        aria-expanded={open}
-        disabled={searching}
-        data-testid="persona-tree-folder"
-        title="人物小传（固定文件夹，不可删除）"
-        onClick={() => setOpen((value) => !value)}
-      >
-        <span className="ui-test-ptree-toggle" aria-hidden="true">
-          {open ? <ChevronDown /> : <ChevronRight />}
-        </span>
-        <FolderLock className="ui-test-ptree-ico" aria-hidden="true" />
-        <span className="ui-test-ptree-name">人物小传</span>
-        <span className="ui-test-ptree-count">{total}</span>
-      </button>
-
-      {open ? (
-        <div className="ui-test-ptree-children">
-          {/* 活跃角色 */}
-          <button
-            type="button"
-            className="ui-test-ptree-row is-group"
-            aria-expanded={activeOpen}
-            disabled={searching}
-            hidden={searching && visibleSkills.length === 0}
-            data-testid="persona-tree-active-toggle"
-            onClick={() => setActiveOpen((value) => !value)}
-          >
-            <span className="ui-test-ptree-toggle" aria-hidden="true">
-              {activeOpen ? <ChevronDown /> : <ChevronRight />}
-            </span>
-            <User className="ui-test-ptree-ico" aria-hidden="true" />
-            <span className="ui-test-ptree-name">活跃角色</span>
-            <span className="ui-test-ptree-count">{visibleSkills.length}</span>
-          </button>
-
-          {activeOpen
-            ? visibleSkills.map((meta) => (
+      {GROUPS.map(({ key, label }) => {
+        const people = members[key]
+        if (searching && !people.length) return null
+        const groupOpen = searching || expanded[key] === true
+        const Icon = key === "candidates" ? Users : User
+        return (
+          <Fragment key={key}>
+            <button
+              type="button"
+              className="ui-test-ptree-row is-group"
+              data-persona-status={key}
+              aria-expanded={groupOpen}
+              disabled={searching}
+              data-testid={`persona-tree-${key}-toggle`}
+              onClick={() => setExpanded((previous) => ({ ...previous, [key]: !previous[key] }))}
+            >
+              <span className="ui-test-ptree-toggle" aria-hidden="true">
+                {groupOpen ? <ChevronDown /> : <ChevronRight />}
+              </span>
+              <Icon className="ui-test-ptree-ico" aria-hidden="true" />
+              <span className="ui-test-ptree-name">{label}</span>
+              <span className="ui-test-ptree-count">{people.length}</span>
+            </button>
+            {groupOpen && people.map((person) => {
+              const filed = "id" in person
+              const name = person.characterName
+              const selected = filed ? currentId === person.id : currentCandidate === name
+              return (
                 <button
-                  key={meta.id}
+                  key={filed ? person.id : name}
+                  ref={selected ? revealSelectedRow : undefined}
                   type="button"
-                  data-testid={`persona-tree-item-${meta.characterName}`}
-                  className={`ui-test-ptree-row is-leaf${currentId === meta.id ? " is-on" : ""}`}
-                  title={`${meta.characterName} · ${meta.roleType || "未标注"} · 出场 ${meta.appearanceCount} 次 · 右键更多`}
-                  onClick={() => setPersonaOutlinePane({ mode: "persona", id: meta.id })}
+                  data-persona-status={key}
+                  data-testid={`persona-tree-${filed ? "item" : "candidate"}-${name}`}
+                  className={`ui-test-ptree-row is-leaf${filed ? "" : " is-candidate"}${selected ? " is-on" : ""}`}
+                  title={filed ? `${name} · ${person.roleType || "未标注"} · 出场 ${person.appearanceCount} 次 · 右键更多`
+                    : `${name} · 候选 · 出场 ${person.appearanceCount} 章 · 右键可建档或删除`}
+                  onClick={() => setPersonaOutlinePane(filed ? { mode: "persona", id: person.id } : { mode: "candidate", name })}
                   onContextMenu={(event) => {
                     event.preventDefault()
-                    setMenu({
-                      kind: "active",
-                      id: meta.id,
-                      name: meta.characterName,
-                      pinned: meta.pinned,
-                      x: event.clientX,
-                      y: event.clientY,
-                    })
+                    const position = { x: event.clientX, y: event.clientY }
+                    setMenu(filed ? { kind: "filed", id: person.id, name, ...position }
+                      : { kind: "candidate", name, ...position })
                   }}
                 >
-                  <i
-                    className={`ui-test-ptree-dot${meta.status === "active" ? "" : " is-idle"}`}
-                    aria-hidden="true"
-                  />
-                  <span className="ui-test-ptree-name">{meta.characterName}</span>
-                  {meta.pinned ? (
+                  <i className="ui-test-ptree-dot" aria-hidden="true" />
+                  <span className="ui-test-ptree-name">{name}</span>
+                  {filed && person.pinned && (
                     <span className="ui-test-ptree-check" title="重要人物（生成研究文件）">
                       <Check aria-hidden="true" />
                     </span>
-                  ) : null}
-                  {meta.status !== "active" ? (
-                    <span className="ui-test-ptree-state" title={meta.status === "dormant" ? "潜伏：长期未出场" : "归档：已长期未出场"}>
-                      {meta.status === "dormant" ? "潜伏" : "归档"}
-                    </span>
-                  ) : null}
-                  {meta.autoUpdate === false ? (
-                    <span className="ui-test-ptree-badge" title="已关闭随章节自动更新">
-                      冻
-                    </span>
-                  ) : null}
+                  )}
+                  {filed && person.autoUpdate === false && (
+                    <span className="ui-test-ptree-badge" title="已关闭随章节自动更新">冻</span>
+                  )}
                 </button>
-              ))
-            : null}
-
-          {/* 候选角色（默认折叠） */}
-          <button
-            type="button"
-            className="ui-test-ptree-row is-group"
-            aria-expanded={candidatesOpen}
-            disabled={searching}
-            hidden={searching && visibleCandidates.length === 0}
-            data-testid="persona-tree-candidates-toggle"
-            onClick={() => setCandidatesOpen((value) => !value)}
-          >
-            <span className="ui-test-ptree-toggle" aria-hidden="true">
-              {candidatesOpen ? <ChevronDown /> : <ChevronRight />}
-            </span>
-            <Users className="ui-test-ptree-ico" aria-hidden="true" />
-            <span className="ui-test-ptree-name">候选角色</span>
-            <span className="ui-test-ptree-count">{visibleCandidates.length}</span>
-          </button>
-
-          {candidatesOpen
-            ? visibleCandidates.map((sighting) => (
-                <button
-                  key={sighting.characterName}
-                  type="button"
-                  data-testid={`persona-tree-candidate-${sighting.characterName}`}
-                  className="ui-test-ptree-row is-leaf is-candidate"
-                  title={`${sighting.characterName} · 候选 · 出场 ${sighting.appearanceCount} 章 · 右键可建档或删除`}
-                  onContextMenu={(event) => {
-                    event.preventDefault()
-                    setMenu({
-                      kind: "candidate",
-                      name: sighting.characterName,
-                      x: event.clientX,
-                      y: event.clientY,
-                    })
-                  }}
-                  /* 候选没有档案可开：左键不做跳转，只提示去看右键菜单。 */
-                  // 候选没有档案，但有「轻量预览」：切中栏看它的出场与原句。
-                  onClick={() => setPersonaOutlinePane({ mode: "candidate", name: sighting.characterName })}
-                >
-                  <i className="ui-test-ptree-dot is-candidate" aria-hidden="true" />
-                  <span className="ui-test-ptree-name">{sighting.characterName}</span>
-                </button>
-              ))
-            : null}
-        </div>
-      ) : null}
+              )
+            })}
+          </Fragment>
+        )
+      })}
 
       {menu ? (
         <ul
@@ -384,16 +250,6 @@ export function PersonaTreeSection({ refreshKey = 0, searchQuery = "" }: Persona
               <li>
                 <button
                   type="button"
-                  data-testid="persona-tree-menu-important"
-                  disabled={busy}
-                  onClick={() => void handleToggleImportant(menu.id, !menu.pinned)}
-                >
-                  <Check aria-hidden="true" /> {menu.pinned ? "取消重要人物" : "标记为重要人物"}
-                </button>
-              </li>
-              <li>
-                <button
-                  type="button"
                   data-testid="persona-tree-menu-open"
                   disabled={busy}
                   onClick={() => {
@@ -410,7 +266,7 @@ export function PersonaTreeSection({ refreshKey = 0, searchQuery = "" }: Persona
                   data-testid="persona-tree-menu-delete-persona"
                   className="is-danger"
                   disabled={busy}
-                  onClick={() => void handleDeletePersona(menu.name)}
+                  onClick={() => void handleDeletePersona(menu.id, menu.name)}
                 >
                   <Trash2 aria-hidden="true" /> 删除角色
                 </button>

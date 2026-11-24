@@ -51,7 +51,7 @@ vi.mock("@/lib/project-store", () => ({
   removeProjectRecords: vi.fn(),
   saveOutputLanguage: mocks.saveOutputLanguage,
 }))
-vi.mock("@/lib/platform", () => ({ pickDirectory: mocks.pickDirectory, isMacOS: mocks.isMacOS }))
+vi.mock("@/lib/platform", () => ({ isTauri: () => false, pickDirectory: mocks.pickDirectory, isMacOS: mocks.isMacOS }))
 vi.mock("@tauri-apps/api/path", () => ({ homeDir: mocks.homeDir }))
 vi.mock("@/lib/templates", () => ({
   getTemplate: () => ({ schema: "原有结构", purpose: "原有用途", extraDirs: ["wiki/outlines"] }),
@@ -287,14 +287,26 @@ describe("独立 UI 书架", () => {
     expect(JSON.parse(localStorage.getItem("qm-uitest-library")!).projects).toEqual([])
   })
 
-  it("目录仍在时删除仍移入系统回收站", async () => {
+  it.each([false, true])("目录仍在时等待确认，选择 %s 后才决定是否移入回收站", async (answer) => {
     mocks.fileExists.mockImplementation(async (path: string) => path === project.path)
-    vi.spyOn(window, "confirm").mockReturnValue(true)
+    let respond!: (value: boolean) => void
+    const pending = new Promise<boolean>((resolve) => { respond = resolve })
+    vi.spyOn(window, "confirm").mockImplementation(() => pending as unknown as boolean)
     await renderShelf()
     const card = host.querySelector<HTMLButtonElement>(".ui-test-book-card")!
     await act(async () => card.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 20, clientY: 30 })))
     await act(async () => button("删除").click())
     expect(window.confirm).toHaveBeenCalledWith("确定将“真实小说”移入系统回收站？")
+    expect(moveProjectToSystemTrash).not.toHaveBeenCalled()
+    expect(removeProjectRecords).not.toHaveBeenCalled()
+    expect(host.querySelectorAll(".ui-test-book-card")).toHaveLength(1)
+    await act(async () => respond(answer))
+    if (!answer) {
+      expect(moveProjectToSystemTrash).not.toHaveBeenCalled()
+      expect(removeProjectRecords).not.toHaveBeenCalled()
+      expect(host.querySelectorAll(".ui-test-book-card")).toHaveLength(1)
+      return
+    }
     expect(moveProjectToSystemTrash).toHaveBeenCalledWith(project.path)
     expect(removeProjectRecords).toHaveBeenCalledWith(project.path)
     expect(host.querySelectorAll(".ui-test-book-card")).toHaveLength(0)

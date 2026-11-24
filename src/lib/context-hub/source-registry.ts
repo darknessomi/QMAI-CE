@@ -70,6 +70,8 @@ export async function scanProjectContextFiles(
     safeList(`${projectPath}/wiki`, { maxDepth: 30 }, io),
     safeList(`${projectPath}/.qmai/novel`, { includeHidden: true, maxDepth: 30 }, io),
     safeList(`${projectPath}/.qmai`, { includeHidden: true, maxDepth: 1 }, io),
+    safeList(`${projectPath}/.qmai/persona-skills`, { maxDepth: 1 }, io)
+      .then((nodes) => nodes.filter((node) => node.name === "index.json")),
     safeList(`${projectPath}/.qmai/retrieval`, { maxDepth: 30 }, io),
   ])
   return flattenFiles(roots.flat())

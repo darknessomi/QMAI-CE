@@ -5,7 +5,7 @@
 // 成本远大于收益，而真正会出错的恰恰是这几条结构性约束：
 // 1. 必须挂在「保存成功之后」的分支里 —— 不保存就不抓（用户拍板口径）。
 // 2. 必须不 await —— 同步不阻塞保存返回。
-// 3. 必须走永不抛包装 —— 否则失败会伪装成「保存失败」。
+// 3. 同步异常不得影响已经成功保存的文件。
 import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { describe, expect, it } from "vitest"
@@ -26,15 +26,14 @@ describe("保存后同步人物小传", () => {
   })
 
   it("不 await：同步不得阻塞保存返回", () => {
-    expect(source).toContain("void runPersonaSyncSafely(")
+    expect(source).toContain("void syncPersonaFromOutlineSave(")
     expect(source).not.toContain("await syncPersonaFromOutlineSave(")
-    expect(source).not.toContain("await runPersonaSyncSafely(")
   })
 
-  it("走永不抛包装，并把大纲文件名与本次请求一起传进去", () => {
-    expect(source).toContain('"保存后同步人物小传"')
-    expect(source).toContain("outlineFileName: savedOutlineFileName")
-    expect(source).toContain("requests,")
+  it("传入实际成功的各份文件并刷新当前项目的人物视图", () => {
+    expect(source).toContain('console.warn("保存后同步人物小传失败：", error)')
+    expect(source).toContain("savedSources: saveResult.savedSources")
+    expect(source).toContain("state.bumpPersonaDataVersion()")
   })
 
   it("同步只接在保存路径上，不接在生成或提取路径上", () => {

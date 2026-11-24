@@ -9,6 +9,8 @@
  * 纯函数、零 IO：调用方负责写盘，也负责判断要不要覆盖（见 isGeneratedProjection）。
  */
 
+import { parseFrontmatter } from "@/lib/frontmatter"
+
 export const PROJECTION_GENERATED_BY = "persona-skill"
 
 export interface PersonaTableProjectionInput {
@@ -35,7 +37,7 @@ export function renderPersonaTableMarkdown(input: PersonaTableProjectionInput): 
   const lines: string[] = [
     "---",
     `generated-from: ${PROJECTION_GENERATED_BY}`,
-    `persona-id: ${input.personaId}`,
+    `persona-id: ${JSON.stringify(input.personaId)}`,
     `generated-at: ${input.generatedAt}`,
   ]
   /*
@@ -62,12 +64,31 @@ export function renderPersonaTableMarkdown(input: PersonaTableProjectionInput): 
   return lines.join("\n")
 }
 
-/**
- * 这个文件是不是我们生成的投影。
- *
- * 只有带标记的才允许覆盖。老项目里 `wiki/outlines/人物小传/*.md` 可能是用户手写的，
- * 把它当成投影覆盖掉，等于一次保存就吃掉用户的正文 —— 这是本功能最严重的可能事故。
- */
-export function isGeneratedProjection(content: string): boolean {
-  return new RegExp(`generated-from:\\s*${PROJECTION_GENERATED_BY}`).test(content)
+// 旧生成器直接写 ID。007、#7、@Q 会被 YAML 改值，甚至整块解析失败。
+// 只在旧生成器的文首字段顺序下修复，保留原始字节供编辑器回写。
+const LEGACY_PROJECTION_ID = /^(---\r?\n(?:ai_exclude: [^\r\n]+\r?\n)?generated-from: persona-skill\r?\npersona-id: )([^"\s]+)(?=\r?\ngenerated-at: \S)/u
+
+export function parsePersonaProjectionFrontmatter(content: string, parsed = parseFrontmatter(content)) {
+  if (!parsed.rawBlock || !content.startsWith(parsed.rawBlock)) return parsed
+  const match = LEGACY_PROJECTION_ID.exec(parsed.rawBlock)
+  if (!match || parsed.frontmatter?.["persona-id"] === match[2]) return parsed
+  const header = match[1] + JSON.stringify(match[2]) + parsed.rawBlock.slice(match[0].length)
+  const { frontmatter } = parseFrontmatter(header)
+  return { ...parsed, frontmatter }
+}
+
+function projectionMetadata(content: string, parsed: ReturnType<typeof parseFrontmatter>) {
+  if (!parsed.rawBlock || !content.startsWith(parsed.rawBlock)) return null
+  const { frontmatter } = parsePersonaProjectionFrontmatter(content, parsed)
+  return frontmatter?.["generated-from"] === PROJECTION_GENERATED_BY ? frontmatter : null
+}
+
+export function isGeneratedProjection(content: string, parsed = parseFrontmatter(content)): boolean {
+  return projectionMetadata(content, parsed) !== null
+}
+
+/** 身份只能取自文首的自动生成标记，正文里引用的小传示例不具有覆盖权限。 */
+export function getPersonaProjectionId(content: string, parsed = parseFrontmatter(content)): string | undefined {
+  const id = projectionMetadata(content, parsed)?.["persona-id"]
+  return typeof id === "string" && id.length > 0 ? id : undefined
 }

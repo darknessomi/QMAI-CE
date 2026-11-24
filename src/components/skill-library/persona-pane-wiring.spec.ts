@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
+import { useWikiStore } from "@/stores/wiki-store"
 import { describe, expect, it } from "vitest"
 
 /**
@@ -25,19 +26,12 @@ describe("人物面板必须接在所有中栏渲染点上", () => {
     expect(source).toMatch(/personaPane\s*\?/)
   })
 
-  it("PersonaPane 只在「换了文档」时收起面板，不在挂载时清空", () => {
-    const pane = readFileSync(
-      resolve(process.cwd(), "src/components/skill-library/persona-pane.tsx"),
-      "utf8",
-    )
-    // 清空必须被「文档确实变了」这个条件包着；无条件清空 = 面板刚挂载就被卸载
-    expect(pane).toMatch(/previous !== \(selectedFile \?\? null\)/)
-    expect(pane).toContain("setPersonaOutlinePane(null)")
-
-    const view = readFileSync(
-      resolve(process.cwd(), "src/components/skill-library/persona-skill-view.tsx"),
-      "utf8",
-    )
-    expect(view).not.toContain("setPersonaOutlinePane(null)")
+  it("点回已选文档时也关闭人物面板", () => {
+    const store = useWikiStore.getState()
+    store.setSelectedFile("大纲.md")
+    store.setPersonaOutlinePane({ mode: "create" })
+    expect(useWikiStore.getState().personaOutlinePane).toEqual({ mode: "create" })
+    store.setSelectedFile("大纲.md")
+    expect(useWikiStore.getState().personaOutlinePane).toBeNull()
   })
 })

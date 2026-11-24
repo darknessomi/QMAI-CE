@@ -1347,11 +1347,10 @@ export function ChatPanel() {
       // 几分钟后的自动保存会把刚刚写回去的正文再盖成空的。
       const openGuard = getOpenDocumentGuard(chapterPath)
       if (openGuard) openGuard.applyMarkdown(chapterMarkdown)
-      useWikiStore.getState().setSelectedFile(chapterPath)
-      if (!openGuard) useWikiStore.getState().setFileContent(chapterMarkdown)
-
       await refreshProjectState(pp)
-      useWikiStore.getState().setActiveView("wiki")
+      if (!(await useWikiStore.getState().setActiveView("wiki"))) return
+      if (!(await useWikiStore.getState().setSelectedFile(chapterPath))) return
+      if (!openGuard) useWikiStore.getState().setFileContent(chapterMarkdown)
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       setChapterSaveStatus(t("chat.saveFailed", { message }))

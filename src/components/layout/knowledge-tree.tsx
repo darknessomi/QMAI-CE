@@ -1,3 +1,4 @@
+import { confirmAction } from "@/lib/confirm-action"
 import { filterUiTestDirectory } from "@/lib/ui-test-layout"
 import { MoreHorizontal } from "lucide-react"
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
@@ -7,15 +8,14 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { useWikiStore } from "@/stores/wiki-store"
-import { createDirectory, deleteFile, fileExists, listDirectory, readFile, writeFile, openFileLocation, copyFile } from "@/commands/fs"
+import { createDirectory, deleteFile, fileExists, listDirectory, readFile, writeFile, openFileLocation, copyFile, movePathIfAbsent, removeEmptyDirectory } from "@/commands/fs"
 import type { FileNode } from "@/types/wiki"
 import { buildChapterWordCountLabel, getChapterStatusLabel } from "@/lib/chapter-display"
 import { isChapterPathInProject, normalizePath } from "@/lib/path-utils"
 import { countChapterBodyWords } from "@/lib/chapter-word-count"
 import { scrollChapterDirectory } from "@/lib/chapter-directory-scroll"
 import { normalizeChapterStatus, type ChapterStatus } from "@/lib/novel/chapter-meta"
-import { AI_EXCLUDE_KEY, isAiExcluded } from "@/lib/novel/ai-exclude"
-import { parseFrontmatter } from "@/lib/frontmatter"
+import { AI_EXCLUDE_KEY, isAiExcludedContent } from "@/lib/novel/ai-exclude"
 import {
   extractChapterNumber,
   extractPageOrderFromTitle,
@@ -31,13 +31,15 @@ import { selectProjectDeAiTasks, useDeAiTaskStore } from "@/stores/de-ai-task-st
 import { useOutlineGenerationStore } from "@/stores/outline-generation-store"
 import { useWritingStatsStore } from "@/stores/writing-stats-store"
 import { getOutlineFileName, outlineSnapshotExists } from "@/lib/novel/outline-ingest-utils"
+import { moveOutlineDocument, outlineCompanionPaths, outlineDocumentNodes } from "@/lib/novel/outline-companions"
+import { isGeneratedProjection } from "@/lib/novel/persona-projection"
 import { isProtectedOutlineFolder } from "@/lib/novel/persona-skill-types"
 import { loadPersonaSkillIndex } from "@/lib/novel/persona-skill-store"
 import {
-  detachOutlineRef,
-  keepPersonaAfterOutlineDelete,
+  outlineSourceRefs,
+  updatePersonaOutlineRefs,
+  renamePersonaOutlineFolderRefs,
   planPersonaDetach,
-  removePersonaFromProject,
 } from "@/lib/novel/persona-outline-detach"
 import { openDocumentInReaderWindow } from "@/lib/reader-window-opener"
 import { saveLastReadChapter } from "@/lib/project-store"
@@ -103,6 +105,7 @@ interface WikiPageInfo {
    * 另建一份"排除索引"则会多出第二个真相源，还必须在每次保存后同步。
    */
   aiExcluded?: boolean
+  personaProjection?: boolean
 }
 
 export interface KnowledgeCreateRequest {
@@ -264,7 +267,7 @@ function parsePageInfo(path: string, fileName: string, content: string): WikiPag
   }
 
   /*
-   * 「选中（AI 不读取）」：判据交给 `isAiExcluded`，不用本地正则自己写一遍 ——
+   * 「选中（AI 不读取）」：与模型读取共用 `isAiExcludedContent`。
    * 上面的 frontmatter 快取匹配要求纯 LF 换行，CRLF 文件在这里取不到块，
    * 而真正拦截模型的那条链路（`parseFrontmatter`）是认 CRLF 的。
    * 两处判据一旦不同，就会出现"编辑器说已选中、目录里没有标记"。
@@ -272,9 +275,7 @@ function parsePageInfo(path: string, fileName: string, content: string): WikiPag
    * 先 `includes` 再解析：绝大多数文件不含这个词，js-yaml 只在真有可能时才跑，
    * 目录每次刷新（每次保存）都解析几百份 YAML 的代价就省掉了。
    */
-  const aiExcluded = content.includes(AI_EXCLUDE_KEY)
-    ? isAiExcluded(parseFrontmatter(content).frontmatter as Record<string, unknown> | null)
-    : false
+  const aiExcluded = content.includes(AI_EXCLUDE_KEY) && isAiExcludedContent(content)
 
   const wordCount = type === "chapter" ? countChapterBodyWords(content) : undefined
   /*
@@ -298,6 +299,7 @@ function parsePageInfo(path: string, fileName: string, content: string): WikiPag
     wordCount,
     wordCountLabel: typeof wordCount === "number" ? buildChapterWordCountLabel(wordCount) : undefined,
     aiExcluded,
+    personaProjection: type === "outline" && content.includes("generated-from") && isGeneratedProjection(content),
   }
 }
 
@@ -338,9 +340,9 @@ function sortFileNodes(
   })
 }
 
-function countMarkdownDescendants(node: FileNode): number {
-  if (!node.is_dir) return node.name.endsWith(".md") ? 1 : 0
-  return (node.children ?? []).reduce((total, child) => total + countMarkdownDescendants(child), 0)
+function countDocumentDescendants(node: FileNode, type: "chapter" | "outline"): number {
+  if (!node.is_dir) return type === "outline" || node.name.endsWith(".md") ? 1 : 0
+  return (node.children ?? []).reduce((total, child) => total + countDocumentDescendants(child, type), 0)
 }
 
 export function KnowledgeTree({
@@ -679,13 +681,7 @@ export function KnowledgeTree({
 
   const sectionNodes = useMemo(() => {
     if (!sectionRootPath) return []
-    const sectionNode = findNodeByPath(fileTree, sectionRootPath)
-    // 人物小传由左栏的人物区段接管，这里不再重复列一份：
-    // 那棵树下放的是投影出来的 MD 文件，和人物索引是同一批人，
-    // 两处都显示会让用户看到两份重名列表（用户实测：很乱）。
-    return (sectionNode?.children ?? []).filter(
-      (node) => !(node.is_dir && isProtectedOutlineFolder(node.name)),
-    )
+    return findNodeByPath(fileTree, sectionRootPath)?.children ?? []
   }, [fileTree, sectionRootPath])
 
   useEffect(() => {
@@ -747,6 +743,33 @@ export function KnowledgeTree({
     }
   }, [refreshCurrentTree])
 
+  const updateOutlineReferences = useCallback(async (
+    source: string | string[],
+    options?: Parameters<typeof updatePersonaOutlineRefs>[2],
+    pathIndex = useWikiStore.getState().projectPathIndex,
+  ) => {
+    if (!project || filterType !== "outline") return
+    const paths = typeof source === "string" ? [source] : source
+    const refs = paths.flatMap((path) => outlineSourceRefs(project.path, path, pathIndex))
+    try {
+      if (await updatePersonaOutlineRefs(project.path, refs, options)) useWikiStore.getState().bumpPersonaDataVersion()
+    } catch (error) {
+      console.warn("[KnowledgeTree] 更新人物小传引用失败", error)
+    }
+  }, [project, filterType])
+
+  const moveOutlineWithReferences = useCallback(async (source: string, dest: string, content?: string) => {
+    if (!project) return
+    const pathIndex = useWikiStore.getState().projectPathIndex
+    const moved = await moveOutlineDocument(source, dest, content)
+    const root = `${normalizePath(project.path)}/wiki/outlines`
+    for (const item of moved) {
+      if (/\.(?:md|html)$/i.test(item.source)) {
+        await updateOutlineReferences(item.source, { replacement: getRelativePath(item.destination, root) }, pathIndex)
+      }
+    }
+  }, [project, updateOutlineReferences])
+
   const handleMovePagesToFolder = useCallback(async (sourcePaths: string[], targetFolderPath: string) => {
     if (!project) return
     const normalizedTargetFolderPath = normalizePath(targetFolderPath)
@@ -779,8 +802,7 @@ export function KnowledgeTree({
     try {
       await createDirectory(normalizedTargetFolderPath).catch(() => {})
       for (const plan of plans) {
-        await copyFile(plan.source, plan.dest)
-        await deleteFile(plan.source)
+        await moveOutlineWithReferences(plan.source, plan.dest)
         onRemovePendingPage?.(plan.source)
       }
 
@@ -791,13 +813,13 @@ export function KnowledgeTree({
       }
     } catch (error) {
       console.error("[KnowledgeTree] move to folder failed:", error)
-      window.alert("移动失败，请稍后重试。")
+      window.alert(`移动大纲失败：${error instanceof Error ? error.message : String(error)}`)
     } finally {
       setMoveMenuTarget(null)
       setPageMenu(null)
       setOutlineDropFolderPath(null)
     }
-  }, [project, onRemovePendingPage, refreshCurrentTree, selectedFile, setSelectedFile, t])
+  }, [project, onRemovePendingPage, refreshCurrentTree, selectedFile, setSelectedFile, t, moveOutlineWithReferences])
 
   const handleMoveChaptersToVolume = useCallback(async (sourcePaths: string[], targetVolumePath: string) => {
     if (!project) return
@@ -929,40 +951,35 @@ export function KnowledgeTree({
     setDeletingPath(pagePath)
     try {
       const projectPath = normalizePath(project.path)
-      const outlineFileName = normalizePath(pagePath).split(/[\\/]/).pop() ?? ""
-
-      /*
-       * 删大纲前先问人物小传怎么办（用户拍板的口径）。
-       *
-       * 三个判断都在**删文件之前**做：
-       * 1. 先分拣（谁可移除、谁必须保留）；
-       * 2. 有关联角色才弹窗 —— 大多数大纲没有角色，不该每次都拦一下；
-       * 3. 用户选「保留」时，角色在删大纲**之前**就转 dormant，
-       *    这样即使删文件失败，角色也只是提前停了更新，不会出现「文件还在、角色却已解引用」。
-       *
-       * window.confirm 只有确定/取消两态：确定＝按规则移除（受保护角色自动跳过），
-       * 取消＝一份都不删，全部保留并转潜伏。
-       */
+      const pathIndex = useWikiStore.getState().projectPathIndex
+      let remove: string[] = []
+      let keepDormant = false
       if (filterType !== "chapter") {
         try {
           const personaIndex = await loadPersonaSkillIndex(projectPath)
-          const plan = planPersonaDetach({ outlineFileName, skills: personaIndex.skills })
-          const related = [...plan.removals, ...plan.kept.map((item) => item.characterName)]
+          const paths = [pagePath]
+          for (const companion of outlineCompanionPaths(pagePath)) {
+            if (/\.html$/i.test(companion) && await fileExists(companion)) paths.push(companion)
+          }
+          const refs = paths.flatMap((path) => outlineSourceRefs(projectPath, path, pathIndex))
+          const plan = planPersonaDetach({ refs, skills: personaIndex.skills })
+          const namesToRemove = plan.removals.map((item) => item.characterName)
+          const related = [...namesToRemove, ...plan.kept.map((item) => item.characterName)]
           if (related.length > 0) {
             const shouldRemove =
               plan.removals.length > 0 &&
-              window.confirm(
+              await confirmAction(
                 t("knowledgeTree.personaDetachConfirm", {
                   count: related.length,
                   names: related.join("、"),
-                  removals: plan.removals.join("、") || "无",
+                  removals: namesToRemove.join("、") || "无",
                   kept: plan.kept.length,
                 }),
               )
             if (shouldRemove) {
-              await removePersonaFromProject(projectPath, plan.removals)
+              remove = plan.removals.map((item) => item.id)
             } else {
-              await keepPersonaAfterOutlineDelete(projectPath, outlineFileName)
+              keepDormant = true
             }
           }
         } catch (e) {
@@ -977,7 +994,17 @@ export function KnowledgeTree({
           sourceContent = await readFile(pagePath)
         } catch { /* ignore */ }
       }
-      await moveFileToTrash(projectPath, pagePath, filterType)
+      const trashed = await moveFileToTrash(projectPath, pagePath, filterType)
+      const removedMain = !(await fileExists(pagePath))
+      if (filterType === "outline") {
+        const removed = (trashed.companions ?? []).map((item) => item.originalPath).filter((path) => /\.html$/i.test(path))
+        if (removedMain) removed.push(pagePath)
+        await updateOutlineReferences(removed, { remove, keepDormant }, pathIndex)
+      }
+      if (!removedMain) {
+        window.alert(`文件仍在原位置，未能移除：${getOutlineFileName(pagePath)}`)
+        return
+      }
       setPages((previous) => previous.filter((page) => page.path !== pagePath))
       onRemovePendingPage?.(pagePath)
       if (selectedFile === pagePath) setSelectedFile(null)
@@ -998,15 +1025,6 @@ export function KnowledgeTree({
           // 记忆清理失败不影响文件删除本身
           console.warn("[KnowledgeTree] 清理关联记忆失败:", e)
         }
-        // 大纲没了，人物档案里对它的引用也必须跟着消失：
-        // 留着会让「是否仍被别的大纲引用」这条判断长期失真，进而影响角色的增删决策。
-        // 只解引用，不删任何人 —— 删大纲不代表用户想删角色。
-        try {
-          const outlineFileName = normalizePath(pagePath).split(/[\\/]/).pop() ?? ""
-          await detachOutlineRef(projectPath, outlineFileName)
-        } catch (e) {
-          console.warn("[KnowledgeTree] 清理人物小传引用失败:", e)
-        }
       }
       const tree = await listDirectory(projectPath)
       setFileTree(tree)
@@ -1016,7 +1034,7 @@ export function KnowledgeTree({
     } finally {
       setDeletingPath(null)
     }
-  }, [project, deletingPath, armedPath, filterType, onRemovePendingPage, setFileTree, bumpDataVersion, selectedFile, setSelectedFile])
+  }, [project, deletingPath, armedPath, filterType, onRemovePendingPage, setFileTree, bumpDataVersion, selectedFile, setSelectedFile, updateOutlineReferences])
 
   const handleDeleteFolder = useCallback(async (folderPath: string) => {
     if (!project) return
@@ -1028,17 +1046,22 @@ export function KnowledgeTree({
     // 「人物小传」是全项目角色的固定容器。它的真实数据在 .qmai/persona-skills/，
     // 删掉文件夹并不会删档案 —— 那样用户会看到「文件夹没了但技能库还在」，
     // 是最难排查的一类不一致。单个角色文件仍可删，这里只拦文件夹。
-    if (isProtectedOutlineFolder(folderNode.name)) {
+    if (filterType === "outline" && isProtectedOutlineFolder(folderNode.name)) {
       window.alert(t("knowledgeTree.protectedFolderAlert"))
       return
     }
 
-    const mdFiles = flattenMdFiles([folderNode]).map((file) => normalizePath(file.path))
+    const sourceIndex = useWikiStore.getState().projectPathIndex
+    const files = flattenAllFiles([folderNode]).map((file) => normalizePath(file.path))
+    const allPaths = new Set(files)
+    const filesToTrash = files.filter((path) => /\.md$/i.test(path) || (
+      filterType === "outline" && /\.html$/i.test(path) && !allPaths.has(path.replace(/\.html$/i, ".md"))
+    ))
     const folderName = folderNode.name
     const fileKind = filterType === "chapter" ? "chapter" : "outline"
-    const confirmed = window.confirm(
-      mdFiles.length > 0
-        ? t("knowledgeTree.deleteFolderConfirm", { name: folderName, count: mdFiles.length })
+    const confirmed = await confirmAction(
+      filesToTrash.length > 0
+        ? t("knowledgeTree.deleteFolderConfirm", { name: folderName, count: filesToTrash.length })
         : t("knowledgeTree.deleteEmptyFolderConfirm", { name: folderName }),
     )
     if (!confirmed) return
@@ -1047,15 +1070,17 @@ export function KnowledgeTree({
     setDeletingPath(normalizedFolderPath)
     try {
       const projectPath = normalizePath(project.path)
-      for (const filePath of mdFiles) {
+      for (const filePath of filesToTrash) {
         try {
-          let sourceContent: string | undefined
-          if (fileKind === "chapter") {
-            try {
-              sourceContent = await readFile(filePath)
-            } catch { /* ignore */ }
+          if (!(await fileExists(filePath))) continue
+          const sourceContent = await readFile(filePath)
+          const trashed = await moveFileToTrash(projectPath, filePath, fileKind)
+          for (const companion of trashed.companions ?? []) {
+            if (/\.html$/i.test(companion.originalPath)) await updateOutlineReferences(companion.originalPath, undefined, sourceIndex)
           }
-          await moveFileToTrash(projectPath, filePath, fileKind)
+          if (await fileExists(filePath)) continue
+          await updateOutlineReferences(filePath, undefined, sourceIndex)
+          onRemovePendingPage?.(filePath)
           if (fileKind === "chapter") {
             enqueueDeletedChapterSourceMemoryCleanup(projectPath, {
               kind: "chapter",
@@ -1072,21 +1097,14 @@ export function KnowledgeTree({
           // 单个文件删除失败不影响整体流程（如文件已不存在的幽灵条目）
           console.warn("[KnowledgeTree] 删除文件失败，继续处理下一个:", filePath, e)
         }
-        onRemovePendingPage?.(filePath)
       }
 
-      // 尝试删除文件夹：如果目录不存在或已空，直接删除；
-      // 这样能清理掉那些文件已丢失、只剩空壳目录的幽灵条目
-      try {
-        const remainingNodes = await listDirectory(normalizedFolderPath).catch(() => [])
-        if (flattenAllFiles(remainingNodes).length === 0) {
-          await deleteFile(normalizedFolderPath)
-        } else {
-          window.alert(t("knowledgeTree.deleteFolderBlocked", { name: folderName }))
-        }
-      } catch {
-        // 目录可能已经不存在了，直接视为删除成功
+      // 目录树可能不完整。由文件系统原子检查空目录，子目录、隐藏文件或新写入均会阻止移除。
+      let allRemoved = true
+      for (const folder of flattenFolders([folderNode]).reverse()) {
+        if (!(await removeEmptyDirectory(folder.path))) allRemoved = false
       }
+      if (!allRemoved) window.alert(t("knowledgeTree.deleteFolderBlocked", { name: folderName }))
 
       await loadPages()
       const tree = await listDirectory(projectPath)
@@ -1100,7 +1118,7 @@ export function KnowledgeTree({
     } finally {
       setDeletingPath(null)
     }
-  }, [project, filterType, sectionNodes, t, loadPages, setFileTree, bumpDataVersion, selectedFile, setSelectedFile, onRemovePendingPage])
+  }, [project, filterType, sectionNodes, t, loadPages, setFileTree, bumpDataVersion, selectedFile, setSelectedFile, onRemovePendingPage, updateOutlineReferences])
 
   const startRenameFolder = useCallback((folderPath: string, folderName: string) => {
     setCreateMenu(null)
@@ -1147,26 +1165,18 @@ export function KnowledgeTree({
 
     setRenamingFolderBusy(true)
     try {
-      await createDirectory(targetFolderPath)
-      const mdFiles = flattenMdFiles([folderNode])
-      for (const file of mdFiles) {
-        const sourcePath = normalizePath(file.path)
-        const relativePath = getRelativePath(sourcePath, renamingFolderPath)
-        const destPath = `${targetFolderPath}/${relativePath}`
-        await createDirectory(getDirName(destPath)).catch(() => {})
-        if (await fileExists(destPath)) {
-          window.alert(t("knowledgeTree.renameTargetFileExists"))
-          return
+      const sourceIndex = useWikiStore.getState().projectPathIndex
+      await movePathIfAbsent(renamingFolderPath, targetFolderPath)
+      if (filterType === "outline") {
+        try {
+          if (await renamePersonaOutlineFolderRefs(project.path, renamingFolderPath, targetFolderPath, sourceIndex)) {
+            useWikiStore.getState().bumpPersonaDataVersion()
+          }
+        } catch (error) {
+          console.warn("[KnowledgeTree] 文件夹已改名，更新人物引用失败", error)
         }
-        await copyFile(sourcePath, destPath)
       }
-
-      for (const file of mdFiles) {
-        await deleteFile(normalizePath(file.path))
-        onRemovePendingPage?.(normalizePath(file.path))
-      }
-      await deleteFile(renamingFolderPath)
-
+      for (const file of flattenMdFiles([folderNode])) onRemovePendingPage?.(normalizePath(file.path))
       await refreshCurrentTree()
       if (selectedFile?.startsWith(`${renamingFolderPath}/`)) {
         setSelectedFile(`${targetFolderPath}/${getRelativePath(selectedFile, renamingFolderPath)}`)
@@ -1179,7 +1189,7 @@ export function KnowledgeTree({
       setRenamingFolderPath(null)
       setRenameFolderValue("")
     }
-  }, [project, renamingFolderPath, renamingFolderBusy, renameFolderValue, sectionNodes, refreshCurrentTree, selectedFile, setSelectedFile, onRemovePendingPage, t])
+  }, [project, filterType, renamingFolderPath, renamingFolderBusy, renameFolderValue, sectionNodes, refreshCurrentTree, selectedFile, setSelectedFile, onRemovePendingPage, t])
 
   const cancelRenameFolder = useCallback(() => {
     if (renamingFolderBusy) return
@@ -1257,14 +1267,21 @@ export function KnowledgeTree({
         })),
       })
       if (plan.status !== "ready" || !plan.content || !plan.fileName) return
-      const targetPath = await allocateUniqueSiblingPath(getDirName(renamingPath), plan.fileName, renamingPath)
-
-      await writeFile(targetPath, plan.content)
+      const targetPath = await allocateUniqueSiblingPath(getDirName(renamingPath), plan.fileName, renamingPath,
+        current.type === "outline" ? async (path) =>
+          (await Promise.all([path, ...outlineCompanionPaths(path)].map(fileExists))).some(Boolean)
+          : fileExists,
+      )
+      if (current.type === "outline" && targetPath !== renamingPath) {
+        await moveOutlineWithReferences(renamingPath, targetPath, plan.content)
+      } else {
+        await writeFile(targetPath, plan.content)
+      }
       if (targetPath !== renamingPath) {
         // 章节改名/换目录：把写作归属账本一起搬到新路径，
         // 否则新路径会从零打基线，用户此前手写的归属会凭空消失。
         useWritingStatsStore.getState().transferChapter(renamingPath, targetPath)
-        await deleteFile(renamingPath)
+        if (current.type !== "outline") await deleteFile(renamingPath)
         if (selectedFile === renamingPath) setSelectedFile(targetPath)
         onRemovePendingPage?.(renamingPath)
       }
@@ -1277,12 +1294,13 @@ export function KnowledgeTree({
       bumpDataVersion()
     } catch (error) {
       console.error("[KnowledgeTree] rename failed:", error)
+      window.alert(`改名失败：${error instanceof Error ? error.message : String(error)}`)
     } finally {
       setRenamingBusy(false)
       setRenamingPath(null)
       setRenameValue("")
     }
-  }, [renamingPath, renamingBusy, renameValue, effectivePages, selectedFile, setSelectedFile, onRemovePendingPage, loadPages, project, setFileTree, bumpDataVersion])
+  }, [renamingPath, renamingBusy, renameValue, effectivePages, selectedFile, setSelectedFile, onRemovePendingPage, loadPages, project, setFileTree, bumpDataVersion, moveOutlineWithReferences])
 
   const cancelRenamePage = useCallback(() => {
     if (renamingBusy) return
@@ -1466,10 +1484,10 @@ export function KnowledgeTree({
     }, 300)
   }, [filterType, renamingPath, renamingFolderPath, selectedFile, isDragging, finishDragInteraction, updateDragTargetFromPoint])
 
-  const handlePageClick = useCallback((pagePath: string) => {
+  const handlePageClick = useCallback(async (pagePath: string) => {
     setArmedPath(null)
     if (renamingPath === pagePath) return
-    setSelectedFile(pagePath)
+    if (!(await setSelectedFile(pagePath))) return
     // 保存最后阅读的章节路径，用于启动时自动打开（仅章节保存，大纲不保存）
     if (pagePath.replace(/\\/g, "/").includes("/wiki/chapters/")) {
       saveLastReadChapter(pagePath, project?.id).catch(() => {})
@@ -1614,7 +1632,13 @@ export function KnowledgeTree({
     }
   }, [])
 
-  const visibleSectionNodes = useMemo(() => filterUiTestDirectory(sectionNodes, searchQuery, new Map(Array.from(pageInfoByPath, ([path, page]) => [path, page.title]))), [sectionNodes, searchQuery, pageInfoByPath])
+  const visibleSectionNodes = useMemo(() => {
+    const nodes = filterType === "outline"
+      ? outlineDocumentNodes(sectionNodes, (path) => !!pageInfoByPath.get(normalizePath(path))?.personaProjection)
+        .filter((node) => !node.is_dir || !isProtectedOutlineFolder(node.name) || Boolean(node.children?.length))
+      : sectionNodes
+    return filterUiTestDirectory(nodes, searchQuery, new Map(Array.from(pageInfoByPath, ([path, page]) => [path, page.title])))
+  }, [filterType, sectionNodes, searchQuery, pageInfoByPath])
 
   const emptyLabel = filterType === "chapter"
     ? t("knowledgeTree.emptyFiltered", { label: t("trash.kindChapter") })
@@ -1691,7 +1715,15 @@ export function KnowledgeTree({
                 ) : (
                   <span className="truncate font-medium">{node.name}</span>
                 )}
-                <span data-ui-tree-meta="true" className="ml-auto text-[0.625rem] text-muted-foreground/60">{countMarkdownDescendants(node)}</span>
+                {filterType === "outline" && depth === 0 && node.name === "人物小传" && (
+                  <span
+                    className="shrink-0 text-xs font-normal text-muted-foreground"
+                    title="这里列出的小传由作者直接编辑。自动生成的小传请在「人物小传」页签中修改对应的人物档案。"
+                  >
+                    作者维护
+                  </span>
+                )}
+                <span data-ui-tree-meta="true" className="ml-auto text-[0.625rem] text-muted-foreground/60">{countDocumentDescendants(node, filterType)}</span>
               </button>
             </div>
             {!isCollapsed && node.children && renderNodes(node.children, depth + 1)}
@@ -1700,7 +1732,12 @@ export function KnowledgeTree({
         return [folderRow]
       }
 
-      if (!node.name.endsWith(".md")) return []
+      if (!/\.md$/i.test(node.name)) {
+        if (filterType !== "outline" || !/\.html$/i.test(node.name)) return []
+        return [<button key={normalizedPath} type="button" data-knowledge-interactive="true" data-ui-tree-row="file" data-page-path={normalizedPath}
+          className="block w-full truncate px-2 py-1 text-left text-sm qm-hover" style={{ paddingLeft: 10 + depth * 16 }}
+          onClick={() => handlePageClick(normalizedPath)}>{node.name}</button>]
+      }
       const page = pageInfoByPath.get(normalizedPath) ?? {
         path: normalizedPath,
         title: node.name.replace(/\.md$/, "").replace(/-/g, " "),
@@ -2110,7 +2147,7 @@ export function KnowledgeTree({
                 刷新目录
               </button>
             ) : null}
-            {createMenu.targetFolderPath ? (
+            {createMenu.targetFolderPath && !(filterType === "outline" && isProtectedOutlineFolder(createMenu.targetFolderName ?? "")) ? (
               <>
                 <button
                   type="button"

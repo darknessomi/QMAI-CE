@@ -1,3 +1,4 @@
+import { confirmAction } from "@/lib/confirm-action"
 import { useState } from "react"
 import { Star, Copy, Trash2, Search } from "lucide-react"
 import { useFavoriteSkillStore } from "@/stores/favorite-skill-store"
@@ -44,7 +45,7 @@ export function FavoriteListView() {
   }
 
   async function handleRemove(favoriteId: string, name: string) {
-    if (!confirm(`确定要删除收藏「${name}」吗？`)) return
+    if (!(await confirmAction(`确定要删除收藏「${name}」吗？`))) return
     await removeFavorite(favoriteId)
     toast.success(`已删除收藏「${name}」`)
   }

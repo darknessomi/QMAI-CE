@@ -1,3 +1,4 @@
+import { confirmAction } from "@/lib/confirm-action"
 import "@/components/uitest/ui-test-tools.css"
 import { useEffect, useMemo, useState, type ComponentType } from "react"
 import { open } from "@tauri-apps/plugin-dialog"
@@ -1012,7 +1013,7 @@ function SkillGallery({ activeTab, onOpen }: { activeTab: GalleryTab; onOpen: (e
 
   async function handleDeleteCategory(categoryId: string, name: string) {
     if (!project || !writingConfig || busy) return
-    if (!window.confirm(`确定删除分类「${name}」吗？分类下的 Skill 将变为未分类。`)) return
+    if (!(await confirmAction(`确定删除分类「${name}」吗？分类下的 Skill 将变为未分类。`))) return
     setCategory("all")
     await persistWritingConfig(deleteSkillCategory(writingConfig, categoryId))
   }
@@ -1242,10 +1243,10 @@ export function UnifiedSkillLibraryView() {
     setEditing(false)
   }, [activeView])
 
-  function handleBackToList() {
+  async function handleBackToList() {
     const dirty = tabDraftDirty(draftKind, skillDraftDirty, writingDraftDirty, false)
     if (dirty) {
-      if (!confirmDiscardSkillLibraryDraft()) return
+      if (!(await confirmDiscardSkillLibraryDraft())) return
       if (draftKind === "writing") setWritingDraftDirty(false)
       else if (draftKind === "skill") setSkillDraftDirty(false)
     }
@@ -1267,14 +1268,14 @@ export function UnifiedSkillLibraryView() {
    * 现在改成穷尽 `switch`：新条目类型必须先在这里**显式**决定去哪儿，
    * 删掉 `case "style"` 也会因为 `default` 里拿不到 `never` 而编译报错。
    */
-  function handleOpenEntry(entry: UnifiedSkillEntry) {
+  async function handleOpenEntry(entry: UnifiedSkillEntry) {
     switch (entry.type) {
       case "writing":
-        setSelectedWritingSkillId(entry.sourceId)
+        if (!(await setSelectedWritingSkillId(entry.sourceId))) return
         setEditing(true)
         return
       case "de-ai":
-        setSelectedSkillId(entry.sourceId)
+        if (!(await setSelectedSkillId(entry.sourceId))) return
         setEditing(true)
         return
       case "style":

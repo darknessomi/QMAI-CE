@@ -42,7 +42,7 @@ export function PersonaPersonalityTab({
   const [custom, setCustom] = useState("")
   const [hint, setHint] = useState("")
 
-  const usedChars = tags.reduce((total, tag) => total + tag.length, 0)
+  const usedChars = tags.join("、").length
   const full = tags.length >= PERSONA_INJECT_PERSONALITY_MAX_TAGS
 
   const toggle = (label: string) => {

@@ -3,14 +3,14 @@
  *
  * 这些函数是「删大纲留下孤儿 HTML/JSON」缺陷的修复基础：
  * - 删除走回收站（trash.ts）；
- * - 改名/移动走这里的 moveOutlineCompanions；
+ * - 改名/移动走这里的 moveOutlineDocument；
  * - 直接清理走 deleteOutlineCompanions。
  */
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 vi.mock("@/commands/fs", () => ({
-  readFile: vi.fn(),
-  writeFile: vi.fn(),
+  movePathIfAbsent: vi.fn(),
+  writeFileAtomic: vi.fn(),
   deleteFile: vi.fn(),
   fileExists: vi.fn(),
 }))
@@ -18,22 +18,23 @@ vi.mock("@/commands/fs", () => ({
 import {
   OUTLINE_COMPANION_EXTENSIONS,
   deleteOutlineCompanions,
-  moveOutlineCompanions,
+  moveOutlineDocument,
   outlineCompanionPaths,
+  outlineDocumentNodes,
 } from "./outline-companions"
 
-import { deleteFile, fileExists, readFile, writeFile } from "@/commands/fs"
+import { deleteFile, fileExists, movePathIfAbsent, writeFileAtomic } from "@/commands/fs"
 
-const mockReadFile = vi.mocked(readFile)
-const mockWriteFile = vi.mocked(writeFile)
+const mockMove = vi.mocked(movePathIfAbsent)
+const mockWrite = vi.mocked(writeFileAtomic)
 const mockDeleteFile = vi.mocked(deleteFile)
 const mockFileExists = vi.mocked(fileExists)
 
 const mdPath = "E:/Novel/wiki/outlines/卷纲/卷纲-第01卷.md"
 
 beforeEach(() => {
-  mockReadFile.mockReset()
-  mockWriteFile.mockReset()
+  mockMove.mockReset()
+  mockWrite.mockReset()
   mockDeleteFile.mockReset()
   mockFileExists.mockReset()
 })
@@ -58,6 +59,17 @@ describe("outlineCompanionPaths", () => {
   })
 })
 
+describe("outlineDocumentNodes", () => {
+  it.each(["人物小传", "自定义/迁移后"])("在 %s 打开独存 HTML，双格式和投影不占重复入口", (folder) => {
+    const root = `/book/wiki/outlines/${folder}`
+    const files = ["独存.html", "双格式.md", "双格式.html", "双格式.json", "投影.md", "投影.html"]
+    const nodes = [{ name: folder, path: root, is_dir: true, children:
+      files.map((name) => ({ name, path: `${root}/${name}`, is_dir: false })) }]
+    const tree = outlineDocumentNodes(nodes, (path) => path.endsWith("/投影.md"))
+    expect(tree[0].children?.map((node) => node.path)).toEqual([`${root}/独存.html`, `${root}/双格式.md`])
+  })
+})
+
 describe("deleteOutlineCompanions", () => {
   it("只删存在的伴生文件，返回删除个数", async () => {
     mockFileExists.mockImplementation(async (path: string) => path.endsWith(".html"))
@@ -77,37 +89,44 @@ describe("deleteOutlineCompanions", () => {
   })
 })
 
-describe("moveOutlineCompanions", () => {
-  it("搬到新主名旁边并删掉旧文件", async () => {
-    const destMd = "E:/Novel/wiki/outlines/卷纲/卷一 残灯有火.md"
-    // 只有源 .html 存在；目标位置为空 → 应当写入并删除旧文件
-    mockFileExists.mockImplementation(
-      async (path: string) => path === "E:/Novel/wiki/outlines/卷纲/卷纲-第01卷.html",
-    )
-    mockReadFile.mockResolvedValue("<html>旧</html>")
-    mockWriteFile.mockResolvedValue(undefined)
-    mockDeleteFile.mockResolvedValue(undefined)
+describe("moveOutlineDocument", () => {
+  const dest = "E:/Novel/wiki/outlines/人物小传/新名字.md"
+  function setupFiles() {
+    const [html, json] = outlineCompanionPaths(mdPath)
+    const files = new Map([[mdPath, "# 原文"], [html, "<html/>"], [json, "{}"]])
+    mockFileExists.mockImplementation(async (path) => files.has(path))
+    mockMove.mockImplementation(async (source, destination) => {
+      if (!files.has(source) || files.has(destination)) throw new Error("文件冲突")
+      files.set(destination, files.get(source)!)
+      files.delete(source)
+    })
+    mockWrite.mockImplementation(async (path, content) => { files.set(path, content) })
+    return files
+  }
 
-    const moved = await moveOutlineCompanions(mdPath, destMd)
-
-    expect(moved).toBe(1)
-    expect(mockWriteFile).toHaveBeenCalledWith(
-      "E:/Novel/wiki/outlines/卷纲/卷一 残灯有火.html",
-      "<html>旧</html>",
-    )
-    expect(mockDeleteFile).toHaveBeenCalledWith("E:/Novel/wiki/outlines/卷纲/卷纲-第01卷.html")
+  it("主文和所有伴生内容同组改名，只改主文标题", async () => {
+    const files = setupFiles()
+    const moved = await moveOutlineDocument(mdPath, dest, "# 改名后")
+    const [html, json] = outlineCompanionPaths(dest)
+    expect(files).toEqual(new Map([[dest, "# 改名后"], [html, "<html/>"], [json, "{}"]]))
+    expect(moved).toContainEqual({ source: outlineCompanionPaths(mdPath)[0], destination: html })
   })
 
-  it("目标位置已有同名文件时不覆盖（用户可能已重新生成）", async () => {
-    const destMd = "E:/Novel/wiki/outlines/卷纲/卷一.md"
-    mockFileExists.mockResolvedValue(true)
-    mockReadFile.mockResolvedValue("old")
-    mockDeleteFile.mockResolvedValue(undefined)
+  it("目标已有 HTML 时保护双方，即使源只有 MD", async () => {
+    const files = setupFiles()
+    files.delete(outlineCompanionPaths(mdPath)[0])
+    files.set(outlineCompanionPaths(dest)[0], "另存的手写小传")
+    const before = new Map(files)
+    await expect(moveOutlineDocument(mdPath, dest)).rejects.toThrow("同名")
+    expect(files).toEqual(before)
+    expect(mockMove).not.toHaveBeenCalled()
+  })
 
-    await moveOutlineCompanions(mdPath, destMd)
-
-    // 两个伴生文件都"存在"，但目标也存在 → 不写，只删旧的
-    expect(mockWriteFile).not.toHaveBeenCalled()
-    expect(mockDeleteFile).toHaveBeenCalledTimes(2)
+  it("改标题失败时原路径与内容均恢复", async () => {
+    const files = setupFiles()
+    const before = new Map(files)
+    mockWrite.mockRejectedValueOnce(new Error("写入失败"))
+    await expect(moveOutlineDocument(mdPath, dest, "新标题")).rejects.toThrow("写入失败")
+    expect(files).toEqual(before)
   })
 })

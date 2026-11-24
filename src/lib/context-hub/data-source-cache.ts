@@ -93,13 +93,12 @@ const CHAPTER_SCOPED_SOURCES = new Set([
 const SOURCE_CACHE_VERSIONS: Partial<Record<string, number>> = {
   writingStyle: 2,
   cognitionText: 1,
-  outline: 3,
+  outline: 4,
   chapterOutline: 3,
   volumeContext: 2,
-  // 2 → 3：sectionBriefing 现在会额外输出「相关道具」小节。旧缓存条目是
-  // 用不含物品的代码算出来的，而它的依赖戳（大纲 + 快照）并没有变，
-  // 不bump 就会一直命中旧值，表现为「改了代码但提示词里始终没有道具」。
-  sectionBriefing: 4,
+  // 速记缓存保留候选小传来源，组包时再与当前人物档案合并。
+  sectionBriefing: 5,
+  graphSearchResults: 1,
   snapshots: 2,
   retrieval: 2,
   fallbackCharacterStates: 2,

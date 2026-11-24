@@ -1,14 +1,17 @@
+import { fileExists } from "@/commands/fs"
+import { isAiExcludedContent } from "./ai-exclude"
+import type { OutlineCharacterBrief } from "./outline-context-index"
 import { normalizePath } from "@/lib/path-utils"
-import { parsePersonalitySection } from "./persona-skill-profile"
-import { loadPersonaSkillIndex, readPersonaSkillDocument } from "./persona-skill-store"
+import { formatPersonaPersonalityForWriting, splitPersonaSkillDocument, type ParsedPersonaSkillDocument } from "./persona-skill-profile"
+import { loadPersonaSkillIndex, loadPersonaSkillIndexStrict, personaSkillDocumentPath, personaSkillIdFor, readPersonaSkillDocument } from "./persona-skill-store"
 import {
   PERSONA_INJECT_CHAR_BUDGET,
   PERSONA_INJECT_FIELD_CHARS,
   PERSONA_INJECT_MAX_SKILLS,
-  PERSONA_INJECT_PERSONALITY_MAX_CHARS,
-  PERSONA_INJECT_PERSONALITY_MAX_TAGS,
   PERSONA_MAJOR_FIELDS,
   PERSONA_MINOR_FIELDS,
+  PERSONA_PROFILE_FIELDS,
+  PERSONA_LIVE_FIELDS,
   PERSONA_MIN_SUBSTRING_MATCH_CHARS,
   PERSONA_SUPPLEMENT_HEADING,
   normalizePersonaName,
@@ -57,86 +60,43 @@ export function matchesPersonaName(normalizedQuery: string, names: readonly stri
 export function selectPersonaSkillCandidates(
   index: PersonaSkillIndex,
   matchingText: string,
+  backgroundText = "",
+  projectionIds: ReadonlySet<string> = new Set(),
 ): PersonaSkillMeta[] {
   const query = normalizePersonaName(matchingText)
-  if (!query) return []
-  return index.skills
-    .filter((meta) => matchesPersonaName(query, [meta.characterName, ...meta.aliases]))
-    .sort(comparePersonaSkillMeta)
+  const background = normalizePersonaName(backgroundText)
+  const primary: PersonaSkillMeta[] = []
+  const secondary: PersonaSkillMeta[] = []
+  for (const meta of index.skills) {
+    const names = [meta.characterName, ...meta.aliases]
+    if (projectionIds.has(meta.id) || matchesPersonaName(query, names)) primary.push(meta)
+    else if (matchesPersonaName(background, names)) secondary.push(meta)
+  }
+  // 用户要求和本章章纲点名的人物先占预算，其次才用此前章节状态补足。
+  return [...primary.sort(comparePersonaSkillMeta), ...secondary.sort(comparePersonaSkillMeta)]
     .slice(0, PERSONA_INJECT_MAX_SKILLS)
-}
-
-/**
- * 把 SKILL.md 拆成「## 标题 → 正文」。
- * 同名标题会拼接：用户手改过的档案每轮都会追加一个「补充（第 N 章）」段。
- */
-export function extractPersonaSkillSections(markdown: string): Map<string, string> {
-  const sections = new Map<string, string>()
-  let current: string | null = null
-  let buffer: string[] = []
-  const flush = () => {
-    if (current == null) return
-    const value = buffer.join("\n").trim()
-    if (!value) return
-    const previous = sections.get(current)
-    sections.set(current, previous ? `${previous}\n${value}` : value)
-  }
-  for (const line of markdown.replace(/\r\n/g, "\n").split("\n")) {
-    const heading = line.match(/^##\s+(.+?)\s*$/)
-    if (heading) {
-      flush()
-      current = heading[1].trim()
-      buffer = []
-      continue
-    }
-    if (/^#\s/.test(line)) {
-      flush()
-      current = null
-      buffer = []
-      continue
-    }
-    if (current != null) buffer.push(line)
-  }
-  flush()
-  return sections
 }
 
 function truncate(value: string, max: number): string {
   return value.length <= max ? value : `${value.slice(0, max)}…`
 }
 
-/** 按档位渲染一条注入块：主要人物 7 段，次要人物只留 2 段。 */
-export function renderPersonaSkillBlock(meta: PersonaSkillMeta, document: string): string {
-  const sections = extractPersonaSkillSections(document)
+/** 按主次档位渲染演技字段，同时保留性格与补充。 */
+export function renderPersonaSkillBlock(meta: PersonaSkillMeta, document: ParsedPersonaSkillDocument): string {
   const order = meta.tier === "major" ? PERSONA_MAJOR_FIELDS : PERSONA_MINOR_FIELDS
   const parts: string[] = []
-  // 性格段必须排在最前：它是「演成什么样」的指令，比「怎么演」的演技字段更强。
-  // 不能靠后面补一句「请注意性格优先」—— 模型对靠前指令的服从度明显更高。
-  // 档位不裁剪：次要人物也带性格，否则「戏份少但性格强」的配角写不出味道。
-  const personality = parsePersonalitySection(sections.get("性格") ?? "")
-  if (personality.tags.length > 0) {
-    // 先按键数上限取，再按字数上限累加：字数超了要整条丢掉，不能把标签切一半。
-    const byChars: string[] = []
-    for (const tag of personality.tags.slice(0, PERSONA_INJECT_PERSONALITY_MAX_TAGS)) {
-      if ([...byChars, tag].join("、").length > PERSONA_INJECT_PERSONALITY_MAX_CHARS) break
-      byChars.push(tag)
-    }
-    if (byChars.length > 0) {
-      parts.push(`人物性格：${byChars.join("、")}`)
-    }
-  } else if (personality.raw) {
-    parts.push(`人物性格：${truncate(personality.raw.replace(/\s*\n\s*/g, " "), PERSONA_INJECT_PERSONALITY_MAX_CHARS)}`)
-  }
+  const personality = formatPersonaPersonalityForWriting(document.fields["性格"] ?? "")
+  if (personality) parts.push(`人物性格：${personality}`)
   for (const field of order) {
-    const value = (sections.get(field) ?? "").replace(/\s*\n\s*/g, " ").trim()
+    const value = (document.fields[field] ?? "").replace(/\s*\n\s*/g, " ").trim()
     if (!value) continue
     parts.push(`${field}：${truncate(value, PERSONA_INJECT_FIELD_CHARS)}`)
   }
   // 新档案只有一个补充段；老档案可能还留着多个「补充（第 N 章）」。
   // 倒序拼接，截断时先丢最早的，而不是把最新的观察截掉。
-  const supplements = [...sections.entries()]
-    .filter(([heading]) => heading.startsWith(PERSONA_SUPPLEMENT_HEADING))
-    .map(([, value]) => value.replace(/\s*\n\s*/g, " ").trim())
+  const supplements = document.extras
+    .filter(({ heading }) => heading.startsWith(PERSONA_SUPPLEMENT_HEADING))
+    .map(({ body }) => body.replace(/\s*\n\s*/g, " ").trim())
     .filter(Boolean)
     .reverse()
   if (supplements.length > 0) {
@@ -153,38 +113,64 @@ export function renderPersonaSkillBlock(meta: PersonaSkillMeta, document: string
 }
 
 /**
- * 写作上下文用的「人物 Skill」段；没有命中时返回空串。
+ * 写作用演技段和可替换生成小传的档案事实。
  * 先只用 index 元数据做名字匹配（几十条，很便宜），命中后才读那一份 SKILL.md。
  */
 export async function buildPersonaSkillContext(
   projectPath: string,
   matchingText: string,
-): Promise<string> {
+  backgroundText = "",
+  briefs: readonly OutlineCharacterBrief[] = [],
+): Promise<{ skills: string; profileFacts: Map<string, string> }> {
+  const profileFacts = new Map<string, string>()
+  if (!matchingText.trim() && !backgroundText.trim()) return { skills: "", profileFacts }
+
   const pp = normalizePath(projectPath)
-  if (!matchingText.trim()) return ""
-
-  let index: PersonaSkillIndex
-  try {
-    index = await loadPersonaSkillIndex(pp)
-  } catch {
-    return ""
+  const index = await loadPersonaSkillIndex(pp)
+  const excluded = new Set(briefs.filter((brief) => brief.excluded).map((brief) => brief.personaId ?? brief.authorPersonaId))
+  const projectionIds = new Set(briefs.flatMap((brief) => brief.personaId && !brief.excluded ? [brief.personaId] : []))
+  const indexed = new Set(index.skills.map((meta) => meta.id))
+  const orphans = [...projectionIds].filter((id) => !indexed.has(id) && id === personaSkillIdFor(id))
+  if (orphans.length && await loadPersonaSkillIndexStrict(pp).catch(() => null)) {
+    // 从有效索引移除/退回候选时旧文件仍在磁盘，不应把其投影当作旧书唯一资料复活。
+    for (const id of orphans) {
+      if (await fileExists(personaSkillDocumentPath(pp, id))) profileFacts.set(id, "")
+    }
   }
-  if (index.skills.length === 0) return ""
-
-  const candidates = selectPersonaSkillCandidates(index, matchingText)
-  if (candidates.length === 0) return ""
-
+  const candidates = selectPersonaSkillCandidates(index, matchingText, backgroundText, projectionIds)
+  const actingIds = new Set(candidates.map((meta) => meta.id))
+  // 排在演技名额之外的角色仍取最新小传事实，避免通过旧投影把过期演技塞回提示词。
+  const factsOnly = index.skills.filter((meta) => projectionIds.has(meta.id) && !actingIds.has(meta.id))
   const blocks: string[] = []
   let used = 0
-  for (const meta of candidates) {
-    const document = await readPersonaSkillDocument(pp, meta.id)
-    if (!document.trim()) continue
-    const block = renderPersonaSkillBlock(meta, document)
-    if (!block) continue
-    if (used + block.length > PERSONA_INJECT_CHAR_BUDGET) break
-    blocks.push(block)
-    used += block.length
+  for (const meta of [...candidates, ...factsOnly]) {
+    if (excluded.has(meta.id)) {
+      profileFacts.set(meta.id, "")
+      continue
+    }
+    const markdown = await readPersonaSkillDocument(pp, meta.id)
+    if (!markdown.trim()) continue
+    if (isAiExcludedContent(markdown)) {
+      profileFacts.set(meta.id, "")
+      continue
+    }
+    const document = splitPersonaSkillDocument(markdown)
+    const block = actingIds.has(meta.id) ? renderPersonaSkillBlock(meta, document) : ""
+    if (block && used + block.length <= PERSONA_INJECT_CHAR_BUDGET) {
+      blocks.push(block)
+      used += block.length + 1
+    }
+    const sourceText = briefs.filter((brief) => !brief.personaId && brief.authorPersonaId === meta.id)
+      .map((brief) => brief.content).join("\n").replace(/[\s|*：:]/g, "")
+    const facts = [...PERSONA_PROFILE_FIELDS, ...PERSONA_LIVE_FIELDS].flatMap((field) => {
+      const value = document.fields[field]
+      if (field === "性格" || !value) return []
+      const compact = value.replace(/[\s|*：:]/g, "")
+      if (sourceText.includes(field + compact) || (compact.length >= 4 && sourceText.includes(compact))) return []
+      return [`${field}：${value}`]
+    })
+    if (meta.roleType && !sourceText.includes(meta.roleType)) facts.unshift(`定位：${meta.roleType}`)
+    profileFacts.set(meta.id, facts.length ? [meta.characterName, ...facts].join("\n") : "")
   }
-  if (blocks.length === 0) return ""
-  return `【人物 Skill】\n${blocks.join("\n")}`
+  return { skills: blocks.join("\n"), profileFacts }
 }

@@ -105,7 +105,7 @@ export function PersonaPersonalityCreateForm({
             {roleType ? <span className="ui-test-skill-badge">{roleType}</span> : null}
           </div>
           <p className="ui-test-persona-hero-line">
-            保存后这个角色会同时出现在「人物小传」与人物 Skill 列表，字段与技能库中的人物 Skill 完全一致。
+            保存后可在大纲的「人物小传」中编辑角色档案。
           </p>
         </div>
         <div className="ui-test-persona-hero-actions">

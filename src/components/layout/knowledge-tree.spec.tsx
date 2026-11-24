@@ -123,50 +123,18 @@ describe("KnowledgeTree 人物小传文件夹保护", () => {
     expect(pageSlice).not.toContain("isProtectedOutlineFolder")
   })
 })
-describe("KnowledgeTree 删大纲时清理人物引用", () => {
-  it("删大纲后调 detachOutlineRef，且失败只 warn 不影响删除", () => {
-    expect(source).toContain("detachOutlineRef(projectPath, outlineFileName)")
-    const callAt = source.indexOf("detachOutlineRef(projectPath, outlineFileName)")
-    // 必须在文件真的移入回收站之后：先删文件再解引用，否则解引用成功但删除失败反而更糟
-    const trashAt = source.indexOf("moveFileToTrash(projectPath, pagePath, filterType)")
-    expect(trashAt).toBeGreaterThan(-1)
-    expect(callAt).toBeGreaterThan(trashAt)
-    // 失败不能冒泡：删大纲已经成功，清理失败只该留日志
-    expect(source).toContain("清理人物小传引用失败")
-  })
-
-  it("只解引用，不在删大纲时删除角色", () => {
-    // 连带删除必须由用户显式选择，不能用删大纲顺手把角色带走
-    const callAt = source.indexOf("detachOutlineRef(projectPath, outlineFileName)")
-    const slice = source.slice(Math.max(0, callAt - 400), callAt + 400)
-    expect(slice).not.toContain("deleteFile")
-    expect(slice).not.toContain("deletePersona")
-  })
-})
-describe("KnowledgeTree 删大纲的连带提示", () => {
-  it("先问再删：弹窗与档案操作都在移入回收站之前", () => {
-    const dialogAt = source.indexOf('t("knowledgeTree.personaDetachConfirm"')
-    const trashAt = source.indexOf("moveFileToTrash(projectPath, pagePath, filterType)")
-    expect(dialogAt).toBeGreaterThan(-1)
-    expect(trashAt).toBeGreaterThan(dialogAt)
-  })
-
-  it("只在大纲分支提示，章节不弹", () => {
-    expect(source).toContain('if (filterType !== "chapter") {')
-  })
-
-  it("确定＝按规则移除，取消＝全部保留转潜伏", () => {
-    expect(source).toContain("removePersonaFromProject(projectPath, plan.removals)")
-    expect(source).toContain("keepPersonaAfterOutlineDelete(projectPath, outlineFileName)")
-    // 受保护角色（manual / pinned / 被引用）不进入 removals，由 planPersonaDetach 决定
-    expect(source).toContain("planPersonaDetach({ outlineFileName, skills: personaIndex.skills })")
-  })
-
-  it("人物小传处理失败不拦住删大纲", () => {
-    expect(source).toContain("处理人物小传关联失败")
-    // 该 try/catch 必须包住整段，且外层仍继续走删除流程
-    const catchAt = source.indexOf("处理人物小传关联失败")
-    expect(catchAt).toBeGreaterThan(-1)
-    expect(source.indexOf("moveFileToTrash(projectPath, pagePath, filterType)")).toBeGreaterThan(catchAt)
+describe("大纲与人物引用的删除顺序", () => {
+  it("删前展示受影响人物，成功移入回收站后才按用户选择更新索引", () => {
+    const start = source.indexOf("const handleDeleteClick")
+    const end = source.indexOf("const handleDeleteFolder", start)
+    const handler = source.slice(start, end)
+    const confirm = handler.indexOf('t("knowledgeTree.personaDetachConfirm"')
+    const trash = handler.indexOf("await moveFileToTrash")
+    const update = handler.indexOf("await updateOutlineReferences(removed, { remove, keepDormant }, pathIndex)")
+    expect(confirm).toBeGreaterThanOrEqual(0)
+    expect(trash).toBeGreaterThan(confirm)
+    expect(update).toBeGreaterThan(trash)
+    expect(handler).toContain("remove = plan.removals")
+    expect(handler).toContain("keepDormant = true")
   })
 })

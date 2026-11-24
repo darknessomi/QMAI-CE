@@ -429,12 +429,15 @@ export function UiTestShell({ project, onOpenProject, onSelectProject, onSwitchP
   const navigate = async (view: NavView) => {
     setToolOpen(false)
     if (!project && view !== "settings") return
-    if (view === "settings") setShowGlobalSettings(true)
-    if (activeView === view) return
+    if (activeView === view) {
+      if (view === "settings") setShowGlobalSettings(true)
+      return
+    }
     if (activeView === "settings" && !(await confirmModelDraftLeave())) return
-    setActiveView(view)
+    await setActiveView(view)
     // 仍由旧 store 决定能否离开有未保存草稿的功能，不能绕过其保护。
     if (useWikiStore.getState().activeView !== view) return
+    if (view === "settings") setShowGlobalSettings(true)
     if (view === "sources" || view === "wiki") {
       const kind = view === "sources" ? "/outlines/" : "/chapters/"
       const current = useWikiStore.getState().selectedFile
@@ -489,9 +492,9 @@ export function UiTestShell({ project, onOpenProject, onSelectProject, onSwitchP
         await refreshProjectFileTree(projectPath, { projectId: project.id, clearDisplayTreeFirst: false })
       }
       const content = await readFile(chapterPath)
-      store.setSelectedFile(chapterPath)
+      if (!(await store.setActiveView("wiki"))) return
+      if (!(await store.setSelectedFile(chapterPath))) return
       store.setFileContent(content)
-      store.setActiveView("wiki")
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "载入示例章节失败，可稍后在章节里手动新建。")
     }

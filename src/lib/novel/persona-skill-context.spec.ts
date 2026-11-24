@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 const io = vi.hoisted(() => ({ files: new Map<string, string>() }))
 
 vi.mock("@/commands/fs", () => ({
+  fileExists: async (path: string) => io.files.has(path),
   readFile: async (path: string) => {
     if (!io.files.has(path)) throw new Error(`文件缺失：${path}`)
     return io.files.get(path)!
@@ -21,11 +22,16 @@ import {
 } from "./persona-skill-types"
 import {
   buildPersonaSkillContext,
-  extractPersonaSkillSections,
   matchesPersonaName,
-  renderPersonaSkillBlock,
+  renderPersonaSkillBlock as renderBlock,
   selectPersonaSkillCandidates,
 } from "./persona-skill-context"
+
+import { splitPersonaSkillDocument } from "./persona-skill-profile"
+
+function renderPersonaSkillBlock(meta: PersonaSkillMeta, document: string) {
+  return renderBlock(meta, splitPersonaSkillDocument(document))
+}
 
 const project = "C:/project"
 const indexFile = `${project}/.qmai/persona-skills/index.json`
@@ -90,17 +96,6 @@ describe("matchesPersonaName", () => {
   })
 })
 
-describe("extractPersonaSkillSections", () => {
-  it("按二级标题切段，同名标题会拼接", () => {
-    const sections = extractPersonaSkillSections(
-      "# 标题\n\n## 怎么说话\n\n甲。\n\n## 补充（第 3 章）\n\n乙。\n\n## 补充（第 9 章）\n\n丙。\n",
-    )
-    expect(sections.get("怎么说话")).toBe("甲。")
-    expect(sections.get("补充（第 3 章）")).toBe("乙。")
-    expect(sections.get("补充（第 9 章）")).toBe("丙。")
-  })
-})
-
 describe("selectPersonaSkillCandidates", () => {
   // 夹具人物名必须 ≥ 2 字：matchesPersonaName 对单字名只允许精确相等，
   // 而这里传进去的是一整段 matchingText，所以单字名会（按设计）匹配不上。
@@ -142,6 +137,15 @@ describe("selectPersonaSkillCandidates", () => {
 
     // 反向：休眠/归档的人名字不在文本里，一个都不占预算
     expect(selectPersonaSkillCandidates(index, "无关的路人")).toEqual([])
+  })
+
+  it("本轮和章纲点名的人物先于仅在近期状态中出现的人物", () => {
+    const index = { version: 1 as const, skills: [
+      meta({ characterName: "甲一", pinned: true }),
+      meta({ characterName: "乙二", tier: "minor" }),
+    ] }
+    expect(selectPersonaSkillCandidates(index, "写乙二回家", "甲一遇见了乙二")
+      .map((item) => item.characterName)).toEqual(["乙二", "甲一"])
   })
 
   it("最多取 12 个", () => {
@@ -189,35 +193,45 @@ describe("buildPersonaSkillContext", () => {
   beforeEach(() => io.files.clear())
 
   it("没有 index.json 时返回空串", async () => {
-    expect(await buildPersonaSkillContext(project, "林清越出场了")).toBe("")
+    expect((await buildPersonaSkillContext(project, "林清越出场了")).skills).toBe("")
   })
 
   it("matchingText 为空时返回空串，不读盘", async () => {
     seed([meta({ characterName: "林清越" })], { 林清越: doc(majorFields) })
-    expect(await buildPersonaSkillContext(project, "   ")).toBe("")
+    expect((await buildPersonaSkillContext(project, "   ")).skills).toBe("")
   })
 
   it("没有命中任何人物时返回空串", async () => {
     seed([meta({ characterName: "林清越" })], { 林清越: doc(majorFields) })
-    expect(await buildPersonaSkillContext(project, "完全无关的一段细纲")).toBe("")
+    expect((await buildPersonaSkillContext(project, "完全无关的一段细纲")).skills).toBe("")
   })
 
   it("命中时输出带标题的块，并包含该人物的字段", async () => {
     seed([meta({ characterName: "林清越" })], { 林清越: doc(majorFields) })
-    const text = await buildPersonaSkillContext(project, "林清越推开门，看见沈砚。")
-    expect(text).toContain("【人物 Skill】")
+    const { skills: text } = await buildPersonaSkillContext(project, "林清越推开门，看见沈砚。")
+    expect(text).toContain("【人物 Skill · 林清越")
     expect(text).toContain("林清越")
     expect(text).toContain("句子短，先问后答。")
   })
 
   it("别名也能命中", async () => {
     seed([meta({ characterName: "林清越", aliases: ["清越"] })], { 林清越: doc(majorFields) })
-    expect(await buildPersonaSkillContext(project, "清越站在门口")).toContain("林清越")
+    expect((await buildPersonaSkillContext(project, "清越站在门口")).skills).toContain("林清越")
   })
 
   it("index 里有条目但 SKILL.md 丢了时跳过它，不抛", async () => {
     seed([meta({ characterName: "林清越" })], {})
-    expect(await buildPersonaSkillContext(project, "林清越出场了")).toBe("")
+    expect((await buildPersonaSkillContext(project, "林清越出场了")).skills).toBe("")
+  })
+
+  it("排在第十三名的人物仍从实档取小传事实，过期演技不能经投影回流", async () => {
+    const people = Array.from({ length: 13 }, (_, i) => meta({ characterName: `角色${i}`, appearanceCount: 20 - i }))
+    seed(people, Object.fromEntries(people.map((m) => [m.id, doc({ 怎么说话: "开口就笑", 背景: "曾是船工" })])))
+    const briefs = people.map((m) => ({ relativePath: m.id, personaId: m.id, content: "过时的角色档案" }))
+    const result = await buildPersonaSkillContext(project, "所有人物聚会", "", briefs)
+    expect(result.skills).not.toContain("角色12")
+    expect(result.profileFacts.get("角色12")).toContain("曾是船工")
+    expect(result.profileFacts.get("角色12")).not.toContain("开口就笑")
   })
 
   it("总长不超过 4000 字预算", async () => {
@@ -235,7 +249,9 @@ describe("buildPersonaSkillContext", () => {
       乙二: doc(fields),
       丙三: doc(fields),
     })
-    const text = await buildPersonaSkillContext(project, "甲一 乙二 丙三")
+    const { skills: text, profileFacts } = await buildPersonaSkillContext(project, "甲一 乙二 丙三", "", skills.map((item) => ({ personaId: item.id, content: "旧投影", relativePath: item.id })))
+    expect(profileFacts.get("丙三")).toContain("定位：男主")
+    expect(profileFacts.get("丙三")).not.toContain("怎么说话")
     expect(text.length).toBeLessThanOrEqual(PERSONA_INJECT_CHAR_BUDGET + 20)
     expect(text).toContain("甲一")
     expect(text).toContain("乙二")
@@ -250,6 +266,12 @@ describe("性格段注入", () => {
     const block = renderPersonaSkillBlock(meta({ characterName: "林清越" }), withPersonality)
     expect(block).toContain("人物性格：毒舌、嘴硬心软")
     expect(block.indexOf("人物性格")).toBeLessThan(block.indexOf("怎么说话"))
+  })
+
+  it("自由文本折叠换行，省略号也计入二十字上限", () => {
+    const body = "先听别人说完。\n从不轻易表露喜怒，总是提醒自己冷静。"
+    const block = renderPersonaSkillBlock(meta({ characterName: "林清越" }), doc({ 性格: body }))
+    expect(block.split("人物性格：")[1]).toBe(body.replace("\n", " ").slice(0, 19) + "…")
   })
 
   it("性格标签超过 4 条时截断，按用户顺序保留前面的", () => {

@@ -151,7 +151,8 @@ export function IconSidebar({ onToggleSidebar, onOpenSidebar, onSwitchProject }:
     .filter((item): item is ConfigurableNavItem => item !== undefined && !hiddenNavIds.has(item.id))
   const visibleNavIds = visibleNavItems.map((item) => item.id)
 
-  const handleNavClick = (view: NavView) => {
+  const handleNavClick = async (view: NavView) => {
+    if (!(await setActiveView(view))) return
     setSearchPanelOpen(false)
     const normalizedSelectedFile = selectedFile?.replace(/\\/g, "/") ?? ""
 
@@ -196,7 +197,6 @@ export function IconSidebar({ onToggleSidebar, onOpenSidebar, onSwitchProject }:
       }
     }
 
-    setActiveView(view)
   }
 
   const handleConfigurableNavClick = (item: ConfigurableNavItem) => {

@@ -467,13 +467,12 @@ export function GuideOverlay({ onDirective }: GuideOverlayProps) {
              * 顶部的 X 只有图标，用户常常以为它「只是关掉这一张卡片」；
              * 「不需要这些」的人需要一个写得出来的出口。
              * 语义与 X 不同：X 记「已完成」，取消记「已关闭，以后不再自动弹」，
-             * 想再看时回「设置 → 新手引导」重新开始即可。
              */}
             <button
               type="button"
               className="guide-btn text guide-btn-quit"
               aria-label="取消引导"
-              title="取消后整段引导不再自动弹出；需要时可到「设置 → 新手引导」重新开始"
+              title="取消后引导不会自动弹出。需要重看时，到「设置 → 写作设置」的新手引导旁点「播放」。"
               onClick={dismiss}
             >
               取消

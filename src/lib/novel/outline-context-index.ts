@@ -2,8 +2,14 @@ import { listDirectory, readFile } from "@/commands/fs"
 import { mapWithConcurrency } from "@/lib/async-pool"
 import { parseFrontmatter } from "@/lib/frontmatter"
 import { isAiExcluded } from "./ai-exclude"
+import { buildProjectPathIndexFromTree, type ProjectPathIndex } from "@/lib/wiki-page-resolver"
+import { htmlToPlainText } from "@/lib/html-text"
+import { extractNameFromHeading, extractRoleFromTrailing } from "./character-save-extractor"
+import { parseCharacterRoleFileName } from "./extract-established-context"
+import { resolvePersonaOutlineRef } from "./persona-outline-detach"
+import type { PersonaSkillMeta } from "./persona-skill-types"
+import { getPersonaProjectionId, parsePersonaProjectionFrontmatter } from "./persona-projection"
 import { normalizePath } from "@/lib/path-utils"
-import type { FileNode } from "@/types/wiki"
 
 type OutlineSegmentKind =
   | "master"
@@ -20,6 +26,7 @@ interface OutlineDocument {
   path: string
   relativePath: string
   folder?: string
+  personaId?: string
   kind: OutlineSegmentKind
   content: string
   frontmatter: Record<string, unknown> | null
@@ -36,6 +43,8 @@ interface OutlineSegment {
 }
 
 interface OutlineDocumentIndex {
+  paths: ProjectPathIndex
+  excludedProfiles: OutlineCharacterBrief[]
   projectPath: string
   documents: OutlineDocument[]
   segments: OutlineSegment[]
@@ -86,18 +95,6 @@ const INDEX_READ_CONCURRENCY = 16
 const MAX_OUTLINE_DOCUMENT_CHARS = 18_000
 const MAX_CHAPTER_CONTEXT_CHARS = 14_000
 const indexRequests = new Map<string, Promise<OutlineDocumentIndex>>()
-
-function flattenMarkdownFiles(nodes: FileNode[]): FileNode[] {
-  const files: FileNode[] = []
-  for (const node of nodes) {
-    if (node.is_dir) {
-      if (node.children) files.push(...flattenMarkdownFiles(node.children))
-      continue
-    }
-    if (node.name.toLowerCase().endsWith(".md")) files.push(node)
-  }
-  return files
-}
 
 function relativeOutlinePath(root: string, path: string): string {
   const normalizedRoot = normalizePath(root).replace(/\/$/, "")
@@ -150,7 +147,9 @@ function classifyDocument(relativePath: string, body: string, frontmatter: Recor
   const headingKind = kindFromHeading(firstHeading)
   // 旧文件常把所有大纲统一写成 type:outline；此值不应盖过明确的卷/章/设定标题。
   if (fmKind !== "unknown" && fmKind !== "master") return fmKind
-  return headingKind ?? fmKind
+  if (headingKind) return headingKind
+  const name = relativePath.split("/").pop() ?? ""
+  return parseCharacterRoleFileName(name) || extractRoleFromTrailing(firstHeading) ? "character" : fmKind
 }
 
 interface HeadingState {
@@ -232,26 +231,29 @@ async function buildIndex(projectPath: string): Promise<OutlineDocumentIndex> {
   const pp = normalizePath(projectPath)
   const outlinesRoot = `${pp}/wiki/outlines`
   const tree = await listDirectory(outlinesRoot)
-  const files = flattenMarkdownFiles(tree).sort((left, right) =>
+  const paths = buildProjectPathIndexFromTree(tree)
+  const files = [...paths.filesByName.values()].flat().filter((file) => /\.md$/i.test(file.name)).sort((left, right) =>
     left.path.localeCompare(right.path, "zh-Hans-CN", { numeric: true }),
   )
   const loadedFiles = await mapWithConcurrency(files, INDEX_READ_CONCURRENCY, async (file) => ({
     path: file.path,
     content: await readFile(file.path).catch(() => ""),
   }))
-  return createOutlineDocumentIndex(pp, loadedFiles)
+  return createOutlineDocumentIndex(pp, loadedFiles, paths)
 }
 
 function createOutlineDocumentIndex(
   projectPath: string,
   files: Array<{ path: string; content: string }>,
+  paths: ProjectPathIndex,
 ): OutlineDocumentIndex {
   const pp = normalizePath(projectPath)
   const outlinesRoot = `${pp}/wiki/outlines`
+  const excludedProfiles: OutlineCharacterBrief[] = []
   const loadedDocuments = files.map((file) => {
     const raw = file.content
     if (!raw.trim()) return null
-    const parsed = parseFrontmatter(raw)
+    const parsed = parsePersonaProjectionFrontmatter(raw)
     /*
      * 「选中（AI 不读取）」：被选中的大纲**整体不进索引**。
      *
@@ -260,15 +262,21 @@ function createOutlineDocumentIndex(
      * 所有大纲上下文的唯一来源，把它们挡在索引之外，等价于"这份大纲对模型不存在"，
      * 不必去 20 多个消费点逐个加判断（漏一处就等于没排干净）。
      */
-    if (isAiExcluded(parsed.frontmatter as Record<string, unknown> | null)) return null
     const relativePath = relativeOutlinePath(outlinesRoot, file.path)
     const folder = relativePath.includes("/") ? relativePath.split("/")[0] : undefined
     const content = parsed.body.trim()
+    const kind = classifyDocument(relativePath, content, parsed.frontmatter)
+    const personaId = getPersonaProjectionId(raw, parsed)
+    if (isAiExcluded(parsed.frontmatter)) {
+      if (kind === "character" || personaId) excludedProfiles.push({ relativePath, personaId, excluded: true, content: "" })
+      return null
+    }
     return {
       path: file.path,
       relativePath,
       folder,
-      kind: classifyDocument(relativePath, content, parsed.frontmatter),
+      personaId,
+      kind,
       content,
       frontmatter: parsed.frontmatter as Record<string, unknown> | null,
     } satisfies OutlineDocument
@@ -279,6 +287,8 @@ function createOutlineDocumentIndex(
 
   return {
     projectPath: pp,
+    excludedProfiles,
+    paths,
     documents,
     segments: documents.flatMap(splitSemanticSegments),
   }
@@ -478,8 +488,8 @@ function volumeMatchScore(segments: OutlineSegment[], chapterNumber: number): nu
   return 0
 }
 
-function firstHeading(content: string): string {
-  return content.match(/^#{1,6}\s+(.+)$/m)?.[1]?.trim() ?? "卷纲"
+function firstHeading(content: string, fallback = "卷纲"): string {
+  return content.match(/^#{1,6}\s+(.+)$/m)?.[1]?.trim() ?? fallback
 }
 
 function resolveTargetVolumes(index: OutlineDocumentIndex, chapterNumber: number): ResolvedVolume[] {
@@ -857,22 +867,113 @@ export function capOutlineSourcesToBudget(outline: string, charCap: number): str
 
 function characterAliases(segment: OutlineSegment): string[] {
   const aliases = new Set<string>()
-  const stem = segment.relativePath.split("/").pop()?.replace(/\.md$/i, "").replace(/^(?:角色|人物小传)[-_：:]*/, "").trim()
-  if (stem) aliases.add(stem)
-  const title = scalarText(segment.frontmatter?.title)
-  const name = scalarText(segment.frontmatter?.name)
-  if (title) aliases.add(title.replace(/^(?:角色|人物小传)[-_：:]*/, "").trim())
-  if (name) aliases.add(name)
-  const heading = firstHeading(segment.content).replace(/^(?:人物小传|人物设定|角色设定)[-_：:]*/, "").trim()
-  if (heading && heading.length <= 24) aliases.add(heading)
+  const fileName = segment.relativePath.split("/").pop() ?? ""
+  const encoded = parseCharacterRoleFileName(fileName)
+  if (encoded) aliases.add(encoded.name)
+  const stem = fileName.replace(/\.md$/i, "")
+  const names = [stem, scalarText(segment.frontmatter?.title), scalarText(segment.frontmatter?.name), firstHeading(segment.content, "")]
+  for (const name of names) {
+    const normalized = extractNameFromHeading(name)
+    if (normalized && normalized.length <= 40) aliases.add(normalized)
+  }
   return Array.from(aliases).filter((alias) => alias.length >= 2)
 }
 
-export function buildRelevantCharacterBriefs(index: OutlineDocumentIndex, matchingText: string): string {
-  const matches = index.segments.filter((segment) =>
-    segment.kind === "character" && characterAliases(segment).some((alias) => matchingText.includes(alias)),
-  )
-  return uniqueSourceBlocks(groupSourcesByDocument(matches)).join("\n\n")
+export interface OutlineCharacterBrief {
+  relativePath: string
+  content: string
+  /** 生成投影的主档 ID。手写小传另外记录所属人物，以保留作者原文。 */
+  personaId?: string
+  authorPersonaId?: string
+  excluded?: boolean
+}
+
+export async function selectRelevantCharacterBriefs(
+  index: OutlineDocumentIndex,
+  matchingText: string,
+  matchedPeople: readonly PersonaSkillMeta[] = [],
+): Promise<OutlineCharacterBrief[]> {
+  const matchedIds = new Set(matchedPeople.map((meta) => meta.id))
+  const referenced = new Map<string, PersonaSkillMeta>()
+  for (const meta of matchedPeople) {
+    for (const ref of meta.outlineRefs) {
+      const path = resolvePersonaOutlineRef(index.projectPath, ref, index.paths)
+      if (path) referenced.set(path, meta)
+    }
+  }
+  const ownerByName = new Map(matchedPeople.flatMap((meta) =>
+    [meta.characterName, ...meta.aliases].map((name) => [name, meta] as const)))
+  const selected = new Map<string, OutlineCharacterBrief>()
+  for (const brief of index.excludedProfiles) {
+    const name = brief.relativePath.split("/").pop() ?? ""
+    const characterName = parseCharacterRoleFileName(name)?.name ?? extractNameFromHeading(name.replace(/\.md$/i, ""))
+    const owner = referenced.get(`${index.projectPath}/wiki/outlines/${brief.relativePath}`) ?? ownerByName.get(characterName)
+    if (brief.personaId || owner) selected.set(brief.relativePath, { ...brief, authorPersonaId: owner?.id })
+  }
+  // 独立小传按整份取，含未知文件夹中通过实际引用和标题确认的人物稿。
+  for (const doc of index.documents) {
+    const person = referenced.get(doc.path)
+    const names = characterAliases(doc)
+    const linkedCharacter = person && names.some((name) => [person.characterName, ...person.aliases].includes(name))
+    const selectedProfile = doc.kind === "character"
+      && (person || names.some((name) => matchingText.includes(name)) || (doc.personaId && matchedIds.has(doc.personaId)))
+    if (selectedProfile || (doc.kind === "unknown" && linkedCharacter)) {
+      const owner = person ?? names.map((name) => ownerByName.get(name)).find(Boolean)
+      selected.set(doc.relativePath, { relativePath: doc.relativePath, content: doc.content, personaId: doc.personaId, authorPersonaId: owner?.id })
+    }
+  }
+  // 混合大纲里嵌套的小传仍按人物章节选取，某人引用过整份卷纲不能让所有人物一起入选。
+  const embedded = index.segments.filter((s) => s.kind === "character" && !selected.has(s.relativePath)
+    && characterAliases(s).some((name) => matchingText.includes(name)))
+  for (const source of groupSourcesByDocument(embedded)) selected.set(source.relativePath, source)
+
+  const root = `${index.projectPath}/wiki/outlines`
+  const files = [...index.paths.filesByName.values()].flat()
+  const markdownStems = new Set(files.filter((file) => /\.md$/i.test(file.name)).map((file) => file.path.slice(0, -3)))
+  const candidates = files.filter((file) => {
+    if (!/\.html$/i.test(file.name) || markdownStems.has(file.path.slice(0, -5))) return false
+    const relative = relativeOutlinePath(root, file.path)
+    const kind = STANDARD_FOLDER_KINDS[relative.split("/")[0]]
+    if (kind && kind !== "character") return false
+    const name = parseCharacterRoleFileName(file.name.replace(/\.html$/i, ".md"))?.name
+      ?? extractNameFromHeading(file.name.replace(/\.html$/i, ""))
+    return referenced.has(file.path) || (kind === "character" && name.length >= 2 && matchingText.includes(name))
+  })
+  const htmlBriefs = await mapWithConcurrency(candidates, INDEX_READ_CONCURRENCY, async ({ path }) => {
+    const parsed = parseFrontmatter(await readFile(path).catch(() => ""))
+    const relativePath = relativeOutlinePath(root, path)
+    const html = parsed.body
+    const heading = htmlToPlainText(html.match(/<h1\b[^>]*>([\s\S]*?)<\/h1>/i)?.[1] ?? "")
+    const title = htmlToPlainText(html.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i)?.[1] ?? "")
+    const kind = STANDARD_FOLDER_KINDS[relativePath.split("/")[0]] ?? kindFromHeading(title) ?? kindFromHeading(heading)
+    const person = referenced.get(path)
+    const named = person && [person.characterName, ...person.aliases].includes(extractNameFromHeading(heading))
+    if (kind !== "character" && (kind || !named)) return null
+    if (isAiExcluded(parsed.frontmatter)) return { relativePath, content: "", authorPersonaId: person?.id, excluded: true }
+    const body = html.match(/<main\b[^>]*>([\s\S]*?)<\/main>/i)?.[1]
+      ?? html.match(/<body\b[^>]*>([\s\S]*?)<\/body>/i)?.[1]
+      ?? html
+    const content = htmlToPlainText(body)
+    return content ? { relativePath, content, authorPersonaId: person?.id } : null
+  })
+  return [...selected.values(), ...htmlBriefs.filter((brief) => brief !== null)]
+}
+
+/** 只替换本轮确实读到主档的生成小传。手写稿和缺失主档的旧投影都保留原文。 */
+export function renderCharacterBriefs(briefs: OutlineCharacterBrief[], profileFacts: ReadonlyMap<string, string>): string {
+  const remaining = new Map(profileFacts)
+  const sources = briefs.filter((brief) => !brief.excluded).map(({ relativePath, content, personaId }) => {
+    if (personaId && profileFacts.has(personaId)) {
+      content = remaining.get(personaId) ?? ""
+      remaining.delete(personaId)
+    }
+    return { kind: "character" as const, relativePath, content }
+  })
+  const blocks = uniqueSourceBlocks(sources)
+  for (const facts of remaining.values()) {
+    if (facts) blocks.push([SOURCE_START, "## 人物档案", facts, SOURCE_END].join("\n"))
+  }
+  return capOutlineSourcesToBudget(blocks.join("\n\n"), 8_000)
 }
 
 export function buildRelevantForeshadowing(index: OutlineDocumentIndex, chapterNumber: number, matchingText: string): string {

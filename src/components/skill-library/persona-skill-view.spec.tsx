@@ -157,8 +157,19 @@ async function click(element: HTMLElement | null) {
   await flushEffects()
 }
 
+async function changeProfileStatus(container: HTMLElement, choice: string) {
+  const select = container.querySelector<HTMLSelectElement>('header select[aria-label="人物状态"]')!
+  await act(async () => {
+    select.value = choice
+    select.dispatchEvent(new Event("change", { bubbles: true }))
+  })
+  await flushEffects()
+  return select
+}
+
 describe("PersonaSkillView", () => {
   beforeEach(() => {
+    useWikiStore.getState().setPersonaOutlinePane(null)
     io.files.clear()
     io.writes = 0
     learning.promoteLocal.mockClear()
@@ -193,17 +204,17 @@ describe("PersonaSkillView", () => {
     writeIndex([meta({ characterName: "沈砚", id: "沈砚", tier: "minor", roleType: "配角" })])
     const { container, root } = await renderView()
 
-    const pin = container.querySelector<HTMLButtonElement>('[data-testid="persona-skill-pin-沈砚"]')!
-    expect(pin.getAttribute("aria-pressed")).toBe("false")
+    expect(container.querySelectorAll('[data-testid="persona-skill-card-沈砚"] button')).toHaveLength(1)
+    await click(getButton(container, "打开档案")!)
+    const pin = container.querySelector<HTMLInputElement>('header [data-testid="persona-mark-important"]')!
+    expect(pin.checked).toBe(false)
 
     await click(pin)
 
     const stored = readIndex().skills[0]
     expect(stored.pinned).toBe(true)
     expect(stored.tier).toBe("major")
-    expect(
-      container.querySelector('[data-testid="persona-skill-pin-沈砚"]')!.getAttribute("aria-pressed"),
-    ).toBe("true")
+    expect(pin.checked).toBe(true)
 
     cleanup(root, container)
   })
@@ -212,7 +223,8 @@ describe("PersonaSkillView", () => {
     writeIndex([meta({ pinned: true })])
     const { container, root } = await renderView()
 
-    await click(container.querySelector('[data-testid="persona-skill-pin-林清越"]'))
+    await click(getButton(container, "打开档案")!)
+    await click(container.querySelector('header [data-testid="persona-mark-important"]'))
 
     expect(readIndex().skills[0].pinned).toBe(false)
     expect(readIndex().skills[0].tier).toBe("major") // 男主本来就是 major
@@ -383,11 +395,49 @@ describe("PersonaSkillView", () => {
       editor.dispatchEvent(new Event("input", { bubbles: true }))
     })
 
+    await waitForAutosave()
+    expect(editor.value).toContain("用户改过的内容。")
+    expect(io.files.get(docPath)).toContain("原始内容。")
     await click(container.querySelector('[data-testid="persona-raw-save"]'))
 
     expect(io.files.get(docPath)).toContain("用户改过的内容。")
     expect(readIndex().skills[0].editedByUser).toBe(true)
 
+    cleanup(root, container)
+  })
+
+  it("原文与表格共用草稿，跨页编辑保留自定义段落和清空的字段", async () => {
+    writeIndex([meta()])
+    const path = `${project}/.qmai/persona-skills/林清越/SKILL.md`
+    io.files.set(path, "# 林清越\n\n## 背景\n\n旧背景。\n")
+    const { container, root } = await renderView()
+    await click(getButton(container, "打开档案") ?? null)
+    async function edit(selector: string, text: string) {
+      await act(async () => {
+        const input = container.querySelector<HTMLTextAreaElement>(selector)!
+        Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(input, text)
+        input.dispatchEvent(new Event("input", { bubbles: true }))
+      })
+    }
+    await click(container.querySelector('[data-testid="persona-page-research"]'))
+    await edit('[data-testid="persona-skill-editor"]', io.files.get(path)! + "\n## 作者笔记\n\n留给第三卷。\n")
+    await click(container.querySelector('[data-testid="persona-page-profile"]'))
+    await edit('[data-testid="persona-field-背景"]', "")
+    await waitForAutosave()
+    expect(io.files.get(path)).toContain("留给第三卷。")
+    expect(io.files.get(path)).not.toContain("旧背景。")
+    cleanup(root, container)
+  })
+
+  it("从人物档案重开保存的 HTML 原文", async () => {
+    const ref = "人物小传/角色-男主-林清越.html"
+    const path = `${project}/wiki/outlines/${ref}`
+    writeIndex([meta({ outlineRefs: [ref] })])
+    useWikiStore.getState().setFileTree([{ path, name: "角色-男主-林清越.html", is_dir: false }])
+    const { container, root } = await renderView()
+    await click(getButton(container, "打开档案") ?? null)
+    await click(getButton(container, ref) ?? null)
+    expect(useWikiStore.getState()).toMatchObject({ selectedFile: path, activeView: "sources", personaOutlinePane: null })
     cleanup(root, container)
   })
 
@@ -489,6 +539,24 @@ describe("PersonaSkillView", () => {
     cleanup(root, container)
   })
 
+  it("列表、筛选计数和分析展示手动状态，手动归档不产生自动归档建议", async () => {
+    writeIndex([
+      meta({ id: "程澄", characterName: "程澄", status: "active", manualStatus: "archived" }),
+      meta({ id: "沈砚", characterName: "沈砚", status: "archived", manualStatus: "active" }),
+    ])
+    const { container, root } = await renderView()
+    await click(getButton(container, "归档 1")!)
+    expect(container.querySelector('[data-testid="persona-skill-card-程澄"]')?.textContent).toContain("归档")
+    expect(container.querySelector('[data-testid="persona-skill-card-沈砚"]')).toBeNull()
+    await click(container.querySelector('[data-testid="persona-skill-analysis-toggle"]'))
+    const card = container.querySelector('[data-testid="persona-skill-analysis-程澄"]')
+    expect(card?.textContent).toContain("手动设置")
+    expect(card?.textContent).not.toContain("建议归档")
+    expect(container.querySelector('[data-testid="persona-skill-analysis-沈砚"]')).toBeNull()
+    expect(io.writes).toBe(0)
+    cleanup(root, container)
+  })
+
   it("候选人物区渲染未建档人物，点「建档」走本地即时建档（不调模型）", async () => {
     io.files.set(
       `${project}/.qmai/persona-skills/sightings.json`,
@@ -515,9 +583,7 @@ describe("PersonaSkillView", () => {
     expect(candidate).not.toBeNull()
     expect(candidate!.textContent).toContain("小紫")
     expect(candidate!.textContent).toContain("出场 2 章")
-    // 反向守卫：候选区不能再出现那枚写死 is-on 的绿勾。它长得像「重要角色开关」，
-    // 实际是只能建档、没有取消分支的动作按钮 —— 用户就是因此以为「取消不掉」。
-    expect(candidate!.querySelector(".ui-test-persona-pin")).toBeNull()
+    expect(candidate!.querySelector('input[type="checkbox"]')).toBeNull()
     expect(candidate!.textContent).toContain("建档")
 
     await click(container.querySelector('[data-testid="persona-skill-promote-小紫"]'))
@@ -615,32 +681,47 @@ describe("PersonaSkillView", () => {
     cleanup(root, container)
   })
 
-  it("档案卡提供「移回候选」，确认后调用 demotePersonaSkillToSighting", async () => {
+  it("从顶栏状态菜单移入候选，确认后调用 demotePersonaSkillToSighting", async () => {
     writeIndex([meta({ id: "小紫", characterName: "小紫", appearanceCount: 2 })])
     const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true)
     const { container, root } = await renderView()
 
-    const demote = container.querySelector<HTMLButtonElement>('[data-testid="persona-skill-demote-小紫"]')
-    expect(demote).not.toBeNull()
-    expect(demote!.textContent).toContain("移回候选")
+    await click(getButton(container, "打开档案")!)
+    const select = await changeProfileStatus(container, "candidate")
 
-    await click(demote)
-
-    expect(confirmSpy).toHaveBeenCalledTimes(1)
-    expect(learning.demote).toHaveBeenCalledWith({ projectPath: project, characterName: "小紫" })
+    expect(Array.from(select.querySelectorAll(":scope > option"), (item) => item.textContent)).toEqual([
+      "自动（活跃）", "活跃", "潜伏", "归档", "候选（待建档）",
+    ])
+    expect(confirmSpy).toHaveBeenCalledWith(expect.stringContaining("可自动重新建档"))
+    expect(learning.demote).toHaveBeenCalledWith({ projectPath: project, id: "小紫" })
 
     confirmSpy.mockRestore()
     cleanup(root, container)
   })
 
+  it("档案被其他操作移走时，顶栏保留原选项并提示状态保存失败", async () => {
+    writeIndex([meta({ manualStatus: "dormant" })])
+    const { container, root } = await renderView()
+    await click(getButton(container, "打开档案")!)
+    writeIndex([])
+    const select = await changeProfileStatus(container, "archived")
+
+    expect(select.value).toBe("dormant")
+    expect(container.querySelector("header")?.textContent).toContain("状态保存失败")
+    expect(io.writes).toBe(0)
+    cleanup(root, container)
+  })
+
   it("「移回候选」在确认框被取消时一个字节都不写", async () => {
-    writeIndex([meta({ id: "小紫", characterName: "小紫" })])
+    writeIndex([meta({ id: "小紫", characterName: "小紫", manualStatus: "dormant" })])
     const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false)
     const { container, root } = await renderView()
 
-    await click(container.querySelector('[data-testid="persona-skill-demote-小紫"]'))
+    await click(getButton(container, "打开档案")!)
+    const select = await changeProfileStatus(container, "candidate")
 
     expect(learning.demote).not.toHaveBeenCalled()
+    expect(select.value).toBe("dormant")
     expect(io.writes).toBe(0)
 
     confirmSpy.mockRestore()

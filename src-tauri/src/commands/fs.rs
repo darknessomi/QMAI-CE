@@ -1329,6 +1329,39 @@ pub async fn copy_directory(source: String, destination: String) -> Result<Vec<S
         .map_err(|e| format!("copy_directory blocking task join error: {e}"))?
 }
 
+#[tauri::command]
+pub async fn move_path_if_absent(source: String, destination: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let source = std::path::PathBuf::from(resolve_project_storage_path(&source));
+        // 解析已存在的父目录，保留旧书实际使用的 wiki 路径。
+        let dest = Path::new(&destination);
+        let parent = dest.parent().and_then(Path::to_str).ok_or("缺少目标目录")?;
+        let name = dest.file_name().ok_or("缺少目标名称")?;
+        let dest = Path::new(&resolve_project_storage_path(parent)).join(name);
+        file_sync::mark_app_write_path(&source);
+        file_sync::mark_app_write_path(&dest);
+        crate::atomic_file::move_path_if_absent(&source, &dest)
+    })
+    .await
+    .map_err(|e| format!("移动失败：{e}"))?
+}
+
+#[tauri::command]
+pub async fn remove_empty_directory(path: String) -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = resolve_project_storage_path(&path);
+        file_sync::mark_app_write_path(Path::new(&path));
+        match fs::remove_dir(&path) {
+            Ok(()) => Ok(true),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(true),
+            Err(e) if e.kind() == std::io::ErrorKind::DirectoryNotEmpty => Ok(false),
+            Err(e) => Err(format!("移除空目录失败：{e}")),
+        }
+    })
+    .await
+    .map_err(|e| format!("移除空目录失败：{e}"))?
+}
+
 /// Core logic for `delete_file`, callable from both Tauri commands and Axum handlers.
 pub fn do_delete_file(path: &str) -> Result<(), String> {
     run_guarded("delete_file", || {
@@ -1707,6 +1740,27 @@ pub async fn get_file_md5(path: String) -> Result<String, String> {
 mod tests {
     use super::*;
     use std::io::Write;
+
+    #[test]
+    fn folder_commands_preserve_legacy_and_virtual_projects() {
+        tauri::async_runtime::block_on(async {
+            for layout in ["wiki", "QM"] {
+                let tmp = tempfile::tempdir().unwrap();
+                let real_root = tmp.path().join(layout).join("outlines");
+                let virtual_root = tmp.path().join("wiki").join("outlines");
+                fs::create_dir_all(real_root.join("旧")).unwrap();
+                fs::write(real_root.join("旧/.hidden"), [0, 255]).unwrap();
+                let new = virtual_root.join("新").to_str().unwrap().to_owned();
+                move_path_if_absent(virtual_root.join("旧").to_str().unwrap().to_owned(), new.clone())
+                    .await.unwrap();
+                assert_eq!(fs::read(real_root.join("新/.hidden")).unwrap(), [0, 255]);
+                assert!(!remove_empty_directory(new.clone()).await.unwrap());
+                fs::remove_file(real_root.join("新/.hidden")).unwrap();
+                assert!(remove_empty_directory(new).await.unwrap());
+                assert!(!real_root.join("新").exists());
+            }
+        });
+    }
 
     #[test]
     fn atomic_save_accepts_long_chinese_chapter_names() {

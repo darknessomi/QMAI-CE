@@ -69,7 +69,7 @@ export function PersonaCandidatePreview(props: PersonaCandidatePreviewProps) {
         <div>
           <h3>{sighting.characterName}</h3>
           <p className="ui-test-cand-sub">
-            候选角色 · 还没有档案
+            候选角色
             {sighting.aliases.length > 0 ? ` · 别名：${sighting.aliases.join("、")}` : ""}
           </p>
         </div>
@@ -144,8 +144,7 @@ export function PersonaCandidatePreview(props: PersonaCandidatePreviewProps) {
         <h5>推测</h5>
         <p className="ui-test-cand-hint">{describeGuess(sighting)}</p>
         <p className="ui-test-cand-hint" style={{ marginTop: 8 }}>
-          候选只统计出场，没有可编辑内容。建档后会移到「活跃角色」，并生成一份空白档案；
-          内容由你补，或等下一次「提取记忆」自动补齐。
+          建档后可编辑人物资料。重新建档会沿用已有的档案内容。
         </p>
       </section>
     </div>

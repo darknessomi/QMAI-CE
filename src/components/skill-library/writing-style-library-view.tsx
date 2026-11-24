@@ -1,3 +1,4 @@
+import { confirmAction } from "@/lib/confirm-action"
 import "@/components/uitest/ui-test-tools.css"
 import { useEffect, useState } from "react"
 import { useWikiStore } from "@/stores/wiki-store"
@@ -114,7 +115,7 @@ export function WritingStyleLibraryView() {
 
   async function handleDelete() {
     if (!projectPath || !preset || busy) return
-    if (!window.confirm(`确定删除文风「${preset.name}」吗？`)) return
+    if (!(await confirmAction(`确定删除文风「${preset.name}」吗？`))) return
     setBusy(true)
     try {
       const next = await removeWritingStylePreset(projectPath, preset.id)

@@ -16,6 +16,7 @@
  * - `出场组织` / `认知变化` / `关系变化` 是**累积**的，按出现顺序去重，超出上限丢最旧。
  */
 import {
+  findPersonaByName,
   loadPersonaSkillIndexStrict,
   personaSkillLockKey,
   readPersonaSkillDocument,
@@ -24,10 +25,10 @@ import {
   writePersonaSkillDocument,
 } from "./persona-skill-store"
 import { applyPersonaProfileEdits, splitPersonaSkillDocument } from "./persona-skill-profile"
+import { projectPersonaToOutline } from "./persona-projection-writer"
 import { loadMemoryCleanupPolicy, memoryRemovalKey } from "./memory-cleanup-policy"
 import {
   PERSONA_LIVE_SECTION_LIMITS,
-  normalizePersonaName,
   type PersonaSkillIndex,
 } from "./persona-skill-types"
 
@@ -318,20 +319,16 @@ export async function syncPersonaSkillChapterFacts(
         (await loadPersonaSkillIndexStrict(projectPath)) ?? { version: 1, skills: [] }
       if (index.skills.length === 0) return
 
-      const appearing = index.skills.filter((meta) =>
-        source.characters.some(
-          (name) =>
-            normalizePersonaName(name) === normalizePersonaName(meta.characterName) ||
-            meta.aliases.some((alias) => normalizePersonaName(alias) === normalizePersonaName(name)),
-        ),
-      )
+      const appearing = [...new Set(source.characters.map((name) => findPersonaByName(index.skills, name)))]
+        .filter((meta) => meta !== undefined)
       if (appearing.length === 0) return
 
       const bumped = new Set<string>()
       for (const meta of appearing) {
         const document = await readPersonaSkillDocument(projectPath, meta.id)
         if (!document.trim()) continue
-        const facts = buildPersonaChapterFacts(source, meta.characterName, meta.aliases)
+        const names = [meta.characterName, ...meta.aliases].filter((name) => findPersonaByName(index.skills, name)?.id === meta.id)
+        const facts = buildPersonaChapterFacts(source, names[0], names.slice(1))
         const parsed = splitPersonaSkillDocument(document)
         const fields: Record<string, string> = { ...parsed.fields }
 
@@ -361,6 +358,7 @@ export async function syncPersonaSkillChapterFacts(
         const next = applyPersonaProfileEdits(document, fields)
         if (next === document) continue
         await writePersonaSkillDocument(projectPath, meta.id, next)
+        await projectPersonaToOutline(projectPath, meta, next, true)
         bumped.add(meta.id)
         updated.push(meta.characterName)
       }

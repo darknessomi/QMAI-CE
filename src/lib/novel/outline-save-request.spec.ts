@@ -184,6 +184,63 @@ describe("outline-save-request", () => {
       .toBe("# 章纲-第001章\n\n正文\n")
   })
 
+  it("批量保存只回报实际落盘的来源，HTML 单存也会避开已有同名文件", async () => {
+    const base: OutlineSaveRequest = {
+      targetFolder: "人物小传", fileName: "林辰.md", fileType: "character", writeMode: "create",
+      referencedSkills: [], sourceIntent: "", content: "# 林辰", htmlContent: "<html>新小传</html>",
+    }
+    const skipped = { ...base, fileName: "跳过.md", writeMode: "replace" as const }
+    const failed = { ...base, fileName: "失败.md" }
+    const other = { ...base, fileName: "沈砚.md" }
+    const root = "C:/book/wiki/outlines"
+    const files = new Map([[`${root}/人物小传/林辰.html`, "<html>手写旧小传</html>"]])
+    const result = await saveOutlineSaveRequests({
+      outlineRoot: root, requests: [base, skipped, failed, other], formats: { md: false, html: true },
+      createDirectory: async () => {},
+      fileExists: async (path) => files.has(path),
+      writeFile: async (path, content) => {
+        if (path.endsWith("失败.html")) throw new Error("写入失败")
+        files.set(path, content)
+      },
+    })
+    expect(result.savedSources).toEqual([
+      { request: base, relativePath: "人物小传/林辰-2.html" },
+      { request: other, relativePath: "人物小传/沈砚.html" },
+    ])
+    expect(result.skipped).toHaveLength(1)
+    expect(result.errors).toHaveLength(1)
+    expect(files.get(`${root}/人物小传/林辰.html`)).toBe("<html>手写旧小传</html>")
+  })
+
+  it("同时保存同名小传时，每份内容得到独立路径与正确回执", async () => {
+    const files = new Map<string, string>()
+    const save = (content: string) => saveOutlineSaveRequests({
+      outlineRoot: "C:/book/wiki/outlines",
+      requests: [{ targetFolder: "人物小传", fileName: "林辰.md", fileType: "character", writeMode: "create",
+        referencedSkills: [], sourceIntent: "", content }],
+      createDirectory: async () => {},
+      fileExists: async (path) => files.has(path),
+      writeFile: async (path, markdown) => { files.set(path, markdown) },
+    })
+    const results = await Promise.all([save("第一份小传"), save("第二份小传")])
+    expect(results.flatMap((result) => result.savedSources.map((source) => source.relativePath)))
+      .toEqual(["人物小传/林辰.md", "人物小传/林辰-2.md"])
+    expect([...files.values()].map((value) => value.trim())).toEqual(["第一份小传", "第二份小传"])
+  })
+
+  it("只存 Markdown 时不会误配同名的独立 HTML 小传", async () => {
+    const result = await saveOutlineSaveRequests({
+      outlineRoot: "/book/wiki/outlines",
+      requests: [{ targetFolder: "自定义", fileName: "林辰.md", fileType: "character", writeMode: "create",
+        referencedSkills: [], sourceIntent: "", content: "新小传" }],
+      formats: { md: true, html: false },
+      createDirectory: async () => {},
+      fileExists: async (path) => path.endsWith("/林辰.html"),
+      writeFile: async () => {},
+    })
+    expect(result.savedSources[0].relativePath).toBe("自定义/林辰-2.md")
+  })
+
   it("append 模式必须真的追加（confirmed 下也不能覆盖已有内容）", async () => {
     /*
      * 回归点：append 的契约是「追加到文件末尾」（提示词与 AI_OUTLINE_OUTPUT_PROTOCOL.md），
@@ -358,6 +415,7 @@ describe("outline-save-request", () => {
     expect(requests[0]).toMatchObject({
       targetFolder: "人物小传",
       fileName: "角色-男主-林辰.md",
+      character: { name: "林辰", roleType: "男主" },
       fileType: "character",
       writeMode: "create",
       referencedSkills: ["JueseSkill/character-design"],

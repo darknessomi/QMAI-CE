@@ -1,4 +1,5 @@
 import { parseFrontmatter } from "@/lib/frontmatter"
+import { parsePersonaProjectionFrontmatter } from "./persona-projection"
 
 /**
  * 「选中（AI 不读取）」的唯一数据口径。
@@ -56,8 +57,7 @@ export function isAiExcluded(frontmatter: Record<string, unknown> | null | undef
  */
 export function isAiExcludedContent(content: string): boolean {
   if (!content) return false
-  const parsed = parseFrontmatter(content)
-  return isAiExcluded(parsed.frontmatter as Record<string, unknown> | null)
+  return isAiExcluded(parsePersonaProjectionFrontmatter(content).frontmatter)
 }
 
 /**

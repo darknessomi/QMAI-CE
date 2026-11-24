@@ -1,3 +1,4 @@
+import { confirmAction } from "@/lib/confirm-action"
 import type { UiTestSkin } from "@/lib/ui-test"
 import { create } from "zustand"
 import type { WikiProject, FileNode } from "@/types/wiki"
@@ -608,9 +609,8 @@ type ReviewRunFinishState = Omit<Partial<ReviewRunState>, "runId" | "projectPath
 
 const SKILL_LIBRARY_UNSAVED_CONFIRM = "当前 Skill 还有未保存修改，确定放弃修改吗？"
 
-export function confirmDiscardSkillLibraryDraft(): boolean {
-  if (typeof window === "undefined" || typeof window.confirm !== "function") return true
-  return window.confirm(SKILL_LIBRARY_UNSAVED_CONFIRM)
+export function confirmDiscardSkillLibraryDraft(): Promise<boolean> {
+  return confirmAction(SKILL_LIBRARY_UNSAVED_CONFIRM)
 }
 
 /**
@@ -618,7 +618,6 @@ export function confirmDiscardSkillLibraryDraft(): boolean {
  * 人物从技能库搬回大纲后，新建与查看都发生在中栏，不再跳整页。
  */
 export type PersonaOutlinePaneFocus =
-  | { mode: "list" }
   | { mode: "create" }
   | { mode: "persona"; id: string }
   | { mode: "candidate"; name: string }
@@ -670,8 +669,6 @@ interface WikiState {
   /** 技能库「文风 skill」当前选中的文风 id；null = 未选中。 */
   selectedWritingStyleLibraryStyleId: string | null
   personaSkillLibraryDraftDirty: boolean
-  /** 「新建人物角色」的意图标记：读一次即清，用来在大纲里开新建流程。 */
-  personaSkillCreateRequested: boolean
   /**
    * 大纲页中间栏当前是否在显示「人物」面板（null = 显示普通文档）。
    * 人物从技能库搬回大纲后，新建 / 查看档案都发生在中栏，不再跳整页。
@@ -728,11 +725,6 @@ interface WikiState {
    * 表现就是「提取完了技能库还是空的」，必须有个能看见的出口。
    */
   personaSkillLearningError: string | null
-  /**
-   * 人物 Skill 本轮学习完成后，弹出「记忆提取完成」提示用的新建/更新人物名单。
-   * null = 不显示弹窗。批量导入多章时会把人物名累加合并。
-   */
-  personaSkillCompletion: { created: string[]; updated: string[] } | null
   searchHistory: string[]
   searchTrigger: { query: string; ts: number } | null
   revisionFeedbackWindowConfig: RevisionFeedbackWindowConfig
@@ -758,7 +750,7 @@ interface WikiState {
   setProject: (project: WikiProject | null) => void
   setFileTree: (tree: FileNode[], options?: { syncPathIndex?: boolean }) => void
   setProjectPathIndexFromTree: (tree: FileNode[]) => void
-  setSelectedFile: (path: string | null) => void
+  setSelectedFile: (path: string | null) => Promise<boolean>
   setSelectedTrashItem: (item: TrashItem | null) => void
   setFileContent: (content: string) => void
   setPendingEditorHighlight: (highlight: PendingEditorHighlight | null) => void
@@ -766,17 +758,16 @@ interface WikiState {
 
   setChatExpanded: (expanded: boolean) => void
   setSearchPanelOpen: (open: boolean) => void
-  setActiveView: (view: WikiState["activeView"]) => void
+  setActiveView: (view: WikiState["activeView"]) => Promise<boolean>
   setActiveSettingsCategory: (category: SettingsCategoryId | null) => void
   setActiveModelSettingsTab: (tab: ModelSettingsTabId | null) => void
-  setSelectedSkillLibrarySkillId: (id: string | null) => void
+  setSelectedSkillLibrarySkillId: (id: string | null) => Promise<boolean>
   setSkillLibraryDraftDirty: (dirty: boolean) => void
-  setSelectedWritingSkillLibrarySkillId: (id: string | null) => void
+  setSelectedWritingSkillLibrarySkillId: (id: string | null) => Promise<boolean>
   setWritingSkillLibraryDraftDirty: (dirty: boolean) => void
   setSelectedWritingStyleLibraryStyleId: (id: string | null) => void
   setPersonaSkillLibraryDraftDirty: (dirty: boolean) => void
-  setPersonaSkillCreateRequested: (requested: boolean) => void
-  setPersonaOutlinePane: (focus: PersonaOutlinePaneFocus | null) => void
+  setPersonaOutlinePane: (focus: PersonaOutlinePaneFocus | null) => Promise<boolean>
   /** 通知所有人物视图「数据变了」。 */
   bumpPersonaDataVersion: () => void
   setSelectedReviewDimension: (dimension: string | null) => void
@@ -804,7 +795,6 @@ interface WikiState {
   setNovelConfig: (config: Partial<NovelConfig>) => void
   setCommunitySummaryError: (error: string | null) => void
   setPersonaSkillLearningError: (error: string | null) => void
-  setPersonaSkillCompletion: (payload: { created: string[]; updated: string[] } | null) => void
   setSearchHistory: (history: string[]) => void
   setSearchTrigger: (trigger: { query: string; ts: number } | null) => void
   setRevisionFeedbackWindowConfig: (revisionFeedbackWindowConfig: RevisionFeedbackWindowConfig) => void
@@ -826,7 +816,30 @@ interface WikiState {
   bumpDataVersion: () => void
 }
 
-export const useWikiStore = create<WikiState>((set) => ({
+async function applyDraftNavigation(
+  state: WikiState, needsConfirmation: boolean, patch: Partial<WikiState>,
+): Promise<boolean> {
+  if (needsConfirmation) {
+    if (!(await confirmDiscardSkillLibraryDraft())) return false
+    const current = useWikiStore.getState()
+    if (current.project?.path !== state.project?.path || current.activeView !== state.activeView
+      || current.personaOutlinePane !== state.personaOutlinePane || current.selectedFile !== state.selectedFile
+      || current.selectedSkillLibrarySkillId !== state.selectedSkillLibrarySkillId
+      || current.selectedWritingSkillLibrarySkillId !== state.selectedWritingSkillLibrarySkillId) return false
+  }
+  useWikiStore.setState(patch)
+  return true
+}
+
+export function discardProjectSkillDrafts(): Promise<boolean> {
+  const state = useWikiStore.getState()
+  return applyDraftNavigation(state,
+    state.skillLibraryDraftDirty || state.writingSkillLibraryDraftDirty || state.personaSkillLibraryDraftDirty,
+    { skillLibraryDraftDirty: false, writingSkillLibraryDraftDirty: false, personaSkillLibraryDraftDirty: false },
+  )
+}
+
+export const useWikiStore = create<WikiState>((set, get) => ({
   project: null,
   fileTree: [],
   projectPathIndex: createEmptyProjectPathIndex(),
@@ -847,7 +860,6 @@ export const useWikiStore = create<WikiState>((set) => ({
   writingSkillLibraryDraftDirty: false,
   selectedWritingStyleLibraryStyleId: null,
   personaSkillLibraryDraftDirty: false,
-  personaSkillCreateRequested: false,
   personaOutlinePane: null,
   personaDataVersion: 0,
   selectedReviewDimension: null,
@@ -875,7 +887,9 @@ export const useWikiStore = create<WikiState>((set) => ({
 
   dataVersion: 0,
 
-  setProject: (project) => set({ project }),
+  setProject: (project) => set((state) => project?.path === state.project?.path
+    ? { project }
+    : { project, personaOutlinePane: null, personaSkillLibraryDraftDirty: false }),
   setFileTree: (fileTree, options) => {
     if (options?.syncPathIndex === false) {
       set({ fileTree })
@@ -885,7 +899,12 @@ export const useWikiStore = create<WikiState>((set) => ({
   },
   setProjectPathIndexFromTree: (tree) =>
     set({ projectPathIndex: buildProjectPathIndexFromTree(tree) }),
-  setSelectedFile: (selectedFile) => set({ selectedFile, selectedTrashItem: null }),
+  setSelectedFile: (selectedFile) => {
+    const state = get()
+    return applyDraftNavigation(state, !!state.personaOutlinePane && state.personaSkillLibraryDraftDirty, {
+      selectedFile, selectedTrashItem: null, personaOutlinePane: null, personaSkillLibraryDraftDirty: false,
+    })
+  },
   setSelectedTrashItem: (selectedTrashItem) => set({ selectedTrashItem, selectedFile: null }),
   setFileContent: (fileContent) => set({ fileContent }),
   setPendingEditorHighlight: (pendingEditorHighlight) => set({ pendingEditorHighlight }),
@@ -893,72 +912,57 @@ export const useWikiStore = create<WikiState>((set) => ({
 
   setChatExpanded: (chatExpanded) => set({ chatExpanded }),
   setSearchPanelOpen: (searchPanelOpen) => set({ searchPanelOpen }),
-  setActiveView: (activeView) => set((state) => {
+  setActiveView: (activeView) => {
+    const state = get()
     if (activeView === "soul" || activeView === "bookAnalysis" || activeView === "storySimulation") {
       activeView = "wiki"
     }
-    if (
-      state.activeView === "skillLibrary"
-      && activeView !== "skillLibrary"
-      && state.skillLibraryDraftDirty
-      && !confirmDiscardSkillLibraryDraft()
-    ) {
-      return {}
-    }
-    if (
-      state.activeView === "writingSkillLibrary"
-      && activeView !== "writingSkillLibrary"
-      && state.writingSkillLibraryDraftDirty
-      && !confirmDiscardSkillLibraryDraft()
-    ) {
-      return {}
-    }
-    if (
-      state.activeView === "personaSkillLibrary"
-      && activeView !== "personaSkillLibrary"
-      && state.personaSkillLibraryDraftDirty
-      && !confirmDiscardSkillLibraryDraft()
-    ) {
-      return {}
-    }
-    return {
+    const leaving = activeView !== state.activeView
+    const dirty = leaving && (
+      (state.activeView === "skillLibrary" && state.skillLibraryDraftDirty)
+      || (state.activeView === "writingSkillLibrary" && state.writingSkillLibraryDraftDirty)
+      || ((!!state.personaOutlinePane || state.activeView === "personaSkillLibrary") && state.personaSkillLibraryDraftDirty)
+    )
+    return applyDraftNavigation(state, dirty, {
       activeView,
+      personaOutlinePane: activeView === state.activeView ? state.personaOutlinePane : null,
       skillLibraryDraftDirty: activeView === "skillLibrary" ? state.skillLibraryDraftDirty : false,
       writingSkillLibraryDraftDirty: activeView === "writingSkillLibrary"
         ? state.writingSkillLibraryDraftDirty
         : false,
-      personaSkillLibraryDraftDirty: activeView === "personaSkillLibrary"
-        ? state.personaSkillLibraryDraftDirty
-        : false,
-    }
-  }),
+      personaSkillLibraryDraftDirty: activeView === state.activeView && state.personaSkillLibraryDraftDirty,
+    })
+  },
   setActiveSettingsCategory: (activeSettingsCategory) => set({ activeSettingsCategory }),
   setActiveModelSettingsTab: (activeModelSettingsTab) => set({ activeModelSettingsTab }),
-  setSelectedSkillLibrarySkillId: (selectedSkillLibrarySkillId) => set((state) => {
-    if (state.selectedSkillLibrarySkillId === selectedSkillLibrarySkillId) return {}
-    if (state.skillLibraryDraftDirty && !confirmDiscardSkillLibraryDraft()) return {}
-    return {
+  setSelectedSkillLibrarySkillId: (selectedSkillLibrarySkillId) => {
+    const state = get()
+    if (state.selectedSkillLibrarySkillId === selectedSkillLibrarySkillId) return Promise.resolve(true)
+    return applyDraftNavigation(state, state.skillLibraryDraftDirty, {
       selectedSkillLibrarySkillId,
       skillLibraryDraftDirty: false,
-    }
-  }),
+    })
+  },
   setSkillLibraryDraftDirty: (skillLibraryDraftDirty) => set({ skillLibraryDraftDirty }),
-  setSelectedWritingSkillLibrarySkillId: (selectedWritingSkillLibrarySkillId) => set((state) => {
-    if (state.selectedWritingSkillLibrarySkillId === selectedWritingSkillLibrarySkillId) return {}
-    if (state.writingSkillLibraryDraftDirty && !confirmDiscardSkillLibraryDraft()) return {}
-    return {
+  setSelectedWritingSkillLibrarySkillId: (selectedWritingSkillLibrarySkillId) => {
+    const state = get()
+    if (state.selectedWritingSkillLibrarySkillId === selectedWritingSkillLibrarySkillId) return Promise.resolve(true)
+    return applyDraftNavigation(state, state.writingSkillLibraryDraftDirty, {
       selectedWritingSkillLibrarySkillId,
       writingSkillLibraryDraftDirty: false,
-    }
-  }),
+    })
+  },
   setWritingSkillLibraryDraftDirty: (writingSkillLibraryDraftDirty) => set({ writingSkillLibraryDraftDirty }),
   setSelectedWritingStyleLibraryStyleId: (selectedWritingStyleLibraryStyleId) =>
     set({ selectedWritingStyleLibraryStyleId }),
   setPersonaSkillLibraryDraftDirty: (personaSkillLibraryDraftDirty) =>
     set({ personaSkillLibraryDraftDirty }),
-  setPersonaSkillCreateRequested: (personaSkillCreateRequested) =>
-    set({ personaSkillCreateRequested }),
-  setPersonaOutlinePane: (personaOutlinePane) => set({ personaOutlinePane }),
+  setPersonaOutlinePane: (personaOutlinePane) => {
+    const state = get()
+    if (state.personaOutlinePane?.mode === "persona" && personaOutlinePane?.mode === "persona"
+      && state.personaOutlinePane.id === personaOutlinePane.id) return Promise.resolve(true)
+    return applyDraftNavigation(state, state.personaSkillLibraryDraftDirty, { personaOutlinePane, personaSkillLibraryDraftDirty: false })
+  },
   bumpPersonaDataVersion: () => set((state) => ({ personaDataVersion: state.personaDataVersion + 1 })),
 
   setSelectedReviewDimension: (selectedReviewDimension) => set({ selectedReviewDimension }),
@@ -1025,7 +1029,6 @@ export const useWikiStore = create<WikiState>((set) => ({
   novelConfig: { ...DEFAULT_NOVEL_CONFIG },
   communitySummaryError: null,
   personaSkillLearningError: null,
-  personaSkillCompletion: null,
   searchHistory: [],
   searchTrigger: null,
   revisionFeedbackWindowConfig: {
@@ -1094,20 +1097,6 @@ export const useWikiStore = create<WikiState>((set) => ({
   })),
   setCommunitySummaryError: (communitySummaryError) => set({ communitySummaryError }),
   setPersonaSkillLearningError: (personaSkillLearningError) => set({ personaSkillLearningError }),
-  setPersonaSkillCompletion: (payload) =>
-    set((state) => {
-      if (!payload) return { personaSkillCompletion: null }
-      const prev = state.personaSkillCompletion
-      if (!prev) return { personaSkillCompletion: payload }
-      // 批量导入多章时每章都会触发一次，人物名累加合并，避免后一章覆盖前一章。
-      const merge = (a: string[], b: string[]) => [...new Set([...a, ...b])]
-      return {
-        personaSkillCompletion: {
-          created: merge(prev.created, payload.created),
-          updated: merge(prev.updated, payload.updated),
-        },
-      }
-    }),
   setSearchHistory: (searchHistory) => set({ searchHistory }),
   setSearchTrigger: (searchTrigger) => set({ searchTrigger }),
   setRevisionFeedbackWindowConfig: (revisionFeedbackWindowConfig) => set({ revisionFeedbackWindowConfig }),

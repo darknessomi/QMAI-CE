@@ -1,3 +1,4 @@
+import { confirmAction } from "@/lib/confirm-action"
 import { useCallback, useEffect, useState, type FormEvent } from "react"
 import { AlertTriangle, FolderOpen, Loader2, Puzzle, ShieldAlert } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -482,7 +483,7 @@ export function PluginSection({ hideInstallForm = false }: PluginSectionProps = 
      * 默认保留插件私有数据：卸载经常只是重装/升级前的动作，删数据不可逆。
      * 第一期没有「同时删除数据」的勾选项，所以 deleteData 固定传 false。
      */
-    if (!window.confirm(`确定卸载「${name}」吗？插件自己的数据会保留。`)) return
+    if (!(await confirmAction(`确定卸载「${name}」吗？插件自己的数据会保留。`))) return
     setBusy({ id: plugin.id, kind: "uninstall" })
     setActionError(null)
     setRetryError(null)

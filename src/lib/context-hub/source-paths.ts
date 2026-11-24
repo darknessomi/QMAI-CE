@@ -40,6 +40,7 @@ export function classifyContextSourcePath(projectPath: string, path: string): Co
   if (relative.startsWith("wiki/memory/")) return "memory"
   if (relative.startsWith("wiki/entities/") || relative.startsWith("wiki/characters/")) return "entity"
   if (relative.startsWith("wiki/settings/") || relative === "wiki/canon.md" || relative === "wiki/writing-style.md") return "setting"
+  if (relative === ".qmai/persona-skills/index.json") return "entity"
   if (relative === ".qmai/novel/cognition-state.json") return "entity"
   if (relative === ".qmai/novel/character-states.json") return "entity"
   if (relative === ".qmai/novel/foreshadowing-tracker.json") return "memory"
@@ -85,7 +86,7 @@ export const SOURCE_DEPENDENCY_PREFIXES: Record<string, string[]> = {
   fallbackTimeline: [".qmai/novel/timeline.json", "wiki/chapters/"],
   revisionFeedback: ["wiki/chapters/", ".qmai/novel/snapshots/", ".qmai/novel/revision-feedback.json"],
   retrieval: [".qmai/retrieval/"],
-  sectionBriefing: ["wiki/outlines/", ".qmai/novel/snapshots/", ".qmai/novel/foreshadowing-tracker.json", ".qmai/novel/character-states.json", "wiki/memory/writing-progress.md"],
+  sectionBriefing: [".qmai/persona-skills/index.json", "wiki/outlines/", ".qmai/novel/snapshots/", ".qmai/novel/foreshadowing-tracker.json", ".qmai/novel/character-states.json", "wiki/memory/writing-progress.md"],
 }
 
 /** 返回某数据源的依赖路径前缀；未声明则返回空（调用方回退到 kind 聚合）。 */

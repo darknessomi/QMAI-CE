@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
-import { PROJECTION_GENERATED_BY, isGeneratedProjection, renderPersonaTableMarkdown } from "./persona-projection"
+import { parseFrontmatter } from "@/lib/frontmatter"
+import { getPersonaProjectionId, isGeneratedProjection, parsePersonaProjectionFrontmatter, PROJECTION_GENERATED_BY, renderPersonaTableMarkdown } from "./persona-projection"
 
 describe("renderPersonaTableMarkdown", () => {
   it("把档案字段投影成表格，并带 generated-from 标记", () => {
@@ -9,7 +10,7 @@ describe("renderPersonaTableMarkdown", () => {
       fields: { 性别: "男", 年龄: "二十四", 势力组织: "青云宗" },
     })
     expect(md).toContain(`generated-from: ${PROJECTION_GENERATED_BY}`)
-    expect(md).toContain("persona-id: 林清越")
+    expect(md).toContain('persona-id: "林清越"')
     expect(md).toContain("| 字段 | 内容 |")
     expect(md).toContain("| 性别 | 男 |")
   })
@@ -44,6 +45,21 @@ describe("renderPersonaTableMarkdown", () => {
   it("isGeneratedProjection 只认带标记的文件", () => {
     expect(isGeneratedProjection("---\ngenerated-from: persona-skill\n---\n")).toBe(true)
     expect(isGeneratedProjection("# 林清越\n\n用户自己写的\n")).toBe(false)
+    expect(isGeneratedProjection("# 我的写作笔记\n---\ngenerated-from: persona-skill\n---\n")).toBe(false)
+    expect(isGeneratedProjection("---\ngenerated-from: persona-skill-backup\n---\n")).toBe(false)
+  })
+
+  it.each(["007", "#7", "@Q"])("新旧投影都保留字面 ID %s 和排除标记", (id) => {
+    const md = renderPersonaTableMarkdown({
+      characterName: id, roleType: "", personaId: id, generatedAt: "2026-11-24T00:00:00Z", fields: {},
+    })
+    const legacy = md.replace(JSON.stringify(id), id).replace("---\n", "---\nai_exclude: true\n").replaceAll("\n", "\r\n")
+    expect(getPersonaProjectionId(md)).toBe(id)
+    expect(getPersonaProjectionId(legacy, parseFrontmatter(legacy))).toBe(id)
+    expect(parsePersonaProjectionFrontmatter(legacy).frontmatter?.ai_exclude).toBe("true")
+    expect(isGeneratedProjection(legacy)).toBe(true)
+    expect(getPersonaProjectionId(`# 我的笔记\n${legacy}`)).toBeUndefined()
+    expect(getPersonaProjectionId(legacy.replace("generated-from: persona-skill", "generated-from: 作者"))).toBeUndefined()
   })
 })
 

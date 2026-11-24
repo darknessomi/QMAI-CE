@@ -128,6 +128,18 @@ export async function deleteFile(path: string): Promise<void> {
   notifyProjectFileMutation({ type: "delete", path })
 }
 
+export async function movePathIfAbsent(source: string, destination: string): Promise<void> {
+  await invoke<void>("move_path_if_absent", { source, destination })
+  notifyProjectFileMutation({ type: "delete", path: source })
+  notifyProjectFileMutation({ type: "write", path: destination })
+}
+
+export async function removeEmptyDirectory(path: string): Promise<boolean> {
+  const removed = await invoke<boolean>("remove_empty_directory", { path })
+  if (removed) notifyProjectFileMutation({ type: "delete", path })
+  return removed
+}
+
 export async function createDirectory(path: string): Promise<void> {
   return invoke<void>("create_directory", { path })
 }

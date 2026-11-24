@@ -23,7 +23,7 @@ const ROLE_PATTERN = /(男主|女主|男配|女配|反派|导师|盟友|配角|�
 const NON_CHARACTER_HEADING_PATTERN =
   /^(?:人物设定|角色设定|人物小传|角色小传|人物关系|角色关系|群像|设定总览|世界观|卷纲|章纲|细纲|大纲|设定|背景|地图|力量体系|金手指|伏笔|组织|势力|时间线|剧情线|第.{1,12}卷(?:[：:].*)?)$/
 
-function extractRoleFromTrailing(text: string): string | null {
+export function extractRoleFromTrailing(text: string): string | null {
   // 支持 "张三（男主）"、"张三(男主)"、"张三 — 男主"、"张三 - 男主"、"张三 男主"
   const parenMatch = text.match(/[（(]\s*(男主|女主|男配|女配|反派|导师|盟友|配角|主角)\s*[)）]/)
   if (parenMatch) return parenMatch[1]
@@ -34,7 +34,7 @@ function extractRoleFromTrailing(text: string): string | null {
   return null
 }
 
-function extractNameFromHeading(rawTitle: string): string {
+export function extractNameFromHeading(rawTitle: string): string {
   // 去掉前缀 "角色设定"、"角色"、"人物小传" 等
   let name = rawTitle.replace(/^角色(?:设定|小传|简介)?[：:\-\s]*/, "")
   name = name.replace(/^人物(?:设定|小传|简介)?[：:\-\s]*/, "")

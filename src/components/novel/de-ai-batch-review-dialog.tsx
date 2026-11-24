@@ -1,3 +1,4 @@
+import { confirmAction } from "@/lib/confirm-action"
 import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import {
@@ -204,9 +205,9 @@ export function DeAiBatchReviewDialog({
             type="button"
             variant="outline"
             disabled={!canCancel}
-            onClick={() => {
+            onClick={async () => {
               if (!record || !chapter) return
-              if (window.confirm(`确定取消“${chapter.title}”的本次处理吗？原文不会被修改。`)) {
+              if (await confirmAction(`确定取消“${chapter.title}”的本次处理吗？原文不会被修改。`)) {
                 clearCandidateDraft(chapter.id)
                 onCancelChapter(record.task.id, chapter.id)
               }

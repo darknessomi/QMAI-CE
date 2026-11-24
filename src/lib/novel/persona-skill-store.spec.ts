@@ -57,6 +57,7 @@ vi.mock("@/commands/fs", () => ({
 
 import {
   loadPersonaSkillIndex,
+  loadPersonaSkillState,
   loadPersonaSightings,
   personaSkillDocumentPath,
   personaSkillIdFor,
@@ -69,6 +70,8 @@ import {
   readPersonaSkillResearch,
   savePersonaSkillIndex,
   savePersonaSightings,
+  setPersonaSkillPinned,
+  setPersonaSkillStatus,
   updatePersonaSkillIndex,
   updatePersonaSkillState,
   updatePersonaSightings,
@@ -286,6 +289,41 @@ describe("persona-skill-store", () => {
     expect(io.files.has(personaSkillIndexPath(projectPath))).toBe(false)
   })
 
+  it("手动分组按 ID 持久化，重复设置不写盘，恢复自动沿用最新状态", async () => {
+    const first = meta("同名", { id: "甲", status: "dormant" })
+    const second = meta("同名", { id: "乙", status: "dormant" })
+    await savePersonaSkillIndex(projectPath, { version: 1, skills: [first, second] })
+    await setPersonaSkillStatus(projectPath, "乙", "archived")
+    await setPersonaSkillPinned(projectPath, "乙", true)
+    expect((await loadPersonaSkillIndex(projectPath)).skills.map((item) => [item.id, item.status, item.manualStatus]))
+      .toEqual([["甲", "dormant", undefined], ["乙", "active", "archived"]])
+    io.writes.length = 0
+    await setPersonaSkillStatus(projectPath, "乙", "archived")
+    await expect(setPersonaSkillStatus(projectPath, "无此人", "active")).rejects.toThrow("人物档案不存在")
+    expect(io.writes).toEqual([])
+    const restored = await setPersonaSkillStatus(projectPath, "乙", null)
+    expect(restored.skills[1]).toMatchObject({ status: "active", pinned: true })
+    expect(io.files.get(personaSkillIndexPath(projectPath))).not.toContain("manualStatus")
+    await setPersonaSkillStatus(projectPath, "乙", null)
+    expect(io.writes).toEqual([personaSkillIndexPath(projectPath)])
+  })
+
+  it("移动大纲后，已有自动小传的来源指向新路径", async () => {
+    const person = meta("林清越", { outlineRefs: ["旧目录/第一卷.md"] })
+    const projection = `${projectPath}/wiki/outlines/人物小传/林清越.md`
+    await savePersonaSkillIndex(projectPath, { version: 1, skills: [person] })
+    await writePersonaSkillDocument(projectPath, person.id, "# 林清越\n\n## 背景\n\n旧城长大。")
+    io.files.set(projection, '---\ngenerated-from: persona-skill\npersona-id: 林清越\noutline-refs: ["旧目录/第一卷.md"]\n---\n')
+    await updatePersonaSkillIndex(projectPath, (index) => ({
+      ...index,
+      skills: index.skills.map((entry) => ({ ...entry, outlineRefs: ["新目录/第一卷.md"] })),
+    }))
+    const updated = io.files.get(projection)
+    expect(updated).toContain("新目录/第一卷.md")
+    expect(updated).not.toContain("旧目录/第一卷.md")
+    expect(updated).toContain("旧城长大。")
+  })
+
   it("坏 JSON 的索引拒绝写入，磁盘上的文件保持原样（不再被静默抹掉）", async () => {
     silenceWarns()
     const path = personaSkillIndexPath(projectPath)
@@ -413,6 +451,29 @@ describe("persona-skill-store", () => {
       sightings: [...sightings.sightings, sighting("路人甲")],
     }))
     expect((await loadPersonaSightings(projectPath)).sightings[0].characterName).toBe("路人甲")
+  })
+
+  it("只读打开旧书时按姓名及别名隐藏已建档候选，保留磁盘内容", async () => {
+    await savePersonaSkillIndex(projectPath, { version: 1, skills: [meta("林辰", { aliases: ["林大夫"] })] })
+    await savePersonaSightings(projectPath, { version: 1, sightings: [
+      sighting("林大夫", { aliases: ["林先生"], appearanceCount: 7, lastChapter: 12 }), sighting("白芷"),
+    ], ignored: ["船夫"] })
+    io.writes.length = 0
+    const { index, sightings } = await loadPersonaSkillState(projectPath)
+    expect(index.skills[0]).toMatchObject({ aliases: ["林大夫", "林先生"], appearanceCount: 7, lastChapter: 12 })
+    expect(sightings.sightings.map(item => item.characterName)).toEqual(["白芷"])
+    expect(sightings.ignored).toEqual(["船夫"])
+    expect(io.writes).toEqual([])
+    await updatePersonaSkillState(projectPath, () => ({}))
+    expect((await loadPersonaSkillIndex(projectPath)).skills).toEqual(index.skills)
+    expect((await loadPersonaSightings(projectPath)).sightings).toEqual(sightings.sightings)
+  })
+
+  it("候选数据损坏时拒绝以空池覆盖旧数据", async () => {
+    silenceWarns()
+    io.files.set(personaSkillSightingsPath(projectPath), "{")
+    await expect(updatePersonaSightings(projectPath, () => ({ version: 1, sightings: [] }))).rejects.toThrow()
+    expect(io.files.get(personaSkillSightingsPath(projectPath))).toBe("{")
   })
 
   it("磁盘上的 id 形如路径穿越时回落到按人名重算的 id，写入不越出 persona-skill-root", async () => {

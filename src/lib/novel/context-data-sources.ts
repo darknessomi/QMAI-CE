@@ -485,18 +485,18 @@ const cognitionTextDataSource: DataSource<string> = {
  * 本节速记数据源
  * 根据细纲筛选角色状态、伏笔和世界观约束，priority=0（最优先）
  */
-const sectionBriefingDataSource: DataSource<string> = {
+const sectionBriefingDataSource: DataSource<Awaited<ReturnType<typeof buildSectionBriefing>> | ""> = {
   name: "sectionBriefing",
   priority: 0,
-  async load(context: ContextLoadContext): Promise<string> {
-    if (!context.chapterNumber) return ""
+  async load(context) {
     const chapterOutlineContent = await readChapterOutlineContent(context.projectPath, context.chapterNumber)
-    return buildSectionBriefing(
+    const briefing = await buildSectionBriefing(
       context.projectPath,
       context.chapterNumber,
       chapterOutlineContent,
       context.task,
     )
+    return briefing.text || briefing.characterBriefs.length ? briefing : ""
   },
 }
 

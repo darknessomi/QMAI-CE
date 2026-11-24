@@ -1,3 +1,4 @@
+import { confirmAction } from "@/lib/confirm-action"
 import { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { listSnapshotHistory, loadSnapshot, restoreSnapshotHistory, syncSnapshotToMemory, type ChapterSnapshot, type SnapshotHistoryEntry } from "@/lib/novel/chapter-ingest"
@@ -164,7 +165,7 @@ export function SnapshotViewer({ projectPath, chapterNumber, onClose }: Snapshot
 
   const restoreHistory = async (entry: SnapshotHistoryEntry) => {
     if (restoring || saving) return
-    if (!window.confirm("恢复历史快照会恢复快照内容，并自动重建小说记忆。是否继续？")) return
+    if (!(await confirmAction("恢复历史快照会恢复快照内容，并自动重建小说记忆。是否继续？"))) return
     setRestoring(true)
     setSaveMessage("")
     try {

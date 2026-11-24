@@ -1,3 +1,4 @@
+import { confirmAction } from "@/lib/confirm-action"
 import { useEffect, useMemo, useState } from "react"
 import {
   createBlankProjectDeAiSkill,
@@ -128,7 +129,7 @@ export function SkillLibrarySidebarPanel() {
 
   async function handleCreateSkill() {
     if (!config || !project || saving) return
-    if (draftDirty && !confirmDiscardSkillLibraryDraft()) return
+    if (draftDirty && !(await confirmDiscardSkillLibraryDraft())) return
     if (draftDirty) setDraftDirty(false)
     const now = Date.now()
     const next = createBlankProjectDeAiSkill(config, now)
@@ -137,7 +138,7 @@ export function SkillLibrarySidebarPanel() {
 
   async function handleToggleSkill(skill: DeAiSkill, enabled: boolean) {
     if (!config || !project || saving) return
-    if (draftDirty && !confirmDiscardSkillLibraryDraft()) return
+    if (draftDirty && !(await confirmDiscardSkillLibraryDraft())) return
     if (draftDirty) setDraftDirty(false)
     const next = setDeAiSkillEnabled(config, skill.id, enabled)
     await persist(next, selectedSkillId ?? next.defaultSkillId)
@@ -332,17 +333,16 @@ export function SkillLibraryView() {
 
   async function handleSetDefault() {
     if (!config || !selectedSkill) return
-    if (draftDirty && !confirmDiscardSkillLibraryDraft()) return
+    if (draftDirty && !(await confirmDiscardSkillLibraryDraft())) return
     if (draftDirty) setDraftDirty(false)
     await persist(setDefaultDeAiSkill(config, selectedSkill.id))
   }
 
   async function handleDeleteSkill() {
     if (!config || !selectedSkill || selectedIsBuiltIn) return
-    if (draftDirty && !confirmDiscardSkillLibraryDraft()) return
-    if (draftDirty) setDraftDirty(false)
-    const confirmed = window.confirm(`确定删除「${selectedSkill.name}」吗？`)
+    const confirmed = await confirmAction(`确定删除「${selectedSkill.name}」吗？` + (draftDirty ? "\n未保存的修改会被放弃。" : ""))
     if (!confirmed) return
+    if (draftDirty) setDraftDirty(false)
     const next = deleteProjectDeAiSkill(config, selectedSkill.id)
     const nextSelected = next.defaultSkillId || getAllDeAiSkills(next)[0]?.id || ""
     await persist(next, nextSelected)
@@ -350,10 +350,9 @@ export function SkillLibraryView() {
 
   async function handleResetBuiltInSkill() {
     if (!config || !selectedSkill || !selectedIsBuiltIn || !selectedHasBuiltInOverride) return
-    if (draftDirty && !confirmDiscardSkillLibraryDraft()) return
-    if (draftDirty) setDraftDirty(false)
-    const confirmed = window.confirm(`确定将「${selectedSkill.name}」恢复为内置默认内容吗？当前项目对此技能的修改会被清除。`)
+    const confirmed = await confirmAction(`确定将「${selectedSkill.name}」恢复为内置默认内容吗？当前项目对此技能的修改会被清除。` + (draftDirty ? "\n未保存的修改会被放弃。" : ""))
     if (!confirmed) return
+    if (draftDirty) setDraftDirty(false)
     await persist(resetBuiltInDeAiSkill(config, selectedSkill.id), selectedSkill.id)
   }
 
@@ -377,7 +376,7 @@ export function SkillLibraryView() {
 
   async function handleRecreateConfig() {
     if (!project || saving) return
-    const confirmed = window.confirm("确定重新创建技能库配置吗？这会用默认内置 Skill 覆盖当前损坏的配置文件。")
+    const confirmed = await confirmAction("确定重新创建技能库配置吗？这会用默认内置 Skill 覆盖当前损坏的配置文件。")
     if (!confirmed) return
     setSaving(true)
     try {

@@ -1,3 +1,4 @@
+import { confirmAction } from "@/lib/confirm-action"
 import { useEffect, useMemo, useState } from "react"
 import { open, save } from "@tauri-apps/plugin-dialog"
 import { readFile, writeFile } from "@/commands/fs"
@@ -349,7 +350,7 @@ export function WritingSkillLibrarySidebarPanel() {
 
   async function handleSelectSkill(skillId: string) {
     if (!config || !project || saving) return
-    if (draftDirty && !confirmDiscardSkillLibraryDraft()) return
+    if (draftDirty && !(await confirmDiscardSkillLibraryDraft())) return
     if (draftDirty) setDraftDirty(false)
     const next = touchSkillUsage(config, skillId)
     await persist(next, skillId)
@@ -357,7 +358,7 @@ export function WritingSkillLibrarySidebarPanel() {
 
   async function handleCreateSkill() {
     if (!config || !project || saving) return
-    if (draftDirty && !confirmDiscardSkillLibraryDraft()) return
+    if (draftDirty && !(await confirmDiscardSkillLibraryDraft())) return
     if (draftDirty) setDraftDirty(false)
     const next = createBlankWritingSkill(config)
     if (selectedCategoryId !== "all" && selectedCategoryId !== "uncategorized") {
@@ -370,7 +371,7 @@ export function WritingSkillLibrarySidebarPanel() {
 
   async function handleImportSkill() {
     if (!config || !project || saving) return
-    if (draftDirty && !confirmDiscardSkillLibraryDraft()) return
+    if (draftDirty && !(await confirmDiscardSkillLibraryDraft())) return
     if (draftDirty) setDraftDirty(false)
     try {
       const selected = await open({
@@ -413,7 +414,7 @@ export function WritingSkillLibrarySidebarPanel() {
 
   async function handleToggleSkill(skill: UserSkill, enabled: boolean) {
     if (!config || !project || saving) return
-    if (draftDirty && !confirmDiscardSkillLibraryDraft()) return
+    if (draftDirty && !(await confirmDiscardSkillLibraryDraft())) return
     if (draftDirty) setDraftDirty(false)
     const next = setWritingSkillEnabled(config, skill.id, enabled)
     await persist(next, selectedSkillId ?? next.selectedSkillId)
@@ -447,7 +448,7 @@ export function WritingSkillLibrarySidebarPanel() {
 
   async function handleDeleteCategory(categoryId: string, categoryName: string) {
     if (!config || !project || saving) return
-    const confirmed = window.confirm(`确定删除分类「${categoryName}」吗？删除分类后，分类下的Skill将变为未分类。`)
+    const confirmed = await confirmAction(`确定删除分类「${categoryName}」吗？删除分类后，分类下的Skill将变为未分类。`)
     if (!confirmed) return
     const next = deleteSkillCategory(config, categoryId)
     if (selectedCategoryId === categoryId) {
@@ -828,17 +829,16 @@ export function WritingSkillLibraryView() {
 
   async function handleToggleEnabled(enabled: boolean) {
     if (!config || !selectedSkill || !project || saving) return
-    if (draftDirty && !confirmDiscardSkillLibraryDraft()) return
+    if (draftDirty && !(await confirmDiscardSkillLibraryDraft())) return
     if (draftDirty) setDraftDirty(false)
     await persist(setWritingSkillEnabled(config, selectedSkill.id, enabled), selectedSkill.id)
   }
 
   async function handleDeleteSkill() {
     if (!config || !selectedSkill || !project || saving) return
-    if (draftDirty && !confirmDiscardSkillLibraryDraft()) return
-    if (draftDirty) setDraftDirty(false)
-    const confirmed = window.confirm(`确定删除「${skillDisplayName(selectedSkill)}」吗？删除后无法恢复。`)
+    const confirmed = await confirmAction(`确定删除「${skillDisplayName(selectedSkill)}」吗？删除后无法恢复。` + (draftDirty ? "\n未保存的修改会被放弃。" : ""))
     if (!confirmed) return
+    if (draftDirty) setDraftDirty(false)
     const next = deleteWritingSkill(config, selectedSkill.id)
     await persist(next, next.selectedSkillId)
   }

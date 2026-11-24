@@ -1,3 +1,4 @@
+import { confirmAction } from "@/lib/confirm-action"
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import {
@@ -558,7 +559,7 @@ export function MaintenanceSection() {
       if (batch) {
         const counts = { high: 0, medium: 0, low: 0 }
         for (const { group } of entries) counts[group.confidence]++
-        const confirmed = await window.confirm(
+        const confirmed = await confirmAction(
           `将合并选中的 ${entries.length} 组候选（高 ${counts.high}、中 ${counts.medium}、低 ${counts.low}）。\n` +
           "模型会从每组现有条目中选择主条目，合并正文并更新引用。确认加入队列？",
         )

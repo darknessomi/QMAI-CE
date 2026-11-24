@@ -16,6 +16,7 @@ import { listSnapshots, loadSnapshot, type ChapterSnapshot } from "./chapter-ing
 import { buildRevisionDirectives } from "./revision-feedback"
 import { extractChapterOutlineStatus } from "./outline-quality-check"
 import { loadCognitionState, cognitionToContextText } from "./character-cognition"
+import { isGeneratedProjection } from "./persona-projection"
 import { buildPersonaSkillContext } from "./persona-skill-context"
 import { withMemoryWriteLock } from "./memory-cleanup-policy"
 import { isAuthoritativeGenerationPath, isHistoricalProjectionSnippet, novelMixedSearch } from "./search-adapter"
@@ -31,6 +32,8 @@ import {
   buildOutlineContext,
   buildOutlineContextLayers,
   type OutlineContextLayers,
+  type OutlineCharacterBrief,
+  renderCharacterBriefs,
   buildVolumeContext,
   capOutlineSourcesToBudget,
   loadOutlineDocumentIndex,
@@ -323,15 +326,19 @@ async function buildContextPackFromRawData(
   // 构建修订指令
   const revisionDirectives = buildRevisionDirectives(rawData.revisionFeedback)
   
-  // 按章纲与人物状态匹配人物 Skill。
-  const personaMatchingText = joinNonEmpty([
-    chapterGoal,
-    rawData.chapterOutline,
-    rawData.fallbackCharacterStates,
-    rawData.snapshots.characterStates,
-    rawData.cognitionText,
+  const briefing = rawData.sectionBriefing
+  const briefs: OutlineCharacterBrief[] = briefing?.characterBriefs ?? []
+  const persona = await buildPersonaSkillContext(
+    context.projectPath,
+    joinNonEmpty([context.task, chapterGoal, rawData.chapterOutline ?? ""], "\n"),
+    joinNonEmpty([characterStates, rawData.cognitionText ?? ""], "\n"),
+    briefs,
+  ).catch(() => ({ skills: "", profileFacts: new Map<string, string>() }))
+  const characterBriefs = renderCharacterBriefs(briefs, persona.profileFacts)
+  const sectionBriefing = joinNonEmpty([
+    briefing?.text ?? "",
+    characterBriefs ? `### 相关人物小传\n${characterBriefs}` : "",
   ], "\n\n")
-  const personaSkillContext = await buildPersonaSkillContext(context.projectPath, personaMatchingText).catch(() => "")
 
   return {
     task: context.task,
@@ -359,8 +366,8 @@ async function buildContextPackFromRawData(
     recentSummaries,
     previousChapterEnding,
     characterStates,
-    sectionBriefing: rawData.sectionBriefing || "",
-    ...(personaSkillContext ? { personaSkills: personaSkillContext } : {}),
+    sectionBriefing,
+    ...(persona.skills ? { personaSkills: persona.skills } : {}),
     cognitionStates: rawData.cognitionText,
     foreshadowingStates,
     timeline,
@@ -1023,6 +1030,7 @@ export async function searchGraphRelevantContent(
           seenIds.add(node.id)
           try {
             const content = await readFile(node.path)
+            if (isAiExcludedContent(content) || isGeneratedProjection(content)) continue
             scoredNodes.push({
               title: node.title,
               snippet: content.slice(0, 300).replace(/\n/g, " "),

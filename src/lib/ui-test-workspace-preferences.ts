@@ -33,7 +33,7 @@ export async function restoreUiTestWorkspace(project: WikiProject, saved = readU
   const path = getUiTestDocumentPath(project.path, saved.files?.[view], view)
   const exists = path ? await fileExists(path).catch(() => false) : false
   if (!current()) return
-  useWikiStore.getState().setActiveView(view)
+  if (!(await useWikiStore.getState().setActiveView(view)) || !current()) return
   if (exists) useWikiStore.getState().setSelectedFile(path)
   const assistant = saved.assistant?.[view]
   if (typeof assistant === "boolean") useWikiStore.getState().setChatExpanded(assistant)

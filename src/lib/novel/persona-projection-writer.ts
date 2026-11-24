@@ -1,45 +1,50 @@
-/**
- * 把人物档案投影成 `wiki/outlines/人物小传/<名>.md`（IO 层）。
- *
- * 为什么单独一个文件而不留在 persona-outline-sync：
- * 「建档」和「保存大纲时抓人」两条路都必须产出投影，而 sync 依赖 learning
- * （要用 createPersonaSkillByUser）。若 learning 反过来 import sync，就成了循环依赖。
- * 所以把这段唯一的写盘逻辑提出来，两边都依赖它，谁也不再依赖谁。
- *
- * 单向投影：只读档案、只写投影，永不反向解析用户改动（理由见 persona-projection.ts）。
- */
 import { createDirectory, fileExists, readFile, writeFileAtomic } from "@/commands/fs"
-import { isGeneratedProjection, renderPersonaTableMarkdown } from "./persona-projection"
-import { splitPersonaSkillDocument } from "./persona-skill-profile"
-import { loadPersonaSkillIndex, readPersonaSkillDocument } from "./persona-skill-store"
+import { isAiExcluded, setAiExcluded } from "./ai-exclude"
+import { getPersonaProjectionId, parsePersonaProjectionFrontmatter, renderPersonaTableMarkdown } from "./persona-projection"
+import { readPersonaDocumentFields } from "./persona-skill-profile"
+import type { PersonaSkillMeta } from "./persona-skill-types"
 
-/** 人物小传投影所在的文件夹（与 DEFAULT_OUTLINE_FOLDERS 的 characters 同名）。 */
 export const PERSONA_PROJECTION_FOLDER = "人物小传"
 
-/**
- * 生成/更新投影文件。
- *
- * 覆盖规则：只有文件不存在、或文件带 generated-from 标记时才写。
- * 用户手写过的同名文件永不覆盖 —— 一次建档就吃掉用户正文是不可接受的。
- */
-export async function projectPersonaToOutline(pp: string, id: string): Promise<void> {
-  const meta = (await loadPersonaSkillIndex(pp)).skills.find((item) => item.id === id)
-  if (!meta) return
-  const fields = splitPersonaSkillDocument(await readPersonaSkillDocument(pp, id)).fields
+/** 调用方持有人物锁，使用本次保存的档案版本。只更新本角色自有的投影。 */
+export async function projectPersonaToOutline(
+  pp: string,
+  meta: PersonaSkillMeta,
+  document: string,
+  onlyExisting = false,
+): Promise<void> {
+  try {
+    await writeProjection(pp, meta, document, onlyExisting)
+  } catch (error) {
+    console.warn(`人物「${meta.characterName}」的大纲投影未同步`, error)
+  }
+}
+
+async function writeProjection(pp: string, meta: PersonaSkillMeta, document: string, onlyExisting: boolean): Promise<void> {
   const dir = `${pp}/wiki/outlines/${PERSONA_PROJECTION_FOLDER}`
-  const target = `${dir}/${meta.characterName}.md`
+  // 保留带空格的既有文件名。不能直接作为文件名的人名回退到已校验的档案 ID。
+  const fileName = /[\\/:*?"<>|\p{Cc}]/u.test(meta.characterName) ? meta.id : meta.characterName
+  const target = `${dir}/${fileName}.md`
+  let previous = ""
+  let excluded = false
   if (await fileExists(target)) {
-    if (!isGeneratedProjection(await readFile(target))) return
+    previous = await readFile(target)
+    const parsed = parsePersonaProjectionFrontmatter(previous)
+    if (getPersonaProjectionId(previous, parsed) !== meta.id) return
+    excluded = isAiExcluded(parsed.frontmatter)
   } else {
+    if (onlyExisting) return
     await createDirectory(dir)
   }
-  await writeFileAtomic(target, renderPersonaTableMarkdown({
+
+  let next = renderPersonaTableMarkdown({
     characterName: meta.characterName,
     roleType: meta.roleType,
     personaId: meta.id,
-    generatedAt: new Date().toISOString(),
-    fields,
-    // 反向引用跟着投影一起出去：从人物小传那份 MD 就能看到它被哪些大纲引用。
+    generatedAt: meta.updatedAt,
+    fields: readPersonaDocumentFields(document),
     outlineRefs: meta.outlineRefs,
-  }))
+  })
+  if (excluded) next = setAiExcluded(next, true)
+  if (next !== previous) await writeFileAtomic(target, next)
 }
