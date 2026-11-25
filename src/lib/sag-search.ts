@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core"
-import { listDirectory } from "@/commands/fs"
+import { fileExists, listDirectory } from "@/commands/fs"
 import { getJevConfig } from "@/lib/jev-config"
 import { normalizePath } from "@/lib/path-utils"
 import { parsePersonaProjectionFrontmatter } from "@/lib/novel/persona-projection"
@@ -65,16 +65,23 @@ export function eligibleChapterNumber(path: string, content: string, beforeChapt
   return Number.isInteger(number) && number > 0 && number < beforeChapter ? number : null
 }
 
-async function listSagFiles(projectPath: string, beforeChapter?: number): Promise<string[]> {
+async function listSagFiles(projectPath: string, beforeChapter?: number, includePages = false): Promise<string[]> {
   if (beforeChapter !== undefined && beforeChapter <= 1) return []
   const root = normalizePath(projectPath).replace(/\/+$/, "")
   const directory = beforeChapter === undefined ? `${root}/wiki` : `${root}/wiki/chapters`
-  return markdownFiles(await listDirectory(directory)).map(file => file.path)
+  let files = markdownFiles(await listDirectory(directory))
+  if (includePages && beforeChapter !== undefined) {
+    for (const kind of ["entities", "concepts"]) {
+      const folder = `${root}/wiki/${kind}`
+      if (await fileExists(folder)) files = files.concat(markdownFiles(await listDirectory(folder)))
+    }
+  }
+  return files.map(file => file.path)
 }
 
-export async function prepareSagChapterScope(projectPath: string, beforeChapter: number, signal?: AbortSignal) {
+export async function prepareSagChapterScope(projectPath: string, beforeChapter: number, signal?: AbortSignal, includePages = false) {
   signal?.throwIfAborted()
-  const files = await listSagFiles(projectPath, beforeChapter)
+  const files = await listSagFiles(projectPath, beforeChapter, includePages)
   signal?.throwIfAborted()
   const result = files.length
     ? await invoke<{ fingerprint: string; chapters: { path: string; chapterNumber: number }[] }>("sag_scope_fingerprint", { projectPath, files, beforeChapter })

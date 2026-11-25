@@ -11,6 +11,7 @@ vi.mock("../sag-search", async importOriginal => ({
 }))
 
 vi.mock("@/commands/fs", () => ({
+  fileExists: vi.fn(async () => false),
   readFile: vi.fn(),
   listDirectory: vi.fn(async () => []),
 }))

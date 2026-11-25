@@ -580,6 +580,79 @@ async fn sag_dedup_bridge() {
 }
 
 #[test]
+fn writing_pages_require_all_chapter_sources_even_with_a_warm_general_index() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().canonicalize().unwrap();
+    let project = root.to_str().unwrap();
+    let chapter = |n, status, excluded| {
+        put(&root, &format!("QM/chapters/第{n}章.md"),
+        &format!("---\nchapter_status: {status}\nchapter_number: {n}\nai_exclude: {excluded}\n---\n正文记录。"))
+    };
+    let page = |file, header| {
+        put(
+            &root,
+            file,
+            &format!("---\n{header}\n---\n渡口凭证由守卫签发。"),
+        )
+    };
+    let first = chapter(1, "final", false);
+    let entity = page(
+        "QM/entities/守卫.md",
+        "source_sequence: 1\nsources: ['001.snapshot.json']",
+    );
+    let concept = page("QM/concepts/通行证.md", "sources: ['001.snapshot.json']");
+    let files = vec![
+        entity.clone(),
+        concept.clone(),
+        page(
+            "QM/entities/混有未来.md",
+            "source_sequence: 1\nsources: ['001.snapshot.json', '005.snapshot.json']",
+        ),
+        page(
+            "QM/entities/混有禁读.md",
+            "snapshot_id: chapter-1-r1\nsources: ['003.snapshot.json']",
+        ),
+        page("QM/concepts/来自草稿.md", "source_sequence: 2"),
+        page("QM/concepts/未知.md", "type: concept"),
+        page(
+            "QM/entities/规划.md",
+            "source_type: outline\nsource_sequence: 1",
+        ),
+        page(
+            "QM/entities/历史.md",
+            "is_historical: true\nsource_sequence: 1",
+        ),
+        page(
+            "QM/entities/禁读.md",
+            "ai_exclude: true\nsource_sequence: 1",
+        ),
+        first.clone(),
+        chapter(2, "draft", false),
+        chapter(3, "final", true),
+        chapter(5, "final", false),
+    ];
+    let token = CancellationToken::new();
+    drop(store::Store::open(project, files.clone(), None, &token).unwrap());
+    let scope = store::fingerprint(project, files.clone(), Some(5)).unwrap();
+    assert_eq!(scope.chapters.len(), 1);
+    let store = store::Store::open(project, files, Some(5), &token).unwrap();
+    assert_eq!(scope.fingerprint, store.fingerprint());
+    let hits = store
+        .candidates(&text::match_query("渡口凭证"), None, &[], 50)
+        .unwrap();
+    let paths: std::collections::HashSet<_> = hits.iter().map(|hit| hit.path.clone()).collect();
+    assert_eq!(paths, [entity, concept].into_iter().collect());
+    store.verify(&hits, &token).unwrap();
+    assert!(!store
+        .quotations(hits.clone(), 5, &token)
+        .unwrap()
+        .is_empty());
+    fs::write(first, "---\nai_exclude: true\n---\n正文记录。").unwrap();
+    assert!(store.verify(&hits, &token).is_err());
+    assert!(store.quotations(hits, 5, &token).is_err());
+}
+
+#[test]
 fn legacy_preambles_and_quoted_metadata_cannot_bypass_scope() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path().canonicalize().unwrap();

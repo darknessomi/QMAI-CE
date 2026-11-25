@@ -45,7 +45,9 @@ beforeEach(async () => {
     const fingerprint = createHash("sha256").update(JSON.stringify(rows)).digest("hex")
     if (name === "sag_scope_fingerprint") return { fingerprint, chapters: [{ path: chapter, chapterNumber: 1 }] }
     expect(args.scopeFingerprint).toBe(fingerprint)
-    return [{ path: chapter, title: "渡口", content: rows[0]![1]!.split("\n").at(-1), startLine: 5, endLine: 5, score: 1 }]
+    return rows.map(([path, text]) => ({
+      path, title: "渡口", content: text!.split("\n").at(-1), startLine: 5, endLine: 5, score: 1,
+    }))
   })
   vi.mocked(streamChat).mockReset().mockImplementation(async (_config, messages, callbacks) => {
     const prompt = JSON.stringify(messages)
@@ -106,6 +108,25 @@ describe("MCP 写作实际组包与模型输入", () => {
     const modelCalls = vi.mocked(streamChat).mock.calls.map(([, messages]) => JSON.stringify(messages))
     expect(modelCalls.some(text => text.includes(anchor) && text.includes(quote) && text.includes("正文"))).toBe(true)
     expect(searchCalls()).toHaveLength(1)
+  })
+
+  it("普通写作将实体和概念送入 SAG2，相关引文进入最终提示词，大纲单独读取", async () => {
+    setupModel(false)
+    const entity = book.path + "/wiki/entities/守卫.md"
+    const concept = book.path + "/wiki/concepts/凭证.md"
+    const outline = book.path + "/wiki/outlines/第5章.md"
+    await writeFileRaw(entity, "---\nsource_sequence: 1\n---\n守卫负责渡口交接。")
+    await writeFileRaw(concept, "---\nsources: ['001.snapshot.json']\n---\n凭证上盖有蓝色印章。")
+    await writeFileRaw(outline, "# 第5章\n下一章计划")
+    const run = vi.spyOn(AgentRunner.prototype, "run").mockResolvedValue({ finalText: "已写完", toolCalls: [], roundsUsed: 1 })
+    await writeViaMcp()
+    expect(searchCalls()).toHaveLength(1)
+    const files = (searchCalls()[0]![1] as { files: string[] }).files
+    expect(files).toEqual(expect.arrayContaining([chapter, entity, concept]))
+    expect(files).not.toContain(outline)
+    const prompt = JSON.stringify(run.mock.calls[0]![2])
+    expect(prompt).toContain("守卫负责渡口交接。")
+    expect(prompt).toContain("凭证上盖有蓝色印章。")
   })
 
   it("同章交接期间发生等长修改就重新检索，新证据覆盖旧引文", async () => {

@@ -162,7 +162,7 @@ export async function buildContextPack(
   let scope: Awaited<ReturnType<typeof prepareSagChapterScope>> | undefined
   let failure = jev.error
   try {
-    scope = await prepareSagChapterScope(pp, beforeChapter, options?.signal)
+    scope = await prepareSagChapterScope(pp, beforeChapter, options?.signal, Boolean(jev.config && wantsSearch))
   } catch (error) {
     options?.signal?.throwIfAborted()
     failure ??= error instanceof Error ? error.message : String(error)

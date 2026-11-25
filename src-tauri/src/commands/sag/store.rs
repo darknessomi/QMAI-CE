@@ -82,6 +82,7 @@ impl Source {
 pub(super) struct Store {
     db: Connection,
     sources: HashMap<String, Source>,
+    writing: WritingScope,
     pub corpus: Corpus,
     documents: usize,
     average_tokens: f64,
@@ -138,6 +139,15 @@ fn body<'a>(
     chapter: Option<u64>,
     name: &str,
 ) -> Option<(&'a str, usize, Option<u64>)> {
+    body_if(source, chapter, name, |_| true)
+}
+
+fn body_if<'a>(
+    source: &'a str,
+    chapter: Option<u64>,
+    name: &str,
+    accept: impl FnOnce(&Value) -> bool,
+) -> Option<(&'a str, usize, Option<u64>)> {
     let source = source.strip_prefix('\u{feff}').unwrap_or(source);
     let ordinary = chapter.is_none().then_some((source, 0, None));
     // The editor also accepts a short preamble (e.g. a legacy fenced YAML
@@ -178,6 +188,9 @@ fn body<'a>(
             "1" | "true" | "y" | "yes" | "on"
         ) || fields["ai_exclude"].as_f64() == Some(1.0)
         {
+            return None;
+        }
+        if !accept(&fields) {
             return None;
         }
         let mut chapter_number = None;
@@ -272,8 +285,11 @@ fn document_paths(
     );
     if chapter.is_some() {
         ensure!(
-            parts.next().is_some_and(|v| v.as_os_str() == "chapters"),
-            "写作检索只支持正文目录"
+            matches!(
+                parts.next().and_then(|v| v.as_os_str().to_str()),
+                Some("chapters" | "entities" | "concepts")
+            ),
+            "写作检索仅支持正文、实体和概念目录"
         );
     }
     ensure!(text::is_markdown(&path), "检索仅支持 Markdown 资料");
@@ -287,6 +303,120 @@ fn document_paths(
         "检索文件不能使用符号链接或父级路径"
     );
     Ok((lexical, path))
+}
+
+// Collect readable chapters first, regardless of the order supplied by the WebView.
+fn ordered_files(
+    project: &str,
+    root: &Path,
+    mut files: Vec<String>,
+    chapter: Option<u64>,
+) -> Vec<String> {
+    if chapter.is_some() {
+        files.sort_by_key(|input| {
+            let path = Path::new(input);
+            let relative = path
+                .strip_prefix(project)
+                .or_else(|_| path.strip_prefix(root))
+                .ok();
+            !relative
+                .is_some_and(|p| p.starts_with("QM/chapters") || p.starts_with("wiki/chapters"))
+        });
+    }
+    files
+}
+
+#[derive(Default)]
+struct WritingScope {
+    chapters: HashMap<u64, String>,
+    page_sources: HashMap<String, Vec<u64>>,
+}
+
+impl WritingScope {
+    fn body<'a>(
+        &mut self,
+        source: &'a str,
+        bound: Option<u64>,
+        title: &str,
+        relative: &Path,
+        input: &str,
+    ) -> Option<(&'a str, usize, Option<u64>)> {
+        if bound.is_none()
+            || relative.starts_with("QM/chapters")
+            || relative.starts_with("wiki/chapters")
+        {
+            let result = body(source, bound, title)?;
+            if let Some(n) = result.2 {
+                self.chapters.insert(n, input.to_owned());
+            }
+            return Some(result);
+        }
+        if relative
+            .components()
+            .any(|part| part.as_os_str() == "history")
+        {
+            return None;
+        }
+        let mut numbers = Vec::new();
+        let result = body_if(source, None, title, |fields| {
+            let Some(refs) = page_chapters(fields) else {
+                return false;
+            };
+            if !refs.iter().all(|n| self.chapters.contains_key(n)) {
+                return false;
+            }
+            numbers = refs;
+            true
+        })?;
+        // A plain Markdown page without provenance can serve project search, but
+        // cannot establish what the writer could know at a given chapter.
+        if numbers.is_empty() {
+            return None;
+        }
+        self.page_sources.insert(input.to_owned(), numbers);
+        Some(result)
+    }
+}
+
+fn page_chapters(fields: &Value) -> Option<Vec<u64>> {
+    if !matches!(&fields["source_type"], Value::Null)
+        && fields["source_type"].as_str() != Some("chapter")
+    {
+        return None;
+    }
+    match &fields["is_historical"] {
+        Value::Null | Value::Bool(false) => {}
+        Value::String(s) if s.eq_ignore_ascii_case("false") => {}
+        _ => return None,
+    }
+    let mut refs = Vec::new();
+    for key in ["source_sequence", "chapter_number"] {
+        if !fields[key].is_null() {
+            refs.push(
+                fields[key]
+                    .as_u64()
+                    .or_else(|| fields[key].as_str()?.parse().ok())?,
+            );
+        }
+    }
+    if !fields["snapshot_id"].is_null() {
+        let id = fields["snapshot_id"].as_str()?.strip_prefix("chapter-")?;
+        let number = id.split_once("-r").map_or(id, |(n, _)| n);
+        refs.push(number.parse().ok()?);
+    }
+    if !fields["sources"].is_null() {
+        for item in fields["sources"].as_sequence()? {
+            refs.push(
+                item.as_str()?
+                    .strip_suffix(".snapshot.json")?
+                    .parse()
+                    .ok()?,
+            );
+        }
+    }
+    refs.sort_unstable();
+    refs.dedup();
+    Some(refs)
 }
 
 fn signature(sources: &HashMap<String, Source>) -> String {
@@ -326,7 +456,8 @@ pub(super) fn fingerprint(
     let mut chapters = Vec::new();
     let mut sources = HashMap::new();
     let mut seen = HashSet::new();
-    for input in files {
+    let mut writing = WritingScope::default();
+    for input in ordered_files(project, &root, files, chapter) {
         let (requested_path, path) = document_paths(project, &root, &input, chapter)?;
         if !seen.insert(path.clone()) {
             continue;
@@ -336,7 +467,9 @@ pub(super) fn fingerprint(
             .file_stem()
             .and_then(|s| s.to_str())
             .context("文件名无效")?;
-        if let Some((_, _, number)) = body(&content, chapter, title) {
+        if let Some((_, _, number)) =
+            writing.body(&content, chapter, title, path.strip_prefix(&root)?, &input)
+        {
             if let Some(chapter_number) = number {
                 chapters.push(ScopedChapter {
                     path: input.clone(),
@@ -395,7 +528,8 @@ impl Store {
                 purge(&tx, &key)?;
             }
         }
-        for input in files {
+        let mut writing = WritingScope::default();
+        for input in ordered_files(project, &root, files, chapter) {
             check_cancel(cancel)?;
             let (lexical, path) = document_paths(project, &root, &input, chapter)?;
             let relative = path.strip_prefix(&root)?;
@@ -409,7 +543,9 @@ impl Store {
                 .to_owned();
             let source = read_source(&path)?;
             let key = relative.to_str().context("文件路径编码无效")?;
-            let Some((document_body, line_offset, _)) = body(&source, chapter, &title) else {
+            let Some((document_body, line_offset, _)) =
+                writing.body(&source, chapter, &title, relative, &input)
+            else {
                 // A draft or future chapter can remain a valid general-search document.
                 // A source now marked AI-excluded must be removed even from the persisted index.
                 if chapter.is_none() || body(&source, None, &title).is_none() {
@@ -490,6 +626,7 @@ impl Store {
         Ok(Self {
             db,
             sources,
+            writing,
             corpus: Corpus::new(&titles)?,
             documents,
             average_tokens,
@@ -513,6 +650,15 @@ impl Store {
                 .get(&c.path)
                 .context("片段超出请求的文件范围")?;
             src.verify()?;
+            if let Some(numbers) = self.writing.page_sources.get(&c.path) {
+                for n in numbers {
+                    let path = &self.writing.chapters[n];
+                    if seen.insert(path) {
+                        check_cancel(cancel)?;
+                        self.sources[path].verify()?;
+                    }
+                }
+            }
         }
         check_cancel(cancel)
     }
@@ -528,6 +674,7 @@ impl Store {
         let mut results = Vec::new();
         let mut seen = HashSet::new();
         let mut contents = HashMap::new();
+        self.verify(&ranked, cancel)?;
         for hit in ranked {
             check_cancel(cancel)?;
             let source = self.sources.get(&hit.path).context("证据超出检索范围")?;
