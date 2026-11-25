@@ -401,7 +401,7 @@ describe("writePatchFieldsToWiki", () => {
     ).toBe(false)
   })
 
-  it("实体页面保留 writeSnapshotToWiki 写入的关系链接，buildWikiGraph 可继续解析", async () => {
+  it("实体页面保留 writeSnapshotToWiki 写入的关系链接", async () => {
     const existingPage = `---
 type: entity
 title: "林烬"

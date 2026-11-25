@@ -996,28 +996,20 @@ function normalizeNovelConfig(
 ): NovelConfig | null {
   if (!config) return null
   return {
-    contextTokenBudget: 0,
     recentSummaryWindow: Math.max(1, Math.min(30, config.recentSummaryWindow ?? DEFAULT_NOVEL_CONFIG.recentSummaryWindow)),
     searchTopK: Math.max(1, Math.min(20, config.searchTopK ?? DEFAULT_NOVEL_CONFIG.searchTopK)),
     chapterTargetChars: Math.max(
       CHAPTER_TARGET_CHARS_MIN,
       Math.min(CHAPTER_TARGET_CHARS_MAX, config.chapterTargetChars ?? DEFAULT_NOVEL_CONFIG.chapterTargetChars),
     ),
-    autoExtractOnImport: config.autoExtractOnImport ?? DEFAULT_NOVEL_CONFIG.autoExtractOnImport,
     deepPreviousChaptersAnalysis: config.deepPreviousChaptersAnalysis ?? DEFAULT_NOVEL_CONFIG.deepPreviousChaptersAnalysis,
     writingWebSearchEnabled: config.writingWebSearchEnabled ?? DEFAULT_NOVEL_CONFIG.writingWebSearchEnabled,
     reviewReasoningEffort: config.reviewReasoningEffort ?? DEFAULT_NOVEL_CONFIG.reviewReasoningEffort,
     defaultLlmModel: config.defaultLlmModel ?? DEFAULT_NOVEL_CONFIG.defaultLlmModel,
-    writingModel: config.writingModel ?? DEFAULT_NOVEL_CONFIG.writingModel,
     reviewModel: config.reviewModel ?? DEFAULT_NOVEL_CONFIG.reviewModel,
-    summaryModel: config.summaryModel ?? DEFAULT_NOVEL_CONFIG.summaryModel,
     extractModel: config.extractModel ?? DEFAULT_NOVEL_CONFIG.extractModel,
     deAiModel: config.deAiModel ?? DEFAULT_NOVEL_CONFIG.deAiModel,
     deAiBatchConcurrency: Math.max(1, Math.min(5, Math.floor(config.deAiBatchConcurrency ?? DEFAULT_NOVEL_CONFIG.deAiBatchConcurrency))),
-    communitySummaryEnabled: config.communitySummaryEnabled ?? DEFAULT_NOVEL_CONFIG.communitySummaryEnabled,
-    communitySummaryInterval: Math.max(1, Math.min(50, config.communitySummaryInterval ?? DEFAULT_NOVEL_CONFIG.communitySummaryInterval)),
-    communitySummaryAsync: config.communitySummaryAsync ?? DEFAULT_NOVEL_CONFIG.communitySummaryAsync,
-    autoGenerateChapterTitle: config.autoGenerateChapterTitle ?? DEFAULT_NOVEL_CONFIG.autoGenerateChapterTitle,
     draftMemoryHintEnabled: config.draftMemoryHintEnabled ?? DEFAULT_NOVEL_CONFIG.draftMemoryHintEnabled,
     draftMemoryHintSeen: config.draftMemoryHintSeen ?? DEFAULT_NOVEL_CONFIG.draftMemoryHintSeen,
     inspirationHintEnabled: config.inspirationHintEnabled ?? DEFAULT_NOVEL_CONFIG.inspirationHintEnabled,

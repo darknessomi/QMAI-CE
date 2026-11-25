@@ -19,7 +19,7 @@ function savedModel(id: string, name: string, model: string) {
 const baseLlmConfig: LlmConfig = {
   provider: "claude-code",
   apiKey: "",
-  model: "claude-sonnet",
+  model: "sonnet",
   ollamaUrl: "http://localhost:11434",
   customEndpoint: "",
   maxContextSize: 204800,
@@ -45,33 +45,25 @@ const dualProviderConfigs: ProviderConfigs = {
 }
 
 const cliProviderConfigs: ProviderConfigs = {
-  "claude-code-cli": {
+  "codex-cli": {
     enabled: true,
-    savedModels: [savedModel("3", "Claude Sonnet", "claude-sonnet-4")],
+    savedModels: [savedModel("3", "GPT-6.2 Sol", "gpt-6.2-sol")],
   },
 }
 
 const storeState = vi.hoisted(() => {
   const novelConfig: NovelConfig = {
-    contextTokenBudget: 0,
     recentSummaryWindow: 8,
     searchTopK: 5,
     chapterTargetChars: 3000,
-    autoExtractOnImport: true,
     deepPreviousChaptersAnalysis: false,
     writingWebSearchEnabled: true,
     reviewReasoningEffort: "high",
     defaultLlmModel: "",
-    writingModel: "",
     reviewModel: "",
-    summaryModel: "",
     extractModel: "",
     deAiModel: "",
     deAiBatchConcurrency: 3,
-    communitySummaryEnabled: true,
-    communitySummaryInterval: 5,
-    communitySummaryAsync: true,
-    autoGenerateChapterTitle: true,
     draftMemoryHintEnabled: true,
     draftMemoryHintSeen: false,
     inspirationHintEnabled: true,
@@ -82,7 +74,7 @@ const storeState = vi.hoisted(() => {
     llmConfig: {
       provider: "claude-code" as const,
       apiKey: "",
-      model: "claude-sonnet",
+      model: "sonnet",
       ollamaUrl: "http://localhost:11434",
       customEndpoint: "",
       maxContextSize: 204800,
@@ -148,12 +140,12 @@ describe("resolveDefaultModel", () => {
     storeState.llmConfig = { ...baseLlmConfig }
     storeState.providerConfigs = { ...cliProviderConfigs }
     storeState.novelConfig.defaultLlmModel = "nonexistent/stale-model"
-    storeState.aiChatModel = "claude-code-cli/claude-sonnet-4"
+    storeState.aiChatModel = "codex-cli/gpt-6.2-sol"
 
     const cfg = resolveDefaultModel(storeState.llmConfig)
 
-    expect(cfg.provider).toBe("claude-code")
-    expect(cfg.model).toBe("claude-sonnet-4")
+    expect(cfg.provider).toBe("codex-cli")
+    expect(cfg.model).toBe("gpt-6.2-sol")
     expect(hasUsableLlm(cfg, cliProviderConfigs)).toBe(true)
   })
 
@@ -188,7 +180,6 @@ describe("resolveNovelModel", () => {
       ...storeState.novelConfig,
       defaultLlmModel: "",
       reviewModel: "",
-      summaryModel: "",
       extractModel: "",
     }
   })

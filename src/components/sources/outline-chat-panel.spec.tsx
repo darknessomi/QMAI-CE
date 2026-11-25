@@ -2496,18 +2496,17 @@ describe("OutlineChatPanel controls", () => {
     useWikiStore.setState({
       aiChatModel: "openai/gpt-4o",
       aiOutlineModel: "openai/gpt-4o",
-      defaultLlmModel: "anthropic/claude-sonnet",
-      novelConfig: { ...useWikiStore.getState().novelConfig, defaultLlmModel: "anthropic/claude-sonnet" },
+      defaultLlmModel: "codex-cli/gpt-6.2-sol",
+      novelConfig: { ...useWikiStore.getState().novelConfig, defaultLlmModel: "codex-cli/gpt-6.2-sol" },
       providerConfigs: {
         openai: {
           apiKey: "old-key",
           enabled: false,
           savedModels: [{ id: "gpt-4o", model: "gpt-4o", name: "GPT-4o", createdAt: 1 }],
         },
-        anthropic: {
-          apiKey: "test-key",
+        "codex-cli": {
           enabled: true,
-          savedModels: [{ id: "claude-sonnet", model: "claude-sonnet", name: "Claude Sonnet", createdAt: 2 }],
+          savedModels: [{ id: "gpt-6.2-sol", model: "gpt-6.2-sol", name: "GPT-6.2 Sol", createdAt: 2 }],
         },
       },
     })
@@ -2516,9 +2515,9 @@ describe("OutlineChatPanel controls", () => {
     const container = await renderOutlineChatPanel()
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)) })
 
-    expect(container.textContent).toContain("Claude Sonnet")
-    expect(useWikiStore.getState().aiOutlineModel).toBe("anthropic/claude-sonnet")
-    expect(outlineModelPreferenceMocks.saveAiOutlineModel).toHaveBeenCalledWith("anthropic/claude-sonnet")
+    expect(container.textContent).toContain("GPT-6.2 Sol")
+    expect(useWikiStore.getState().aiOutlineModel).toBe("codex-cli/gpt-6.2-sol")
+    expect(outlineModelPreferenceMocks.saveAiOutlineModel).toHaveBeenCalledWith("codex-cli/gpt-6.2-sol")
     expect(toastSpy).toHaveBeenCalledWith(
       "\u539f \u0041\u0049 \u5927\u7eb2\u6a21\u578b\u5df2\u4e0d\u53ef\u7528\uff0c\u5df2\u56de\u9000\u5230\u5f53\u524d\u9ed8\u8ba4\u6a21\u578b\u3002",
       expect.objectContaining({ dedupeKey: "outline-model-fallback" }),

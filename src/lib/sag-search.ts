@@ -79,15 +79,27 @@ async function listSagFiles(projectPath: string, beforeChapter?: number, include
   return files.map(file => file.path)
 }
 
+export interface ChapterScope {
+  fingerprint: string
+  chapters: ReadonlyMap<number, string>
+  /** 仅含全部来源章均可读的实体、概念页，以及此次校验的正文版本。 */
+  pages: ReadonlyMap<string, string>
+}
+
 export async function prepareSagChapterScope(projectPath: string, beforeChapter: number, signal?: AbortSignal, includePages = false) {
   signal?.throwIfAborted()
   const files = await listSagFiles(projectPath, beforeChapter, includePages)
   signal?.throwIfAborted()
   const result = files.length
-    ? await invoke<{ fingerprint: string; chapters: { path: string; chapterNumber: number }[] }>("sag_scope_fingerprint", { projectPath, files, beforeChapter })
-    : { fingerprint: "empty", chapters: [] }
+    ? await invoke<{ fingerprint: string; chapters: { path: string; chapterNumber: number }[]; pages: Record<string, string> }>("sag_scope_fingerprint", { projectPath, files, beforeChapter })
+    : { fingerprint: "empty", chapters: [], pages: {} }
   signal?.throwIfAborted()
-  return { files, fingerprint: result.fingerprint, chapters: new Map(result.chapters.map(ch => [ch.chapterNumber, ch.path])) }
+  return {
+    files,
+    fingerprint: result.fingerprint,
+    chapters: new Map(result.chapters.map(ch => [ch.chapterNumber, ch.path])),
+    pages: new Map(Object.entries(result.pages).map(([path, hash]) => [normalizePath(path), hash])),
+  }
 }
 
 export async function searchSagProject(

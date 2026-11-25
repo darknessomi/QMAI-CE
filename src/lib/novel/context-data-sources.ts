@@ -11,7 +11,7 @@ import { eligibleChapterNumber } from "@/lib/sag-search"
 import { parseFrontmatter } from "@/lib/frontmatter"
 import { parseChapterMeta } from "./chapter-meta"
 import { isAiExcludedContent } from "./ai-exclude"
-import { eligibleLocalSource } from "./search-adapter"
+import { eligibleLocalSource, isEntityOrConceptPath } from "./search-adapter"
 import { hasReadableHistory, listAiExcludedChapterNumbers, readVisibleChapter } from "./ai-exclude-chapters"
 import { listSnapshots, loadSnapshot, type ChapterSnapshot } from "./chapter-ingest"
 import { loadRevisionFeedbackForContext, createEmptyRevisionFeedback } from "./revision-feedback"
@@ -332,9 +332,24 @@ function referenceSearchOptions(context: ContextLoadContext) {
   return {
     localOnly: true,
     acceptPath: (path: string) => !/\/(?:chapters|outlines|memory)\//i.test(path),
-    acceptFile: (path: string, content: string) => !/^[ \t]*snapshot_id:/m.test(content)
-      || eligibleLocalSource(path, content, context.chapterNumber, context.chapterScope?.chapters),
+    acceptFile: (path: string, content: string) => {
+      if (isAiExcludedContent(content)) return false
+      const fields = parseFrontmatter(content).frontmatter
+      if (isEntityOrConceptPath(path) || fields?.snapshot_id || fields?.source_sequence || fields?.source_type) {
+        return eligibleLocalSource(path, content, context.chapterNumber, context.chapterScope)
+      }
+      return true
+    },
   }
+}
+
+async function referencePages(context: ContextLoadContext, query: string, limit: number): Promise<string[]> {
+  const options = referenceSearchOptions(context)
+  const hits = await searchWiki(context.projectPath, query, options)
+  return Promise.all(hits.slice(0, limit).map(async ({ path }) => {
+    const content = await readFile(path).catch(() => "")
+    return content && options.acceptPath(path) && await options.acceptFile(path, content) ? content : ""
+  }))
 }
 
 const relatedSettingsDataSource: DataSource<string> = {
@@ -342,11 +357,8 @@ const relatedSettingsDataSource: DataSource<string> = {
   priority: 10,
   async load(context: ContextLoadContext): Promise<string> {
     try {
-      const results = await searchWiki(context.projectPath, "setting 设定 location 地点", referenceSearchOptions(context))
-      if (results.length > 0) {
-        const contents = await Promise.all(results.slice(0, 3).map(r => readFile(r.path).catch(() => "")))
-        return contents.filter(text => text && !isAiExcludedContent(text)).join("\n---\n").slice(0, 2000)
-      }
+      const pages = await referencePages(context, "setting 设定 location 地点", 3)
+      return pages.filter(Boolean).join("\n---\n").slice(0, 2000)
     } catch {}
     return ""
   },
@@ -362,11 +374,8 @@ const canonRulesDataSource: DataSource<string> = {
     try {
       const canon = await readFile(`${context.projectPath}/wiki/canon.md`).catch(() => "")
       if (canon) return isAiExcludedContent(canon) ? "" : canon.slice(0, 2000)
-      const results = await searchWiki(context.projectPath, "canon 正史 rule 规则", referenceSearchOptions(context))
-      if (results.length > 0) {
-        const content = await readFile(results[0].path)
-        return isAiExcludedContent(content) ? "" : content.slice(0, 2000)
-      }
+      const [page] = await referencePages(context, "canon 正史 rule 规则", 1)
+      return page?.slice(0, 2000) ?? ""
     } catch {}
     return ""
   },
@@ -418,11 +427,8 @@ const writingStyleDataSource: DataSource<string> = {
 
     // 优先级3: 从 wiki 搜索风格相关页面
     try {
-      const results = await searchWiki(context.projectPath, "style 风格 writing 写作", referenceSearchOptions(context))
-      if (results.length > 0) {
-        const content = await readFile(results[0].path)
-        return isAiExcludedContent(content) ? "" : content.slice(0, 1000)
-      }
+      const [page] = await referencePages(context, "style 风格 writing 写作", 1)
+      return page?.slice(0, 1000) ?? ""
     } catch {}
     return ""
   },
@@ -440,7 +446,7 @@ const searchResultsDataSource: DataSource<string> = {
       context.task,
       context.chapterNumber,
       context.config.searchTopK,
-      context.chapterScope?.chapters,
+      context.chapterScope,
     )
   },
 }
@@ -457,7 +463,7 @@ const graphSearchResultsDataSource: DataSource<string> = {
       context.task,
       context.chapterNumber,
       context.config.searchTopK,
-      context.chapterScope?.chapters,
+      context.chapterScope,
     )
   },
 }

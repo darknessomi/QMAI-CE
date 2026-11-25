@@ -258,7 +258,7 @@ const RAW_LLM_PRESETS: LlmPreset[] = [
       "moonshotai/kimi-k2.6",
       "zai-org/glm-5",
       "minimaxai/minimax-m2.7",
-      "anthropic/claude-sonnet-4.6",
+      "openai/gpt-6.2-sol",
       "openai/gpt-5.5",
       "google/gemini-3.5-flash",
     ],

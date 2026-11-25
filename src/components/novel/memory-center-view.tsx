@@ -63,6 +63,26 @@ function markdownBody(markdown: string): string {
   return parsed.rawBlock ? parsed.body : markdown
 }
 
+/** 旧版快照 Markdown 带有图谱栏，仅在打开快照详情时过滤。 */
+function snapshotMarkdownBody(markdown: string): string {
+  const body = markdownBody(markdown)
+  const graphHeading = /^##[ \t]+图谱(?:节点|关系边|边)[ \t]*$/m
+  if (!graphHeading.test(body)) return body
+
+  let hidden = false
+  let fence = ""
+  return body.split(/\r?\n/).filter(line => {
+    const marker = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line)
+    if (marker) {
+      if (!fence) fence = marker[1]
+      else if (marker[1].startsWith(fence) && !marker[2].trim()) fence = ""
+    } else if (!fence && /^#{1,2}(?:[ \t]|$)/.test(line)) {
+      hidden = graphHeading.test(line)
+    }
+    return !hidden
+  }).join("\n")
+}
+
 /**
  * 把元素滚入视野。
  *
@@ -226,10 +246,13 @@ export function MemoryCenterView() {
       const markdown = await readFile(path)
       setDetailView({
         title,
-        content: markdownBody(markdown),
+        content: snapshotMarkdownBody(markdown),
         chapterNumber: snapshotNumberFromMarkdownPath(path),
       })
-      requestAnimationFrame(() => scrollContainerRef.current?.scrollTo({ top: 0 }))
+      requestAnimationFrame(() => {
+        const container = scrollContainerRef.current
+        if (container) container.scrollTop = 0
+      })
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     }

@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { invoke } from "@tauri-apps/api/core"
 import { AgentRunner } from "@/lib/agent/runner"
 import { streamChat } from "@/lib/llm-client"
-import { buildContextPack } from "@/lib/novel/context-engine"
+import { buildContextPack, contextPackToPrompt } from "@/lib/novel/context-engine"
 import { useWikiStore, DEFAULT_NOVEL_CONFIG } from "@/stores/wiki-store"
 import { createTempProject, realFs, writeFileRaw } from "@/test-helpers/fs-temp"
 import { runWritingConversation } from "./writing-conversation"
@@ -43,7 +43,7 @@ beforeEach(async () => {
     expect(args.beforeChapter).toBe(5)
     const rows = await Promise.all(args.files.map(async path => [path, await realFs.readFile(path)]))
     const fingerprint = createHash("sha256").update(JSON.stringify(rows)).digest("hex")
-    if (name === "sag_scope_fingerprint") return { fingerprint, chapters: [{ path: chapter, chapterNumber: 1 }] }
+    if (name === "sag_scope_fingerprint") return { fingerprint, pages: {}, chapters: [{ path: chapter, chapterNumber: 1 }] }
     expect(args.scopeFingerprint).toBe(fingerprint)
     return rows.map(([path, text]) => ({
       path, title: "渡口", content: text!.split("\n").at(-1), startLine: 5, endLine: 5, score: 1,
@@ -127,6 +127,41 @@ describe("MCP 写作实际组包与模型输入", () => {
     const prompt = JSON.stringify(run.mock.calls[0]![2])
     expect(prompt).toContain("守卫负责渡口交接。")
     expect(prompt).toContain("凭证上盖有蓝色印章。")
+  })
+
+  it.each([true, false])("回写旧章时三个辅助设定入口均遵守来源章和页版本，JEV=%s", async (jev) => {
+    setupModel(false)
+    if (!jev) useWikiStore.setState({ jevConfig: null })
+    const entity = book.path + "/wiki/entities/船夫.md"
+    const mixed = book.path + "/wiki/concepts/通行证.md"
+    const changed = book.path + "/wiki/entities/改稿.md"
+    const keywords = "setting 设定 location 地点 canon 正史 rule 规则 style 风格 writing 写作"
+    const original = "---\nsource_sequence: 1\n---\n" + keywords + "\n只有船夫认识旧船票。"
+    const mixedText = "---\nsources: ['001.snapshot.json', '009.snapshot.json']\n---\n" + keywords + "\n第九章秘密印章已被销毁。"
+    const oldText = "---\nsource_sequence: 1\n---\n" + keywords
+    await writeFileRaw(entity, original)
+    await writeFileRaw(mixed, mixedText)
+    await writeFileRaw(changed, oldText)
+    vi.mocked(invoke).mockImplementation(async (name, raw) => {
+      if (name === "sag_scope_fingerprint") {
+        expect((raw as { files: string[] }).files).toEqual(expect.arrayContaining([chapter, entity, changed, mixed]))
+        await writeFileRaw(changed, oldText + "\n校验后才补上的结局。")
+        const hash = (text: string) => createHash("sha256").update(text).digest("hex")
+        return { fingerprint: "chapter-five", chapters: [{ chapterNumber: 1, path: chapter }], pages: { [entity]: hash(original), [changed]: hash(oldText) } }
+      }
+      if (name === "sag_search") return [{ path: chapter, title: "渡口", content: quote, startLine: 5, endLine: 5, score: 1 }]
+      return null
+    })
+    const pack = await buildContextPack(book.path, userRequest, 5, { categories: ["settings", "plot_tools"] })
+    for (const reference of [pack.relatedSettings, pack.canonRules, pack.writingStyle]) {
+      expect(reference).toContain("只有船夫认识旧船票")
+    }
+    const prompt = contextPackToPrompt(pack, 20_000)
+    expect(prompt).toContain("只有船夫认识旧船票")
+    expect(prompt).not.toContain("第九章秘密印章")
+    expect(prompt).not.toContain("校验后才补上的结局")
+    if (jev) expect(prompt).toContain(quote)
+    expect(searchCalls()).toHaveLength(jev ? 1 : 0)
   })
 
   it("同章交接期间发生等长修改就重新检索，新证据覆盖旧引文", async () => {

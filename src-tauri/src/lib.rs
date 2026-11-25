@@ -225,6 +225,7 @@ pub fn run() {
             commands::sag::sag_search,
             commands::sag::sag_cancel,
             commands::legacy_retrieval::clear_legacy_project_retrieval,
+            commands::legacy_retrieval::clear_legacy_community_summaries,
             app_state::clear_legacy_retrieval_credentials,
             commands::sag::sag_scope_fingerprint,
             commands::sag::sag_test_jev,

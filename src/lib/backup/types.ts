@@ -71,6 +71,7 @@ export interface ProjectRestoreResult {
 /** 导入结果 */
 export interface ImportResult {
   success: boolean
+  jevConfigRestored?: boolean
   appState: Record<string, unknown> | null
   localStorageData: Record<string, string> | null
   projects: ProjectRestoreResult[]

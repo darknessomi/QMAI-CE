@@ -198,7 +198,7 @@ const ACP_CATALOG = [
   { name: "gemini-3.7-flash", modelId: "gemini-3.7-flash[effort=high]" },
   { name: "gpt-5.6-terra", modelId: "gpt-5.6-terra[context=272k,reasoning=medium,fast=false]" },
   { name: "claude-sonnet-5", modelId: "claude-sonnet-5[thinking=true,context=300k,effort=high]" },
-  { name: "claude-sonnet-4-6", modelId: "claude-sonnet-4-6[thinking=true,context=200k,effort=medium]" },
+  { name: "gpt-6.2-sol", modelId: "gpt-6.2-sol[reasoning=medium,fast=false]" },
   { name: "gpt-5.3-codex", modelId: "gpt-5.3-codex[reasoning=medium,fast=false]" },
   { name: "claude-opus-4-7", modelId: "claude-opus-4-7[thinking=true,context=300k,effort=xhigh,fast=false]" },
   { name: "gpt-5.4", modelId: "gpt-5.4[context=272k,reasoning=medium,fast=false]" },
@@ -211,10 +211,8 @@ const ACP_CATALOG = [
   { name: "gpt-5.4-mini", modelId: "gpt-5.4-mini[reasoning=medium]" },
   { name: "gpt-5.4-nano", modelId: "gpt-5.4-nano[reasoning=medium]" },
   { name: "claude-haiku-4-5", modelId: "claude-haiku-4-5[thinking=true]" },
-  { name: "claude-sonnet-4-5", modelId: "claude-sonnet-4-5[thinking=true,context=200k]" },
   { name: "gpt-5.1", modelId: "gpt-5.1[reasoning=medium]" },
   { name: "gemini-3.5-flash", modelId: "gemini-3.5-flash[]" },
-  { name: "claude-sonnet-4", modelId: "claude-sonnet-4[thinking=false,context=200k]" },
   { name: "gpt-5-mini", modelId: "gpt-5-mini[]" },
   { name: "gemini-2.5-flash", modelId: "gemini-2.5-flash[]" },
   { name: "kimi-k3", modelId: "kimi-k3[reasoning=max]" },
@@ -240,6 +238,7 @@ const CLI_WITH_PHANTOMS = [
   "claude-opus-4-7-medium-fast",
   "claude-opus-4-7-thinking-max",
   "gpt-5.3-codex-medium",
+  "gpt-6.2-sol-medium",
   "kimi-k3-max",
   "acp-only-missing-from-cli",
 ]
@@ -270,6 +269,7 @@ describe("filterCursorCliByAcp", () => {
     expect(filtered).toContain("composer-2.5-fast")
     expect(filtered).toContain("claude-opus-4-7-thinking-max")
     expect(filtered).toContain("gpt-5.3-codex-medium")
+    expect(filtered).toContain("gpt-6.2-sol-medium")
     expect(filtered).toContain("kimi-k3-max")
     expect(filtered).toContain("gemini-3.1-pro")
     expect(filtered).not.toContain("cursor-grok-4.6-medium-fast")

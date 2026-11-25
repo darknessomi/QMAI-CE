@@ -483,6 +483,7 @@ fn signature(sources: &HashMap<String, Source>) -> String {
 pub struct Fingerprint {
     pub fingerprint: String,
     pub chapters: Vec<ScopedChapter>,
+    pub pages: BTreeMap<String, String>,
 }
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -501,6 +502,7 @@ pub(super) fn fingerprint(
         .canonicalize()
         .context("无法访问项目目录")?;
     let mut chapters = Vec::new();
+    let mut pages = BTreeMap::new();
     let mut sources = HashMap::new();
     let mut seen = HashSet::new();
     let mut writing = WritingScope::default();
@@ -523,12 +525,21 @@ pub(super) fn fingerprint(
                     chapter_number,
                 });
             }
+            let hash = Sha256::digest(content.as_bytes());
+            if writing.page_sources.contains_key(&input) {
+                // read_file removes a UTF-8 BOM before returning the page to the WebView.
+                let decoded_hash = match content.strip_prefix('\u{feff}') {
+                    Some(decoded) => Sha256::digest(decoded.as_bytes()),
+                    None => hash,
+                };
+                pages.insert(input.clone(), format!("{decoded_hash:x}"));
+            }
             sources.insert(
                 input,
                 Source {
                     path,
                     requested_path,
-                    hash: Sha256::digest(content.as_bytes()).into(),
+                    hash: hash.into(),
                 },
             );
         }
@@ -536,6 +547,7 @@ pub(super) fn fingerprint(
     Ok(Fingerprint {
         fingerprint: signature(&sources),
         chapters,
+        pages,
     })
 }
 

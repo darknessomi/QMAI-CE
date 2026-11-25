@@ -25,6 +25,7 @@ vi.mock("@/commands/fs", () => {
 vi.mock("@/lib/llm-client", () => ({ streamChat: vi.fn(), DEFAULT_LLM_REQUEST_TIMEOUT_MS: 30000 }))
 
 import { useWikiStore } from "@/stores/wiki-store"
+import { fingerprintText } from "./book-analysis/content-fingerprint"
 import { applyMemoryCleanup, loadMemoryCleanupScan, runMemoryCleanupScan, undoLastMemoryCleanup } from "./memory-cleanup-runner"
 import { collectMemoryRecords, type MemoryCleanupIssue, type MemoryCleanupScan } from "./memory-cleanup"
 import { loadSnapshot, rebuildDerivedMemoryFromSnapshots, syncSnapshotToMemory, type ChapterSnapshot } from "./chapter-ingest"
@@ -159,13 +160,29 @@ describe("来源删除与派生文件同步", () => {
   })
   it("项目有旧索引时可清理和撤销，原索引保留且不调用旧模型", async () => {
     const oldIndex = "/project/.qmai/lancedb/.keep"
+    const oldSummary = "/project/.qmai/novel/community-summaries/5.json"
     fs.files.set(oldIndex, "legacy")
+    fs.files.set(oldSummary, "旧摘要")
     const scan = await scanFixture()
     await expect(applyMemoryCleanup("/project", scan, scan.issues)).resolves.toBe(6)
     expect((await loadSnapshot("/project", 1))?.knowledgeChanges).toEqual([])
+    expect(fs.files.get(oldSummary)).toBe("旧摘要")
     await undoLastMemoryCleanup("/project")
     expect((await loadSnapshot("/project", 1))?.knowledgeChanges).toEqual(source(1).knowledgeChanges)
     expect(fs.files.get(oldIndex)).toBe("legacy")
+  })
+  it("旧版清理备份仍可恢复当时删除的社区摘要原文", async () => {
+    const dir = "/project/.qmai/memory-cleanup-history/legacy"
+    const path = ".qmai/novel/community-summaries/2.json"
+    const before = '{ "summary": "原文" }'
+    fs.files.set(`${dir}/backup.json`, JSON.stringify({
+      version: 1, createdAt: 1,
+      files: [{ path, before, after: fingerprintText(JSON.stringify(null)) }],
+    }))
+    fs.files.set("/project/.qmai/memory-cleanup-last.json", JSON.stringify({ dir }))
+
+    await undoLastMemoryCleanup("/project")
+    expect(fs.files.get(`/project/${path}`)).toBe(before)
   })
   it("只删伏笔时不重写不受影响的人物实体", async () => {
     const path = "/project/wiki/entities/林默.md", before = fs.files.get(path)

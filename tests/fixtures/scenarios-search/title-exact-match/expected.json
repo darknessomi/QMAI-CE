@@ -2,7 +2,7 @@
   "topResultPaths": [
     "wiki/attention.md"
   ],
-  "titleMatchPaths": [
+  "includedPaths": [
     "wiki/attention.md"
   ],
   "excludedPaths": [

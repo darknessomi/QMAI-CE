@@ -22,7 +22,7 @@ function prefixToKinds(prefix: string): ContextSourceKind[] {
   if (prefix.startsWith("wiki/settings/") || prefix === "wiki/canon.md" || prefix === "wiki/writing-style.md" || prefix === ".qmai/writing-style.json") return ["setting"]
   if (prefix.startsWith("wiki/entities/") || prefix.startsWith("wiki/characters/") || prefix === ".qmai/novel/cognition-state.json") return ["entity"]
   if (prefix.startsWith("wiki/memory/") || prefix === ".qmai/novel/timeline.json") return ["memory"]
-  if (prefix.startsWith(".qmai/novel/snapshots/") || prefix.startsWith(".qmai/novel/community-summaries/") || prefix === ".qmai/novel/revision-feedback.json") return ["snapshot"]
+  if (prefix.startsWith(".qmai/novel/snapshots/") || prefix === ".qmai/novel/revision-feedback.json") return ["snapshot"]
   if (prefix.startsWith(".qmai/retrieval/")) return ["retrieval"]
   return ["other"]
 }
@@ -211,6 +211,17 @@ describe("DataSourceCacheAdapter", () => {
     ])
   })
 
+  it.each(["relatedSettings", "canonRules", "writingStyle"])("%s 回写旧章及同章切换禁读后均重新读取", async (name) => {
+    const harness = createHarness()
+    const source: DataSource<string> = { name, priority: 1, load: vi.fn() }
+    const read = (chapterNumber: number, fingerprint: string, text: string) => harness.adapter.load(source, {
+      ...context, chapterNumber, chapterScope: { fingerprint, chapters: new Map(), pages: new Map() },
+    }, async () => text)
+    await expect(read(8, "可读至七", "后文情报")).resolves.toBe("后文情报")
+    await expect(read(5, "可读至四", "前章情报")).resolves.toBe("前章情报")
+    await expect(read(5, "切换禁读", "")).resolves.toBe("")
+  })
+
   it("refreshes only an artifact whose dependencies changed", async () => {
     const harness = createHarness()
     const chapterSource: DataSource<string> = { name: "recentChapterContents", priority: 1, load: async () => "" }
@@ -348,7 +359,7 @@ describe("DataSourceCacheAdapter", () => {
     expect(directLoad).not.toHaveBeenCalled()
   })
 
-  it("uses project scope for retrieval and related settings", async () => {
+  it("shares the retrieval index across chapters but rechecks related settings", async () => {
     const harness = createHarness()
     const retrieval: DataSource<string> = { name: "retrieval", priority: 1, load: async () => "" }
     const relatedSettings: DataSource<string> = { name: "relatedSettings", priority: 1, load: async () => "" }
@@ -361,7 +372,7 @@ describe("DataSourceCacheAdapter", () => {
     await harness.adapter.load(relatedSettings, { ...context, task: "另一个任务", chapterNumber: 99 }, loadSettings)
 
     expect(loadRetrieval).toHaveBeenCalledOnce()
-    expect(loadSettings).toHaveBeenCalledOnce()
+    expect(loadSettings).toHaveBeenCalledTimes(2)
   })
 
   it("按写作章界分别缓存近期摘要，避免复用未来章节", async () => {
@@ -433,14 +444,14 @@ describe("DataSourceCacheAdapter", () => {
     })
   })
 
-  it("invalidates search results when a snapshot or community-summary file is added", async () => {
+  it("invalidates search results when a snapshot file is added", async () => {
     const harness = createHarness()
     const source: DataSource<string> = { name: "searchResults", priority: 1, load: async () => "" }
     const directLoad = vi.fn(async () => `结果-${directLoad.mock.calls.length}`)
 
     await harness.adapter.load(source, context, directLoad)
     await harness.adapter.load(source, context, directLoad)
-    harness.revisions.snapshot!["E:/Novel/.qmai/novel/community-summaries/new.json"] = 1
+    harness.revisions.snapshot!["E:/Novel/.qmai/novel/snapshots/001.snapshot.json"] = 1
     await harness.adapter.load(source, context, directLoad)
 
     expect(directLoad).toHaveBeenCalledTimes(2)

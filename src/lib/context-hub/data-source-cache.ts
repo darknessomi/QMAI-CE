@@ -54,10 +54,7 @@ interface DataSourceCacheStats {
 }
 
 const STATIC_SOURCES = new Set([
-  "canonRules",
   "sourceCanon",
-  "writingStyle",
-  "relatedSettings",
   // 以下源加载的是项目级数据（不依赖章节号），改用恒定 key 跨章节/跨消息复用
   // retrieval 现在返回项目级原始条目（按章节过滤移到构建阶段），同样跨章节复用
   "retrieval",
@@ -75,6 +72,9 @@ const TASK_SCOPED_SOURCES = new Set([
 ])
 
 const CHAPTER_SCOPED_SOURCES = new Set([
+  "canonRules",
+  "writingStyle",
+  "relatedSettings",
   "fallbackRecentSummaries",
   "outline",
   "chapterOutline",
@@ -91,15 +91,15 @@ const CHAPTER_SCOPED_SOURCES = new Set([
 // Bump only the affected data source when its extraction semantics change.
 // This prevents a previously cached wrong-chapter outline from surviving the fix.
 const SOURCE_CACHE_VERSIONS: Partial<Record<string, number>> = {
-  writingStyle: 2,
+  writingStyle: 3,
   cognitionText: 1,
   outline: 4,
   chapterOutline: 3,
   volumeContext: 2,
   // 速记缓存保留候选小传来源，组包时再与当前人物档案合并。
   sectionBriefing: 6,
-  graphSearchResults: 2,
-  searchResults: 1,
+  graphSearchResults: 3,
+  searchResults: 2,
   snapshots: 2,
   retrieval: 2,
   fallbackCharacterStates: 2,
@@ -108,8 +108,8 @@ const SOURCE_CACHE_VERSIONS: Partial<Record<string, number>> = {
   recentChapterContents: 1,
   fallbackPreviousEnding: 1,
   fallbackRecentSummaries: 1,
-  relatedSettings: 1,
-  canonRules: 1,
+  relatedSettings: 2,
+  canonRules: 2,
 }
 
 function canonicalize(value: unknown): unknown {

@@ -6,12 +6,12 @@ function page(title: string, body: string): string {
 
 export const searchScenarios: SearchScenario[] = [
   // 1. title-exact-match — a page whose title exactly contains the query
-  //    should rank first and have titleMatch=true.
+  //    should rank first.
   {
     name: "title-exact-match",
     description:
       "Query 'attention'. attention.md has 'attention' in its title and in " +
-      "content. Should rank first with titleMatch=true.",
+      "content. Should rank first.",
     initialWiki: {
       "wiki/attention.md": page("Attention", "The attention mechanism weights sequence tokens."),
       "wiki/other.md": page("Other Page", "Discusses something unrelated entirely."),
@@ -20,7 +20,7 @@ export const searchScenarios: SearchScenario[] = [
     query: "attention",
     expected: {
       topResultPaths: ["wiki/attention.md"],
-      titleMatchPaths: ["wiki/attention.md"],
+      includedPaths: ["wiki/attention.md"],
       excludedPaths: ["wiki/other.md"],
     },
   },
@@ -30,7 +30,7 @@ export const searchScenarios: SearchScenario[] = [
     name: "content-match",
     description:
       "Query 'rotary' appears only in the body of embeddings.md, not in " +
-      "any title. Should still be returned, but with titleMatch=false.",
+      "any title. Should still be returned.",
     initialWiki: {
       "wiki/embeddings.md": page(
         "Embeddings",
@@ -137,7 +137,7 @@ export const searchScenarios: SearchScenario[] = [
     query: "attention",
     expected: {
       topResultPaths: ["wiki/attention.md"],
-      titleMatchPaths: [
+      includedPaths: [
         "wiki/attention.md",
         "wiki/multi-head-attention.md",
         "wiki/self-attention-history.md",
@@ -182,7 +182,7 @@ export const searchScenarios: SearchScenario[] = [
     name: "trailing-punct-phrase-bonus",
     description:
       "Query '总资产。' (with trailing 。). Page with '总资产' in BOTH title " +
-      "and content should still rank first and titleMatch=true, the same " +
+      "and content should still rank first, the same " +
       "as if the user had typed '总资产' without the period.",
     initialWiki: {
       "wiki/zong-zi-chan.md": page(
@@ -202,7 +202,7 @@ export const searchScenarios: SearchScenario[] = [
     query: "总资产。",
     expected: {
       topResultPaths: ["wiki/zong-zi-chan.md"],
-      titleMatchPaths: ["wiki/zong-zi-chan.md"],
+      includedPaths: ["wiki/zong-zi-chan.md"],
       excludedPaths: ["wiki/unrelated.md"],
     },
   },

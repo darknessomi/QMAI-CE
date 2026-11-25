@@ -34,7 +34,6 @@ export function comparePersonaSkillMeta(a: PersonaSkillMeta, b: PersonaSkillMeta
 /**
  * 名字匹配：精确相等 / 别名命中 / 双向包含。
  * 包含匹配要求两边都 ≥ 2 个字，否则单姓（「林」）会把全库都匹配上。
- * 故意不做拼音与繁简归一：那会把 pinyin-pro 拖过 bundle 边界。
  */
 export function matchesPersonaName(normalizedQuery: string, names: readonly string[]): boolean {
   for (const name of names) {

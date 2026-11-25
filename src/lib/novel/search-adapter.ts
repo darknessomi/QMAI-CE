@@ -1,4 +1,5 @@
-import { eligibleChapterNumber, searchSagProject } from "@/lib/sag-search"
+import { eligibleChapterNumber, searchSagProject, type ChapterScope } from "@/lib/sag-search"
+import { sha256Text } from "@/lib/context-hub/fingerprint"
 import { getJevConfig } from "@/lib/jev-config"
 import { searchWiki } from "@/lib/search"
 import { parseFrontmatter } from "@/lib/frontmatter"
@@ -11,7 +12,7 @@ interface NovelSearchParams {
   projectPath: string
   query: string
   chapterNumber?: number
-  readableChapters?: ReadonlyMap<number, string>
+  chapterScope?: ChapterScope
   topK?: number
   authoritativeOnly?: boolean
   includeGraph?: boolean
@@ -31,23 +32,23 @@ interface NovelSearchResult {
   relevance: number
 }
 
-type RankedNovelSearchResult = NovelSearchResult & {
+type LocalSearchResult = NovelSearchResult & { type: Exclude<NovelSearchResult["type"], "sag"> }
+
+type RankedNovelSearchResult = LocalSearchResult & {
   sourceRank: number
 }
 
 const SOURCE_RRF_K = 60
 const SEARCH_SOURCE_TIMEOUT_MS = 2500
-const SOURCE_WEIGHTS: Record<NovelSearchResult["type"], number> = {
+const SOURCE_WEIGHTS: Record<LocalSearchResult["type"], number> = {
   keyword: 1,
-  sag: 1,
   graph: 0.95,
   canon: 0.9,
   recent_chapter: 0.75,
 }
 
-const SOURCE_TIE_PRIORITY: Record<NovelSearchResult["type"], number> = {
+const SOURCE_TIE_PRIORITY: Record<LocalSearchResult["type"], number> = {
   keyword: 0,
-  sag: 1,
   graph: 2,
   canon: 3,
   recent_chapter: 4,
@@ -84,7 +85,7 @@ export async function novelMixedSearch(params: NovelSearchParams): Promise<Novel
       localOnly: true,
       signal: params.signal,
       acceptFile: (path, content) => !isAiExcludedContent(content)
-        && (!params.authoritativeOnly || eligibleLocalSource(path, content, params.chapterNumber, params.readableChapters)),
+        && (!params.authoritativeOnly || eligibleLocalSource(path, content, params.chapterNumber, params.chapterScope)),
     })).then(items => {
       console.log("[novelMixedSearch] keyword done, got", items.length)
       results.push(...items.slice(0, topK).map((item, sourceRank) => ({
@@ -100,7 +101,7 @@ export async function novelMixedSearch(params: NovelSearchParams): Promise<Novel
   }
 
   if (params.includeGraph) {
-    const pGraph = runSearchBranch("graph", runGraphSearch(pp, params.query, topK, params.authoritativeOnly ? params.chapterNumber : undefined, params.readableChapters)).then(items => {
+    const pGraph = runSearchBranch("graph", runGraphSearch(pp, params.query, topK, params.authoritativeOnly ? params.chapterNumber : undefined, params.chapterScope)).then(items => {
       console.log("[novelMixedSearch] graph done, got", items.length)
       results.push(...rankSourceResults(items))
     })
@@ -108,7 +109,7 @@ export async function novelMixedSearch(params: NovelSearchParams): Promise<Novel
   }
 
   if (params.includeRecentChapters) {
-    const pRecent = runSearchBranch("recent_chapter", runRecentChapterSearch(pp, topK, params.chapterNumber, params.readableChapters)).then(items => {
+    const pRecent = runSearchBranch("recent_chapter", runRecentChapterSearch(pp, topK, params.chapterNumber, params.chapterScope?.chapters)).then(items => {
       console.log("[novelMixedSearch] recent_chapter done, got", items.length)
       results.push(...rankSourceResults(items))
     })
@@ -141,8 +142,16 @@ export async function novelMixedSearch(params: NovelSearchParams): Promise<Novel
   return filtered
 }
 
-export function eligibleLocalSource(path: string, content: string, chapterNumber?: number, readable?: ReadonlyMap<number, string>): boolean {
+export function isEntityOrConceptPath(path: string): boolean {
+  return /\/(?:wiki|QM)\/(?:entities|concepts)\//.test(normalizePath(path))
+}
+
+export async function eligibleLocalSource(path: string, content: string, chapterNumber?: number, scope?: ChapterScope): Promise<boolean> {
   if (isAiExcludedContent(content) || isHistoricalProjectionSnippet(path, content)) return false
+  if ((chapterNumber || scope) && isEntityOrConceptPath(path)) {
+    const approvedHash = scope?.pages.get(normalizePath(path))
+    return !!approvedHash && approvedHash === await sha256Text(content)
+  }
   if (chapterNumber && /\/(?:wiki|QM)\/chapters\//.test(normalizePath(path))) {
     return eligibleChapterNumber(path, content, chapterNumber) !== null
   }
@@ -151,7 +160,7 @@ export function eligibleLocalSource(path: string, content: string, chapterNumber
     if (frontmatter?.snapshot_id || /\/(?:wiki|QM)\/memory\//.test(normalizePath(path))) {
       const through = Number(frontmatter?.source_sequence ?? frontmatter?.chapter_number)
       return frontmatter?.source_type !== "outline" && through > 0 && through < chapterNumber
-        && (!readable || hasReadableHistory(through, readable))
+        && (!scope || hasReadableHistory(through, scope.chapters))
     }
   }
   return isAuthoritativeGenerationPath(normalizePath(path))
@@ -189,7 +198,7 @@ function withTimeout<T>(
   })
 }
 
-function rankSourceResults(items: NovelSearchResult[]): RankedNovelSearchResult[] {
+function rankSourceResults(items: LocalSearchResult[]): RankedNovelSearchResult[] {
   return items.map((item, sourceRank) => ({ ...item, sourceRank }))
 }
 
@@ -198,8 +207,8 @@ async function runGraphSearch(
   query: string,
   topK: number,
   chapterNumber?: number,
-  readable?: ReadonlyMap<number, string>,
-): Promise<NovelSearchResult[]> {
+  scope?: ChapterScope,
+): Promise<LocalSearchResult[]> {
   try {
     const { buildRetrievalGraph, getRelatedNodes } = await import("@/lib/graph-relevance")
     const graph = await buildRetrievalGraph(pp)
@@ -237,7 +246,7 @@ async function runGraphSearch(
           seenIds.add(node.id)
           try {
             const content = await readFile(node.path)
-            if (isAiExcludedContent(content) || (chapterNumber && !eligibleLocalSource(node.path, content, chapterNumber, readable))) continue
+            if (isAiExcludedContent(content) || ((chapterNumber || scope) && !await eligibleLocalSource(node.path, content, chapterNumber, scope))) continue
             scoredNodes.push({
               title: node.title,
               path: node.path,
@@ -267,13 +276,13 @@ async function runRecentChapterSearch(
   topK: number,
   beforeChapter?: number,
   readable?: ReadonlyMap<number, string>,
-): Promise<NovelSearchResult[]> {
+): Promise<LocalSearchResult[]> {
   try {
     const chapterNumbers = await listSnapshots(pp)
     if (chapterNumbers.length === 0) return []
 
     const recentNumbers = chapterNumbers.filter(n => n > 0 && (!beforeChapter || n < beforeChapter) && (!readable || readable.has(n))).slice(-topK).reverse()
-    const items: NovelSearchResult[] = []
+    const items: LocalSearchResult[] = []
     // 「选中（AI 不读取）」：快照也是从被排除的章节里提炼的，检索里同样不出现。
     const excludedNumbers = await listAiExcludedChapterNumbers(pp, recentNumbers, readable)
 
@@ -300,7 +309,7 @@ async function runRecentChapterSearch(
 async function runCanonSearch(
   pp: string,
   query: string,
-): Promise<NovelSearchResult[]> {
+): Promise<LocalSearchResult[]> {
   const canonPath = `${pp}/wiki/canon.md`
   try {
     const content = await readFile(canonPath)

@@ -54,27 +54,27 @@ describe("stable available model keys", () => {
   })
 
   it("falls back to a full legacy model id when the real provider prefix is disabled", () => {
-    const legacyModelId = "anthropic/claude-3-7-sonnet"
+    const legacyModelId = "openai/gpt-6.2-sol"
     const configs: ProviderConfigs = {
-      anthropic: { enabled: false, apiKey: "old-key", savedModels: [saved("claude-3-7-sonnet")] },
+      openai: { enabled: false, apiKey: "old-key", savedModels: [saved("gpt-6.2-sol")] },
       openrouter: { enabled: true, apiKey: "key", savedModels: [saved(legacyModelId)] },
     }
 
     expect(getStableAvailableModelKey(legacyModelId, configs))
-      .toBe("openrouter/anthropic/claude-3-7-sonnet")
+      .toBe("openrouter/openai/gpt-6.2-sol")
   })
 
   it("uses stable available-provider order when multiple other providers store the full legacy id", () => {
-    const legacyModelId = "anthropic/claude-3-7-sonnet"
+    const legacyModelId = "openai/gpt-6.2-sol"
     const configs: ProviderConfigs = {
-      anthropic: { enabled: true, apiKey: "key", savedModels: [saved("another-model")] },
+      openai: { enabled: true, apiKey: "key", savedModels: [saved("another-model")] },
       "custom-first": { enabled: true, apiKey: "key", savedModels: [saved(legacyModelId)] },
       openrouter: { enabled: true, apiKey: "key", savedModels: [saved(legacyModelId)] },
       groq: { enabled: true, apiKey: "key", savedModels: [saved(legacyModelId)] },
     }
 
     expect(getStableAvailableModelKey(legacyModelId, configs))
-      .toBe("openrouter/anthropic/claude-3-7-sonnet")
+      .toBe("openrouter/openai/gpt-6.2-sol")
   })
 
 })

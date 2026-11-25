@@ -3,12 +3,15 @@ import { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { MemoryCenterData, MemoryCenterSnapshotCard } from "@/lib/novel/memory-center"
+import { normalizeChapterSnapshot } from "@/lib/novel/snapshot-format"
 import { useWikiStore } from "@/stores/wiki-store"
 
 const hoisted = vi.hoisted(() => ({
   loadMemoryCenterData: vi.fn(),
   fileExists: vi.fn(),
   rebuild: vi.fn(),
+  loadSnapshot: vi.fn(),
+  syncSnapshotToMemory: vi.fn(),
   readFile: vi.fn(),
   writeFile: vi.fn(),
   deleteFile: vi.fn(),
@@ -20,7 +23,12 @@ vi.mock("@/commands/fs", () => ({
   writeFile: hoisted.writeFile,
   deleteFile: hoisted.deleteFile,
 }))
-vi.mock("@/lib/novel/chapter-ingest", () => ({ finalizeProjectMemoryRebuild: hoisted.rebuild }))
+vi.mock("@/lib/novel/chapter-ingest", () => ({
+  finalizeProjectMemoryRebuild: hoisted.rebuild,
+  loadSnapshot: hoisted.loadSnapshot,
+  listSnapshotHistory: async () => [],
+  syncSnapshotToMemory: hoisted.syncSnapshotToMemory,
+}))
 vi.mock("@/lib/novel/memory-center", () => ({
   loadMemoryCenterData: hoisted.loadMemoryCenterData,
 }))
@@ -152,6 +160,53 @@ describe("记忆中心：单页结构", () => {
     expect(detail?.textContent).toContain("正式记忆")
     expect(detail?.textContent).not.toContain("structured-memory")
     expect(detail?.querySelector("button, textarea")).toBeNull()
+  })
+
+  it("打开旧版 Markdown 快照时略去图谱段，保留人物关系、代码示例和校验警告", async () => {
+    const story = ["# 第4章", "## 人物关系变化", "- 两人达成合作", "```text", "## 图谱节点", "这里是原文示例", "```"]
+    const warnings = ["## 校验警告", "- 核对称谓"]
+    hoisted.readFile.mockResolvedValue([...story, "## 图谱节点", "- 人物:甲", "## 图谱关系边", "- 甲->合作->乙", ...warnings].join("\r\n"))
+    await render()
+    const open = [...host.querySelectorAll("button")].find(button => button.textContent === "查看记忆")!
+    await act(async () => { open.click() })
+    expect(host.querySelector('[data-testid="wiki-reader"]')?.textContent).toBe([...story, ...warnings].join("\n"))
+    expect(hoisted.writeFile).not.toHaveBeenCalled()
+  })
+
+  it("查看和编辑章节快照时隐藏图谱栏，保存其他记忆时保留原始关系数据", async () => {
+    const graph = { graphNodes: ["人物:甲"], graphEdges: ["甲->合作->乙"] }
+    hoisted.loadSnapshot.mockResolvedValue(normalizeChapterSnapshot({
+      chapterNumber: 4, summary: "本章摘要", relationshipChanges: ["两人达成合作"], ...graph,
+    }))
+    hoisted.syncSnapshotToMemory.mockResolvedValue({ memorySyncedAt: "2026-01-01", writtenEntityPaths: [] })
+    await render()
+    const card = host.querySelector('[data-ui="memory-snapshot"]')!
+    await act(async () => { [...card.querySelectorAll("button")].find(b => b.textContent === "编辑")!.click() })
+    const dialog = () => host.querySelector<HTMLElement>(".fixed.inset-0")!
+    const clickDialog = async (label: string) => {
+      const button = [...dialog().querySelectorAll("button")].find(b => b.textContent?.includes(label))!
+      await act(async () => { button.click() })
+    }
+    await vi.waitFor(() => expect(dialog()?.textContent).toContain("两人达成合作"))
+    expect(dialog().textContent).not.toMatch(/图谱节点|图谱关系边|人物:甲|甲->合作->乙/)
+    await clickDialog("JSON 详情")
+    expect(JSON.parse(dialog().querySelector("pre")!.textContent!)).toMatchObject({ summary: "本章摘要" })
+    expect(dialog().querySelector("pre")!.textContent).not.toMatch(/graphNodes|graphEdges/)
+    await clickDialog("编辑")
+    expect(dialog().textContent).not.toMatch(/图谱节点|图谱关系边/)
+    const fields = [...dialog().querySelectorAll("textarea")]
+    const values = fields.map(field => field.value)
+    expect(values).not.toContain(graph.graphNodes[0])
+    expect(values).not.toContain(graph.graphEdges[0])
+    const summary = fields.find(field => field.value === "本章摘要")!
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(summary, "修订后的摘要")
+      summary.dispatchEvent(new Event("input", { bubbles: true }))
+    })
+    await clickDialog("保存")
+    expect(hoisted.syncSnapshotToMemory).toHaveBeenCalledWith(PROJECT.path, expect.objectContaining({
+      summary: "修订后的摘要", ...graph,
+    }))
   })
 
   it("每个标签都带计数，且两种快照的计数各算各的", async () => {

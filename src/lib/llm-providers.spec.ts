@@ -897,7 +897,7 @@ describe("modelSupportsReasoningControl", () => {
     // the model id (`model[reasoning_effort=high]`) instead.
     expect(modelSupportsReasoningControl(customConfig({
       provider: "claude-code",
-      model: "claude-sonnet-4-5",
+      model: "sonnet",
     }))).toBe(false)
     expect(modelSupportsReasoningControl(customConfig({
       provider: "cursor-cli",
@@ -934,7 +934,7 @@ describe("modelSupportsReasoningControl", () => {
     }))).toBe(true)
     expect(modelSupportsReasoningControl(customConfig({
       provider: "anthropic",
-      model: "claude-sonnet-4-5",
+      model: "claude-sonnet-5-5",
     }))).toBe(true)
     expect(modelSupportsReasoningControl(customConfig({
       provider: "anthropic",

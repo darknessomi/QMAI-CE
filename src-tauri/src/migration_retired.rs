@@ -362,62 +362,6 @@ pub(super) fn clean(source: &Path, stage: &Path, report: &mut Report) -> Result<
         }
     }
     reserve_foreshadowing_ids(stage, highest)?;
-    let dir = stage.join(".qmai/novel/community-summaries");
-    if dir.exists() {
-        for entry in fs::read_dir(&dir).map_err(ioerr)? {
-            let p = entry.map_err(ioerr)?.path();
-            if p.file_name().is_some_and(|name| name == ".DS_Store") {
-                fs::remove_file(&p).map_err(ioerr)?;
-                continue;
-            }
-            let record = read(stage, &p)?;
-            let stem = p
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .ok_or_else(|| invalid(stage, &p))?;
-            // The first writer used the numeric community ID. Its successor
-            // keys files by a 16-digit member fingerprint.
-            let known_name = match record.get("memberFingerprint") {
-                Some(fingerprint) => {
-                    stem.len() == 16
-                        && stem.bytes().all(|b| b.is_ascii_hexdigit())
-                        && fingerprint == stem
-                        && rows(&record["memberIds"], Value::is_string)
-                }
-                None => {
-                    stem.parse::<u64>()
-                        .ok()
-                        .is_some_and(|n| record["communityId"] == n)
-                        && record.get("memberIds").is_none()
-                }
-            };
-            if !only(
-                &record,
-                &[
-                    "memoryCleanupFingerprint",
-                    "communityId",
-                    "memberFingerprint",
-                    "memberIds",
-                    "summary",
-                    "nodeCount",
-                    "topNodes",
-                    "generatedAt",
-                ],
-            ) || p.extension().is_none_or(|s| s != "json")
-                || !record["communityId"].is_i64()
-                || !record["summary"].is_string()
-                || !record["generatedAt"].is_string()
-                || !record["nodeCount"].is_u64()
-                || !rows(&record["topNodes"], Value::is_string)
-                || !known_name
-            {
-                return Err(invalid(stage, &p));
-            }
-            fs::remove_file(&p).map_err(ioerr)?;
-            count(report, "communitySummaries");
-        }
-        fs::remove_dir(dir).map_err(ioerr)?;
-    }
     for (name, key) in [
         ("dedup-scan-cache.json", "groups"),
         ("foreshadowing-scan-cache.json", "issues"),

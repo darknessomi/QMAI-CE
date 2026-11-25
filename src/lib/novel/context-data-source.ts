@@ -3,14 +3,14 @@
  * 用于统一管理和加载各种上下文数据源
  */
 
-/**
- * 上下文加载配置
- */
+import type { ChapterScope } from "@/lib/sag-search"
+
+/** 上下文加载配置 */
 export interface ContextLoadContext {
   projectPath: string
   task: string
   chapterNumber?: number
-  chapterScope?: { fingerprint: string; chapters: ReadonlyMap<number, string> }
+  chapterScope?: ChapterScope
   config: {
     recentSummaryWindow: number
     searchTopK: number

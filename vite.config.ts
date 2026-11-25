@@ -50,26 +50,12 @@ export default defineConfig({
     // Hidden maps only when uploading; never ship *.map in the Tauri bundle.
     sourcemap: uploadSentrySourcemaps ? "hidden" : false,
     chunkSizeWarningLimit: 700,
-    modulePreload: {
-      resolveDependencies(_filename: string, deps: string[]) {
-        return deps.filter((dep) => !dep.includes("graphology-vendor"))
-      },
-    },
     rollupOptions: {
       output: {
         manualChunks(id: string) {
           if (id.includes("node_modules")) {
-            if (id.includes("opencc-js")) {
-              return "opencc-vendor"
-            }
-            if (id.includes("pinyin-pro")) {
-              return "pinyin-vendor"
-            }
             if (id.includes("js-yaml")) {
               return "yaml-vendor"
-            }
-            if (id.includes("graphology")) {
-              return "graphology-vendor"
             }
             if (id.includes("react") || id.includes("scheduler")) {
               return "react-vendor"

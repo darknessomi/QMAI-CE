@@ -12,10 +12,10 @@ describe("wiki-store AI outline model", () => {
   })
 
   it("updates only the global outline model without changing chat or defaults", () => {
-    useWikiStore.getState().setAiOutlineModel("anthropic/claude-sonnet")
+    useWikiStore.getState().setAiOutlineModel("openai/gpt-6.2-sol")
 
     const state = useWikiStore.getState()
-    expect(state.aiOutlineModel).toBe("anthropic/claude-sonnet")
+    expect(state.aiOutlineModel).toBe("openai/gpt-6.2-sol")
     expect(state.aiChatModel).toBe("openai/chat-model")
     expect(state.defaultLlmModel).toBe("openai/default-model")
   })

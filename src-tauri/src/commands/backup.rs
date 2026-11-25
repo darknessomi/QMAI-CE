@@ -1,5 +1,5 @@
 use std::fs;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -12,6 +12,7 @@ use zip::CompressionMethod;
 
 use crate::app_state;
 use crate::panic_guard::run_guarded;
+use crate::secret_store;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectBackupInfo {
@@ -81,6 +82,7 @@ pub struct ImportParams {
 #[serde(rename_all = "camelCase")]
 pub struct ImportResult {
     pub success: bool,
+    pub jev_config_restored: bool,
     pub app_state: Option<serde_json::Value>,
     pub local_storage_data: Option<serde_json::Value>,
     pub replace_local_storage: bool,
@@ -292,6 +294,81 @@ fn filter_app_state(
         remove_sensitive_fields(&mut value);
     }
     Ok(value)
+}
+
+const JEV_ENTRY: &str = "global/jev-config.json";
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct JevBackupConfig {
+    endpoint: String,
+    model: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    api_key: Option<String>,
+}
+
+fn parse_jev_config(bytes: &[u8]) -> Result<Option<JevBackupConfig>, String> {
+    if bytes.len() > secret_store::MAX_STATE_SECRET_BYTES {
+        return Err("JEV 配置内容过大".to_string());
+    }
+    let value: Option<JevBackupConfig> =
+        serde_json::from_slice(bytes).map_err(|_| "JEV 配置格式无效".to_string())?;
+    if let Some(config) = &value {
+        let url = url::Url::parse(config.endpoint.trim()).map_err(|_| "JEV 服务地址无效")?;
+        if config.model.trim().is_empty()
+            || !matches!(url.scheme(), "http" | "https")
+            || !url.has_host()
+            || !url.username().is_empty()
+            || url.password().is_some()
+            || url.query().is_some()
+            || url.fragment().is_some()
+        {
+            return Err("JEV 服务地址或模型无效，请检查配置并将密钥填入专用输入框。".into());
+        }
+    }
+    Ok(value)
+}
+
+fn local_jev_config(dir: &Path) -> Result<Option<JevBackupConfig>, String> {
+    let contents = secret_store::read_jev_config(dir)?;
+    parse_jev_config(contents.as_deref().unwrap_or("null").as_bytes())
+}
+
+fn jev_config_to_restore(
+    archive: &mut zip::ZipArchive<fs::File>,
+    dir: &Path,
+    credentials: bool,
+    warnings: &mut Vec<String>,
+) -> Result<Option<String>, String> {
+    let file = match archive.by_name(JEV_ENTRY) {
+        Ok(file) => file,
+        Err(zip::result::ZipError::FileNotFound) => return Ok(None),
+        Err(e) => return Err(format!("访问备份中的 JEV 配置失败：{e}")),
+    };
+    let mut bytes = Vec::new();
+    file.take(secret_store::MAX_STATE_SECRET_BYTES as u64 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|_| "读取备份中的 JEV 配置失败")?;
+    let mut imported = parse_jev_config(&bytes)?;
+    if !credentials {
+        // 无凭据的空配置没有字段可合并；更换服务时不能把本机密钥发给新的地址。
+        let Some(config) = &mut imported else {
+            return Ok(None);
+        };
+        config.api_key = local_jev_config(dir)?.and_then(|current| {
+            if current.endpoint.trim() == config.endpoint.trim() {
+                return current.api_key;
+            }
+            if current.api_key.is_some() {
+                warnings
+                    .push("备份中的 JEV 服务地址与本机不同，新地址的访问密钥需另行填写。".into());
+            }
+            None
+        });
+    }
+    serde_json::to_string(&imported)
+        .map(Some)
+        .map_err(|_| "无法序列化 JEV 配置".into())
 }
 
 fn all_project_sections() -> Vec<ProjectBackupSection> {
@@ -858,6 +935,7 @@ fn validate_backup_destination(params: &ExportParams, output: &Path) -> Result<(
 pub fn do_export_backup<F: Fn(&BackupProgressPayload)>(
     params: ExportParams,
     app_state_path: &Path,
+    jev_dir: &Path,
     on_progress: F,
 ) -> Result<ExportResult, String> {
     let save_path = std::path::PathBuf::from(&params.save_path);
@@ -868,7 +946,13 @@ pub fn do_export_backup<F: Fn(&BackupProgressPayload)>(
     // 上一次异常退出可能留下同名临时文件；先清掉，免得失败清理时删错对象。
     let _ = fs::remove_file(&partial_path);
 
-    let packed = write_backup_zip(&params, app_state_path, &partial_path, &on_progress);
+    let packed = write_backup_zip(
+        &params,
+        app_state_path,
+        jev_dir,
+        &partial_path,
+        &on_progress,
+    );
     let (file_count, warnings) = match packed {
         Ok(packed) => packed,
         Err(error) => {
@@ -910,6 +994,7 @@ pub fn do_export_backup<F: Fn(&BackupProgressPayload)>(
 fn write_backup_zip<F: Fn(&BackupProgressPayload)>(
     params: &ExportParams,
     app_state_path: &Path,
+    jev_dir: &Path,
     zip_path: &Path,
     on_progress: &F,
 ) -> Result<(usize, Vec<String>), String> {
@@ -1005,6 +1090,19 @@ fn write_backup_zip<F: Fn(&BackupProgressPayload)>(
                 .map_err(|e| format!("写入空 app-state 失败: {e}"))?;
             warnings.push("app-state.json 不存在，已写入空对象".to_string());
         }
+    }
+
+    if params.include_global_config {
+        let mut config = local_jev_config(jev_dir)?;
+        if !params.include_credentials {
+            if let Some(config) = &mut config {
+                config.api_key = None;
+            }
+        }
+        zip.start_file(JEV_ENTRY, options)
+            .map_err(|e| format!("创建 JEV 配置条目失败：{e}"))?;
+        serde_json::to_writer(&mut zip, &config).map_err(|e| format!("写入 JEV 配置失败：{e}"))?;
+        file_count += 1;
     }
 
     // 3. global/local-storage.json
@@ -1222,12 +1320,14 @@ fn write_backup_zip<F: Fn(&BackupProgressPayload)>(
 pub fn do_import_backup<F: Fn(&BackupProgressPayload)>(
     params: ImportParams,
     app_state_dir: &Path,
+    jev_dir: &Path,
     on_progress: F,
 ) -> Result<ImportResult, String> {
     let zip_path = Path::new(&params.zip_path);
     if !zip_path.exists() {
         return Ok(ImportResult {
             success: false,
+            jev_config_restored: false,
             app_state: None,
             local_storage_data: None,
             replace_local_storage: true,
@@ -1255,12 +1355,18 @@ pub fn do_import_backup<F: Fn(&BackupProgressPayload)>(
     let mut project_results: Vec<ProjectRestoreResult> = Vec::new();
     let mut manifest_version = 1;
     let mut manifest_contents = default_legacy_contents();
+    let mut restore_jev = false;
 
     let mut manifest_projects: Vec<ProjectBackupInfo> = Vec::new();
     if let Some(manifest_bytes) = extract_file_from_zip(&mut archive, "manifest.json")? {
         let manifest: BackupManifest = serde_json::from_slice(&manifest_bytes)
             .map_err(|e| format!("解析 manifest.json 失败: {e}"))?;
         manifest_version = manifest.backup_version;
+        restore_jev = manifest
+            .contents
+            .as_ref()
+            .is_some_and(|contents| contents.global_config)
+            && manifest_version >= 2;
         manifest_contents = manifest.contents.unwrap_or_else(default_legacy_contents);
         if manifest.backup_version > 2 {
             warnings.push(format!(
@@ -1319,6 +1425,7 @@ pub fn do_import_backup<F: Fn(&BackupProgressPayload)>(
         warnings.push("该备份不包含全局配置或界面偏好，当前设置保持不变".to_string());
     }
 
+    let mut jev_config_restored = false;
     if need_global {
         on_progress(&BackupProgressPayload {
             operation: "import".to_string(),
@@ -1328,6 +1435,16 @@ pub fn do_import_backup<F: Fn(&BackupProgressPayload)>(
             message: "正在恢复全局配置...".to_string(),
         });
 
+        let jev_config = if restore_jev {
+            jev_config_to_restore(
+                &mut archive,
+                jev_dir,
+                manifest_contents.credentials,
+                &mut warnings,
+            )?
+        } else {
+            None
+        };
         if let Some(app_state_bytes) = extract_file_from_zip(&mut archive, "global/app-state.json")?
         {
             let app_state_json: serde_json::Value = serde_json::from_slice(&app_state_bytes)
@@ -1351,6 +1468,12 @@ pub fn do_import_backup<F: Fn(&BackupProgressPayload)>(
             let ls_json: serde_json::Value = serde_json::from_slice(&ls_bytes)
                 .map_err(|e| format!("解析 local-storage.json 失败: {e}"))?;
             local_storage_data = Some(ls_json);
+        }
+        if let Some(config) = jev_config {
+            match secret_store::write_jev_config(jev_dir, &config) {
+                Ok(()) => jev_config_restored = true,
+                Err(error) => warnings.push(format!("JEV 配置未恢复：{error}")),
+            }
         }
     }
 
@@ -1519,6 +1642,7 @@ pub fn do_import_backup<F: Fn(&BackupProgressPayload)>(
 
     Ok(ImportResult {
         success: overall_success,
+        jev_config_restored,
         app_state,
         local_storage_data,
         /*
@@ -1641,7 +1765,8 @@ pub async fn export_backup(
         };
 
         let app_clone = app.clone();
-        do_export_backup(params, &app_state_path, move |payload| {
+        let jev_dir = secret_store::jev_config_dir(&app)?;
+        do_export_backup(params, &app_state_path, &jev_dir, move |payload| {
             emit_progress(
                 &app_clone,
                 &payload.operation,
@@ -1669,7 +1794,8 @@ pub async fn import_backup(
             .map_err(|error| format!("导入前保存当前应用状态失败: {error}"))?;
 
         let app_clone = app.clone();
-        let result = do_import_backup(params, &app_data_dir, move |payload| {
+        let jev_dir = secret_store::jev_config_dir(&app)?;
+        let result = do_import_backup(params, &app_data_dir, &jev_dir, move |payload| {
             emit_progress(
                 &app_clone,
                 &payload.operation,
@@ -1719,6 +1845,180 @@ mod tests {
     }
 
     #[test]
+    fn jev_backup_roundtrip_uses_target_key_and_respects_credential_selection() {
+        let tmp = tempfile::tempdir().unwrap();
+        let source = tmp.path().join("source-local/jev");
+        let target = tmp.path().join("target-local/jev");
+        let state = tmp.path().join("source-roaming/app-state.json");
+        fs::create_dir_all(state.parent().unwrap()).unwrap();
+        fs::write(&state, "{}").unwrap();
+        let endpoint = "https://first.example.test/v1";
+        let other = "https://second.example.test/v1";
+        let fixture = |url: &str, model: &str, key: &str| {
+            serde_json::json!({
+                "endpoint": url, "model": model, "apiKey": key
+            })
+        };
+        secret_store::write_jev_config(
+            &source,
+            &fixture(endpoint, "new", "source-fixture").to_string(),
+        )
+        .unwrap();
+        let zip = tmp.path().join("backup.zip");
+        let export = |global, credentials| {
+            do_export_backup(
+                ExportParams {
+                    save_path: zip.to_string_lossy().into_owned(),
+                    include_global_config: global,
+                    include_ui_preferences: true,
+                    include_credentials: credentials,
+                    local_storage_data: serde_json::json!({}),
+                    projects: vec![],
+                },
+                &state,
+                &source,
+                |_| {},
+            )
+            .unwrap()
+        };
+        let import = |strategy| {
+            do_import_backup(
+                ImportParams {
+                    zip_path: zip.to_string_lossy().into_owned(),
+                    strategy,
+                    projects: None,
+                    project_path_overrides: None,
+                },
+                &tmp.path().join("target-roaming"),
+                &target,
+                |_| {},
+            )
+            .unwrap()
+        };
+        let target_json = || {
+            serde_json::from_str::<serde_json::Value>(
+                &secret_store::read_jev_config(&target).unwrap().unwrap(),
+            )
+            .unwrap()
+        };
+
+        for (credentials, current_url, expected_key) in [
+            (true, other, Some("source-fixture")),
+            (false, endpoint, Some("target-fixture")),
+            (false, other, None),
+        ] {
+            secret_store::write_jev_config(
+                &target,
+                &fixture(current_url, "old", "target-fixture").to_string(),
+            )
+            .unwrap();
+            let result = export(true, credentials);
+            let archive = zip::ZipArchive::new(fs::File::open(&zip).unwrap()).unwrap();
+            assert_eq!(result.file_count, archive.len());
+            assert!(archive
+                .file_names()
+                .all(|n| !n.ends_with(".bin") && !n.ends_with(".enc")));
+            drop(archive);
+            let entry: serde_json::Value =
+                serde_json::from_str(&read_zip_entry(&zip, JEV_ENTRY)).unwrap();
+            assert_eq!(
+                entry.get("apiKey").and_then(|v| v.as_str()),
+                credentials.then_some("source-fixture")
+            );
+            assert!(!import(ImportStrategy::Selective).jev_config_restored);
+            assert_eq!(target_json()["model"], "old");
+            let imported = import(ImportStrategy::GlobalOnly);
+            assert!(imported.jev_config_restored);
+            assert_eq!(
+                imported
+                    .warnings
+                    .iter()
+                    .any(|warning| warning.contains("访问密钥需另行填写")),
+                expected_key.is_none()
+            );
+            let restored = target_json();
+            assert_eq!(restored["model"], "new");
+            assert_eq!(restored["endpoint"], endpoint);
+            assert_eq!(
+                restored.get("apiKey").and_then(|v| v.as_str()),
+                expected_key
+            );
+            assert_ne!(
+                fs::read(source.join("key.bin")).unwrap(),
+                fs::read(target.join("key.bin")).unwrap()
+            );
+        }
+        secret_store::write_jev_config(&source, "null").unwrap();
+        export(true, false);
+        assert!(!import(ImportStrategy::Full).jev_config_restored);
+        assert_eq!(target_json()["model"], "new");
+        export(true, true);
+        assert!(import(ImportStrategy::Full).jev_config_restored);
+        assert!(target_json().is_null());
+
+        fs::write(source.join("config.enc"), "damaged").unwrap();
+        export(false, true);
+        assert!(!zip::ZipArchive::new(fs::File::open(&zip).unwrap())
+            .unwrap()
+            .file_names()
+            .any(|n| n == JEV_ENTRY));
+        assert!(!import(ImportStrategy::Full).jev_config_restored);
+    }
+
+    #[test]
+    fn invalid_jev_entry_stops_restore_before_writing_and_legacy_zip_preserves_jev() {
+        let dir = tempfile::tempdir().unwrap();
+        let jev = dir.path().join("local/jev");
+        let state = dir.path().join("roaming");
+        let zip_path = dir.path().join("backup.zip");
+        let current =
+            r#"{"endpoint":"https://example.test","model":"old","apiKey":"existing-fixture"}"#;
+        secret_store::write_jev_config(&jev, current).unwrap();
+        let previous = fs::read(jev.join("config.enc")).unwrap();
+        for entry in [
+            Some(r#"{"endpoint":"https://example.test/?key=redacted-fixture","model":"new"}"#),
+            None,
+        ] {
+            let mut zip = ZipWriter::new(fs::File::create(&zip_path).unwrap());
+            for (name, data) in [
+                (
+                    "manifest.json",
+                    Some(
+                        r#"{"backup_version":2,"created_at":"","app_version":"4.8.2","contents":{"globalConfig":true,"uiPreferences":true,"credentials":true},"projects":[]}"#,
+                    ),
+                ),
+                (JEV_ENTRY, entry),
+                ("global/app-state.json", Some(r#"{"theme":"dark"}"#)),
+            ] {
+                if let Some(data) = data {
+                    zip.start_file(name, SimpleFileOptions::default()).unwrap();
+                    zip.write_all(data.as_bytes()).unwrap();
+                }
+            }
+            zip.finish().unwrap();
+            let result = do_import_backup(
+                ImportParams {
+                    zip_path: zip_path.to_string_lossy().into_owned(),
+                    strategy: ImportStrategy::Full,
+                    projects: None,
+                    project_path_overrides: None,
+                },
+                &state,
+                &jev,
+                |_| {},
+            );
+            if entry.is_some() {
+                let error = result.unwrap_err();
+                assert!(error.contains("JEV") && !error.contains("redacted-fixture"));
+                assert!(!state.join("app-state.json").exists());
+            } else {
+                assert!(!result.unwrap().jev_config_restored);
+            }
+            assert_eq!(fs::read(jev.join("config.enc")).unwrap(), previous);
+        }
+    }
+
+    #[test]
     fn sag_index_backup_preserves_committed_wal_without_live_sidecars() {
         let temp = tempfile::tempdir().unwrap();
         let meta = temp.path().join(".qmai");
@@ -1765,7 +2065,13 @@ mod tests {
                 sections: vec![ProjectBackupSection::Content],
             }],
         };
-        assert!(do_export_backup(params, &tmp.path().join("app.json"), |_| {}).is_err());
+        assert!(do_export_backup(
+            params,
+            &tmp.path().join("app.json"),
+            &tmp.path().join("jev"),
+            |_| {}
+        )
+        .is_err());
         assert_eq!(fs::read(partial).unwrap(), b"untouched");
     }
 
@@ -1810,7 +2116,7 @@ mod tests {
             }],
         };
 
-        do_export_backup(params, &app_state, |_| {}).unwrap();
+        do_export_backup(params, &app_state, &tmp.join("jev"), |_| {}).unwrap();
 
         let file = std::fs::File::open(&zip_path).unwrap();
         let archive = zip::ZipArchive::new(file).unwrap();
@@ -1868,6 +2174,7 @@ mod tests {
                 }],
             },
             &app_state,
+            &tmp.join("jev"),
             |_| {},
         )
         .unwrap();
@@ -1896,6 +2203,7 @@ mod tests {
                 project_path_overrides: Some(path_overrides),
             },
             &tmp.join("app-data"),
+            &tmp.join("local-data/jev"),
             |_| {},
         )
         .unwrap();
@@ -1948,7 +2256,7 @@ mod tests {
             }],
         };
 
-        do_export_backup(params, &app_state, |_| {}).unwrap();
+        do_export_backup(params, &app_state, &tmp.join("jev"), |_| {}).unwrap();
 
         let global: serde_json::Value =
             serde_json::from_str(&read_zip_entry(&zip_path, "global/app-state.json")).unwrap();
@@ -2002,6 +2310,7 @@ mod tests {
                 projects: vec![],
             },
             &source_state,
+            &tmp.join("source-local/jev"),
             |_| {},
         )
         .unwrap();
@@ -2022,6 +2331,7 @@ mod tests {
                 project_path_overrides: None,
             },
             &target_dir,
+            &tmp.join("target-local/jev"),
             |_| {},
         )
         .unwrap();
@@ -2081,6 +2391,7 @@ mod tests {
                 project_path_overrides: None,
             },
             &target_dir,
+            &tmp.join("target-local/jev"),
             |_| {},
         )
         .unwrap();
@@ -2132,6 +2443,7 @@ mod tests {
                 }],
             },
             &app_state,
+            &tmp.join("jev"),
             |_| {},
         )
         .unwrap_err();
@@ -2163,6 +2475,7 @@ mod tests {
                 projects: vec![],
             },
             &app_state,
+            &tmp.join("jev"),
             |_| {},
         )
         .unwrap();
@@ -2200,6 +2513,7 @@ mod tests {
                 projects: vec![],
             },
             &app_state,
+            &tmp.join("jev"),
             |_| {},
         )
         .expect("覆盖已有备份必须成功");
@@ -2236,6 +2550,7 @@ mod tests {
                 projects: vec![],
             },
             &app_state,
+            &tmp.join("jev"),
             |_| {},
         )
         .unwrap();
@@ -2302,6 +2617,7 @@ mod tests {
                 }],
             },
             &app_state,
+            &tmp.join("jev"),
             |_| {},
         )
         .unwrap();
@@ -2440,6 +2756,7 @@ mod tests {
                 project_path_overrides: Some(overrides),
             },
             &target_dir,
+            &tmp.join("target-local/jev"),
             |_| {},
         )
         .unwrap();
@@ -2503,6 +2820,7 @@ mod tests {
                 project_path_overrides: None,
             },
             &target_dir,
+            &tmp.join("target-local/jev"),
             |_| {},
         )
         .unwrap();
@@ -2544,6 +2862,7 @@ mod tests {
                 project_path_overrides: None,
             },
             &target_dir,
+            &tmp.join("target-local/jev"),
             |_| {},
         )
         .unwrap();
@@ -2597,6 +2916,7 @@ mod tests {
                 }],
             },
             &app_state,
+            &tmp.join("jev"),
             |_| {},
         )
         .expect("一个文件读不出来不应导致整份备份失败");
@@ -2689,6 +3009,7 @@ mod tests {
                 projects: vec![],
             },
             &app_state,
+            &tmp.join("jev"),
             |_| {},
         )
         .unwrap();
@@ -2722,6 +3043,7 @@ mod tests {
                 projects: vec![],
             },
             &app_state,
+            &tmp.join("jev"),
             |_| {},
         )
         .unwrap();
@@ -2819,6 +3141,7 @@ mod tests {
                 }],
             },
             &app_state,
+            &tmp.join("jev"),
             |_| {},
         )
         .unwrap();
@@ -2924,6 +3247,7 @@ mod tests {
                 }],
             },
             &app_state,
+            &tmp.join("jev"),
             |_| {},
         )
         .unwrap();

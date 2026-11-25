@@ -30,7 +30,7 @@ export function NetworkSection({ draft, setDraft }: Props) {
         <p className="mt-1 text-sm text-muted-foreground">
           {t("settings.sections.network.description", {
             defaultValue:
-              "开启后，所有对外请求（模型、向量、搜索、更新检查）都会经由代理；关闭时一律直连。保存后立即生效，无需重启。",
+              "开启后，所有对外请求（模型、JEV 检索、联网搜索、更新检查）都会经由代理；关闭时一律直连。保存后立即生效，无需重启。",
           })}
         </p>
       </div>

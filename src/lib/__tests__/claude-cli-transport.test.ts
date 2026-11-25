@@ -68,7 +68,7 @@ vi.mock("@/lib/platform", () => ({
 const claudeCliConfig: LlmConfig = {
   provider: "claude-code",
   apiKey: "",
-  model: "claude-sonnet-4-6",
+  model: "sonnet",
   ollamaUrl: "http://localhost:11434",
   customEndpoint: "",
   maxContextSize: 204800,

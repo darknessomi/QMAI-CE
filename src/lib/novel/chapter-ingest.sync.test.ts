@@ -167,6 +167,16 @@ describe("syncSnapshotToMemory", () => {
     expect(titles).toContain("灵石")
   })
 
+  it("生成的快照 Markdown 展示人物关系变化，JSON 继续保存图谱数据", async () => {
+    const graph = { graphNodes: ["人物:甲", "人物:乙"], graphEdges: ["甲->合作->乙"] }
+    await syncSnapshotToMemory("/project", { ...syncedSnapshot, ...graph, relationshipChanges: ["两人达成合作"] })
+    const base = "/project/.qmai/novel/snapshots/001.snapshot"
+    expect(JSON.parse(files.get(base + ".json")!)).toMatchObject(graph)
+    const markdown = files.get(base + ".md")
+    expect(markdown).toContain("## 人物关系变化\n- 两人达成合作")
+    expect(markdown).not.toMatch(/图谱节点|图谱关系边|甲->合作->乙/)
+  })
+
   it("长大纲从正式入口完整提取，源文件变更保留断点，重试写盘不重复请求模型", async () => {
     const outline = "/project/wiki/outlines/卷三/转折.md"
     const original = "首段约定。" + "风雨未停。".repeat(4000) + "末段交还信件。"

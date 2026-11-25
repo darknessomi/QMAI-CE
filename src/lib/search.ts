@@ -2,7 +2,7 @@ import { parseFrontmatter } from "./frontmatter"
 import { isAiExcludedContent } from "./novel/ai-exclude"
 import { getJevConfig } from "./jev-config"
 import { searchSagProject } from "./sag-search"
-import { listDirectory } from "@/commands/fs"
+import { listDirectory, readFile } from "@/commands/fs"
 import type { FileNode } from "@/types/wiki"
 import { normalizePath } from "@/lib/path-utils"
 import { mapWikiMarkdown } from "./wiki-markdown-batches"
@@ -28,7 +28,6 @@ export interface SearchResult {
   snippet: string
   startLine?: number
   endLine?: number
-  titleMatch: boolean
   score: number
   /**
    * Image references found inside this result's markdown. Populated
@@ -42,11 +41,12 @@ export interface SearchResult {
 interface SearchWikiOptions {
   topK?: number
   localOnly?: boolean
+  includePageImages?: boolean
   /** 仅供内部按章号读取禁读标记。 */
   includeExcludedMetadata?: boolean
   signal?: AbortSignal
   acceptPath?: (path: string) => boolean
-  acceptFile?: (path: string, content: string) => boolean
+  acceptFile?: (path: string, content: string) => boolean | Promise<boolean>
 }
 
 const MAX_RESULTS = 20
@@ -227,9 +227,18 @@ export async function searchWiki(
   const topK = options.topK ?? MAX_RESULTS
   if (!options.localOnly && getJevConfig()) {
     const hits = await searchSagProject(pp, query, topK, { signal: options.signal })
-    return hits.map(hit => ({
+    const pageImages = new Map<string, ImageRef[]>()
+    if (options.includePageImages) {
+      for (const path of new Set(hits.map(hit => hit.path))) {
+        options.signal?.throwIfAborted()
+        const text = await readFile(path).catch(() => null)
+        if (text !== null && !isAiExcludedContent(text)) pageImages.set(path, extractImageRefs(text))
+      }
+      options.signal?.throwIfAborted()
+    }
+    return hits.filter(hit => !options.includePageImages || pageImages.has(hit.path)).map(hit => ({
       path: hit.path, title: hit.title, snippet: hit.content, score: hit.score,
-      startLine: hit.startLine, endLine: hit.endLine, titleMatch: false, images: extractImageRefs(hit.content),
+      startLine: hit.startLine, endLine: hit.endLine, images: pageImages.get(hit.path) ?? [],
     }))
   }
 
@@ -240,11 +249,12 @@ export async function searchWiki(
   try {
     const allFiles = flattenMdFiles(await listDirectory(`${pp}/wiki`))
     const files = options.acceptPath ? allFiles.filter(file => options.acceptPath!(file.path)) : allFiles
-    results = await mapWikiMarkdown(files, (file, content) => {
+    results = await mapWikiMarkdown(files, async (file, content) => {
       options.signal?.throwIfAborted()
       if (!options.includeExcludedMetadata && isAiExcludedContent(content)) return null
-      if (options.acceptFile && !options.acceptFile(file.path, content)) return null
-      return scoreFile(file, content, effectiveTokens, queryPhrase, query)
+      const result = scoreFile(file, content, effectiveTokens, queryPhrase, query)
+      if (result && options.acceptFile && !await options.acceptFile(file.path, content)) return null
+      return result
     })
   } catch {
     options.signal?.throwIfAborted()
@@ -309,8 +319,6 @@ function scoreFile(
     titleTokenScore * TITLE_TOKEN_WEIGHT +
     contentTokenScore * CONTENT_TOKEN_WEIGHT
 
-  const isTitleMatch = titleTokenScore > 0 || titleHasPhrase
-
   const snippetAnchor =
     contentPhraseOcc > 0
       ? queryPhrase
@@ -320,7 +328,6 @@ function scoreFile(
     path: file.path,
     title,
     snippet: buildSnippet(content, snippetAnchor),
-    titleMatch: isTitleMatch,
     score,
     images: extractImageRefs(content),
   }

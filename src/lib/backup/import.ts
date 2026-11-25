@@ -3,6 +3,7 @@ import { open } from "@tauri-apps/plugin-dialog"
 import { listen, type UnlistenFn } from "@tauri-apps/api/event"
 import { loadRegistry, upsertProjectInfo } from "@/lib/project-identity"
 import { refreshProjectState } from "@/lib/project-refresh"
+import { loadJevConfig } from "@/lib/jev-config"
 import { useWikiStore } from "@/stores/wiki-store"
 import { normalizePath } from "@/lib/path-utils"
 import { registerUiTestProjects } from "@/lib/ui-test-library"
@@ -213,6 +214,7 @@ export async function importBackup(
 
     const result = await invoke<ImportResult>("import_backup", { params })
 
+    if (result.jevConfigRestored) await loadJevConfig()
     if (!result.success) {
       return result
     }

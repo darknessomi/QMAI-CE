@@ -15,6 +15,7 @@ export type ContextSourceKind =
   | "chapter"
   | "outline"
   | "memory"
+  | "reference"
   | "setting"
   | "entity"
   | "snapshot"

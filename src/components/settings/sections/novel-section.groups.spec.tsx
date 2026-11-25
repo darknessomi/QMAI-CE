@@ -108,9 +108,9 @@ describe("写作设置：分组与新手引导播放", () => {
   const playButton = () => [...container.querySelectorAll<HTMLButtonElement>("button")]
     .find((item) => item.getAttribute("aria-label") === "播放新手引导")
 
-  it("按功能分成六组，默认展开，提示类单独成组", async () => {
+  it("按功能分成五组，默认展开，提示类单独成组", async () => {
     await mount()
-    const ids = ["context", "generation", "hints", "community", "performance", "feedback"]
+    const ids = ["context", "generation", "hints", "performance", "feedback"]
     expect(groupIds()).toEqual(ids)
     for (const id of ids) {
       expect(group(id).open, `${id} 默认展开`).toBe(true)
@@ -122,10 +122,13 @@ describe("写作设置：分组与新手引导播放", () => {
     expect(toggleIn(group("hints"), "novel.settings.inspirationHintEnabled")).not.toBeNull()
   })
 
-  it("打开项目后也不显示人物角色和文风自进化设置", async () => {
+  it("打开项目后保留章节检索设置，隐藏已退役的设置", async () => {
     useWikiStore.setState({ project: { id: "novel", name: "测试小说", path: "/novel" } })
     await mount()
     expect(container.textContent).toContain("写作设置")
+    expect(group("context").querySelector('input[aria-label="novel.settings.recentSummaryWindow"]')).not.toBeNull()
+    expect(group("context").querySelector('input[aria-label="novel.settings.searchTopK"]')).not.toBeNull()
+    expect(container.textContent).not.toMatch(/社区摘要|communitySummary/)
     expect(container.textContent).not.toContain("人物角色自进化")
     expect(container.textContent).not.toContain("文风自进化")
   })

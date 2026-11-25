@@ -54,7 +54,7 @@ it.each([true, false])("从实际聊天面板发起%s模式请求，主模型收
       ? [{ path: hitPath, name: hitPath.split("/").at(-1)!, is_dir: false, size: 50, mtimeMs: 1 }] : []
   })
   vi.mocked(invoke).mockReset().mockImplementation(async (cmd, raw) => {
-    if (cmd === "sag_scope_fingerprint") return { fingerprint: "scope", chapters: [{ path: hitPath, chapterNumber: 1 }] }
+    if (cmd === "sag_scope_fingerprint") return { fingerprint: "scope", pages: {}, chapters: [{ path: hitPath, chapterNumber: 1 }] }
     if (cmd !== "sag_search") return null
     expect(raw).toMatchObject({ beforeChapter: novel ? 5 : undefined, files: [hitPath] })
     return [{ path: hitPath, title: "码头", content: evidence, startLine: 7, endLine: 8, score: 1 }]

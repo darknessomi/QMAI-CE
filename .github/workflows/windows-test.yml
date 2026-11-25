@@ -25,10 +25,6 @@ jobs:
         with:
           workspaces: src-tauri
 
-      - name: Install protoc (Windows)
-        shell: pwsh
-        run: ./.github/scripts/install-protoc-windows.ps1
-
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
 

@@ -24,7 +24,7 @@ export function saveUiTestProvider(id: string, value: ProviderOverride | null, e
     const active = state.activePresetId === id
     const resolved = value && preset && active ? resolveConfig(preset, value, state.llmConfig) : null
     const removedReference = (key: string) => value === null && (key.trim().startsWith(`${id}/`) || (getStableAvailableModelKey(key, state.providerConfigs).startsWith(`${id}/`) && !getStableAvailableModelKey(key, next)))
-    const defaultFields = ["defaultLlmModel", "reviewModel", "summaryModel", "extractModel", "deAiModel"] as const
+    const defaultFields = ["defaultLlmModel", "reviewModel", "extractModel", "deAiModel"] as const
     const cleared = Object.fromEntries(defaultFields.filter(field => removedReference(state.novelConfig[field])).map(field => [field, ""]))
     const clearNovel = Object.keys(cleared).length > 0
     const clearDefault = removedReference(state.defaultLlmModel)

@@ -81,7 +81,7 @@ describe("OpenAI buildBody — vision content", () => {
 
 describe("Anthropic buildBody — vision content", () => {
   it("emits image block with media_type/data inside source", () => {
-    const cfg = mkConfig({ provider: "anthropic", model: "claude-3-5-sonnet-latest" })
+    const cfg = mkConfig({ provider: "anthropic", model: "claude-sonnet-5-5" })
     const body = getProviderConfig(cfg).buildBody([visionMessage()]) as {
       messages: Array<{ role: string; content: unknown }>
     }
@@ -95,7 +95,7 @@ describe("Anthropic buildBody — vision content", () => {
   })
 
   it("flattens system content with images by dropping image blocks (anthropic doesn't accept system images)", () => {
-    const cfg = mkConfig({ provider: "anthropic", model: "claude-3-5-sonnet-latest" })
+    const cfg = mkConfig({ provider: "anthropic", model: "claude-sonnet-5-5" })
     const sys: ChatMessage = {
       role: "system",
       content: [
@@ -243,7 +243,7 @@ describe("reasoning controls", () => {
   })
 
   it("maps Anthropic reasoning budget to extended thinking and removes sampling knobs", () => {
-    const cfg = mkConfig({ provider: "anthropic", model: "claude-sonnet-4-5-20250929" })
+    const cfg = mkConfig({ provider: "anthropic", model: "claude-haiku-4-5" })
     const body = getProviderConfig(cfg).buildBody(
       [{ role: "user", content: "hi" }],
       { reasoning: { mode: "custom", budgetTokens: 2048 }, temperature: 0.1, max_tokens: 4096 },
@@ -254,7 +254,7 @@ describe("reasoning controls", () => {
   })
 
   it("reserves answer tokens in addition to Anthropic extended thinking budget", () => {
-    const cfg = mkConfig({ provider: "anthropic", model: "claude-sonnet-4-5-20250929" })
+    const cfg = mkConfig({ provider: "anthropic", model: "claude-haiku-4-5" })
     const body = getProviderConfig(cfg).buildBody(
       [{ role: "user", content: "hi" }],
       { reasoning: { mode: "high" } },

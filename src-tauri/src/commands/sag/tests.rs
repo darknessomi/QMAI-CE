@@ -600,7 +600,11 @@ fn writing_excludes_unattributed_page_text_even_with_a_warm_general_index() {
         "QM/entities/守卫.md",
         "source_sequence: 1\nsources: ['001.snapshot.json']",
     );
-    let concept = page("QM/concepts/通行证.md", "sources: ['001.snapshot.json']");
+    let concept = put(
+        &root,
+        "QM/concepts/通行证.md",
+        "\u{feff}---\nsources: ['001.snapshot.json']\n---\n渡口凭证由守卫签发。",
+    );
     let files = vec![
         entity.clone(),
         concept.clone(),
@@ -635,6 +639,15 @@ fn writing_excludes_unattributed_page_text_even_with_a_warm_general_index() {
     drop(store::Store::open(project, files.clone(), None, &token).unwrap());
     let scope = store::fingerprint(project, files.clone(), Some(5)).unwrap();
     assert_eq!(scope.chapters.len(), 1);
+    let expected_pages = [&entity, &concept]
+        .into_iter()
+        .map(|path| {
+            let content = fs::read_to_string(path).unwrap();
+            let hash = Sha256::digest(content.trim_start_matches('\u{feff}').as_bytes());
+            (path.clone(), format!("{hash:x}"))
+        })
+        .collect();
+    assert_eq!(scope.pages, expected_pages);
     let store = store::Store::open(project, files, Some(5), &token).unwrap();
     assert_eq!(scope.fingerprint, store.fingerprint());
     let hits = store
@@ -786,6 +799,7 @@ fn restoring_a_pre_sag_backup_builds_the_first_index_from_restored_markdown() {
             )])),
         },
         temp.path(),
+        &temp.path().join("jev"),
         |_| {},
     )
     .unwrap();

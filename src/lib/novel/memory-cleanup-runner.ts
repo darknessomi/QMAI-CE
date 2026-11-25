@@ -220,7 +220,7 @@ async function captureBackup(projectPath: string, changed: ChapterSnapshot[], en
   for (const snapshot of snapshots) {
     if (snapshot.chapterNumber > 0) paths.add(retrieval.getVolumePath(retrieval.chapterToVolumeName(snapshot.chapterNumber)))
   }
-  for (const path of [...await optionalTree(`${pp}/.qmai/retrieval`), ...await optionalTree(`${pp}/.qmai/novel/community-summaries`)]) paths.add(path)
+  for (const path of await optionalTree(`${pp}/.qmai/retrieval`)) paths.add(path)
   const persona = await loadPersonaSkillIndexStrict(pp)
   if (persona) {
     paths.add(personaSkillIndexPath(pp))
@@ -335,7 +335,6 @@ export async function applyMemoryCleanup(projectPath: string, scan: MemoryCleanu
     report(onLog, `正在备份 ${changed.length} 章来源`)
     const { dir, backup } = await captureBackup(projectPath, changed, entityPaths, snapshots)
     report(onLog, `已备份至 ${dir}`)
-    const communities = backup.files.filter((f) => f.path.startsWith(".qmai/novel/community-summaries/")).map((f) => `${normalizePath(projectPath)}/${f.path}`)
     try {
       await saveMemoryCleanupPolicy(projectPath, nextPolicy)
       const rewritten = next.filter((s) => changedNumbers.has(s.chapterNumber))
@@ -351,7 +350,6 @@ export async function applyMemoryCleanup(projectPath: string, scan: MemoryCleanu
       report(onLog, "正在同步人物页和人设事实")
       await rebuildMemoryEntityProjections(projectPath, patches, entityPaths, changed, committed)
       await rebuildPersonaFacts(projectPath, committed, changedNumbers, changedFields)
-      for (const path of communities) await deleteFile(path)
       const mutatedPaths: string[] = []
       for (let index = 0; index < backup.files.length; index++) {
         if (index % 200 === 0) report(onLog, `正在核对改动 ${index + 1}/${backup.files.length}`)

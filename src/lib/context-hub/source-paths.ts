@@ -11,10 +11,10 @@ const DATA_SOURCE_KINDS: Record<string, ContextSourceKind[]> = {
   fallbackCharacterStates: ["entity"],
   fallbackForeshadowingStates: ["memory", "entity"],
   fallbackTimeline: ["memory"],
-  relatedSettings: ["entity", "setting"],
-  canonRules: ["setting"],
+  relatedSettings: ["entity", "setting", "reference"],
+  canonRules: ["entity", "setting", "reference"],
   sourceCanon: ["setting"],
-  writingStyle: ["setting"],
+  writingStyle: ["entity", "setting", "reference"],
   searchResults: ["chapter", "outline", "memory", "setting", "entity", "snapshot"],
   graphSearchResults: ["chapter", "outline", "memory", "setting", "entity", "snapshot"],
   revisionFeedback: ["chapter", "snapshot"],
@@ -38,8 +38,9 @@ export function classifyContextSourcePath(projectPath: string, path: string): Co
   if (relative.startsWith("wiki/chapters/")) return "chapter"
   if (relative.startsWith("wiki/outlines/")) return "outline"
   if (relative.startsWith("wiki/memory/")) return "memory"
-  if (relative.startsWith("wiki/entities/") || relative.startsWith("wiki/characters/")) return "entity"
+  if (relative.startsWith("wiki/entities/") || relative.startsWith("wiki/concepts/") || relative.startsWith("wiki/characters/")) return "entity"
   if (relative.startsWith("wiki/settings/") || relative === "wiki/canon.md" || relative === "wiki/writing-style.md") return "setting"
+  if (relative.startsWith("wiki/") && relative.endsWith(".md")) return "reference"
   if (relative === ".qmai/persona-skills/index.json") return "entity"
   if (relative === ".qmai/novel/cognition-state.json") return "entity"
   if (relative === ".qmai/novel/character-states.json") return "entity"
@@ -47,7 +48,7 @@ export function classifyContextSourcePath(projectPath: string, path: string): Co
   if (relative === ".qmai/novel/fanfic-canon.md") return "setting"
   if (relative === ".qmai/novel/revision-feedback.json") return "snapshot"
   if (relative === ".qmai/novel/timeline.json") return "memory"
-  if (relative.startsWith(".qmai/novel/snapshots/") || relative.startsWith(".qmai/novel/community-summaries/")) return "snapshot"
+  if (relative.startsWith(".qmai/novel/snapshots/")) return "snapshot"
   if (relative.startsWith(".qmai/retrieval/")) return "retrieval"
   return "other"
 }
@@ -64,20 +65,12 @@ export function getDataSourceKinds(sourceName: string): ContextSourceKind[] {
  */
 export const SOURCE_DEPENDENCY_PREFIXES: Record<string, string[]> = {
   cognitionText: [".qmai/novel/cognition-state.json", "wiki/outlines/"],
-  writingStyle: ["wiki/settings/", "wiki/canon.md", "wiki/writing-style.md", ".qmai/writing-style.json"],
-  relatedSettings: [
-    "wiki/settings/", "wiki/canon.md", "wiki/writing-style.md",
-    "wiki/entities/", "wiki/characters/", "wiki/memory/",
-  ],
-  canonRules: [
-    "wiki/settings/", "wiki/canon.md", "wiki/writing-style.md",
-    "wiki/memory/", "wiki/entities/", "wiki/characters/",
-  ],
+  // 三个设定源可从任意知识库 Markdown 回退，使用上方的来源类别计算依赖戳。
   sourceCanon: [".qmai/novel/fanfic-canon.md"],
   outline: ["wiki/outlines/"],
   chapterOutline: ["wiki/outlines/"],
   volumeContext: ["wiki/outlines/", "wiki/settings/", "wiki/canon.md"],
-  snapshots: [".qmai/novel/snapshots/", ".qmai/novel/community-summaries/", ".qmai/novel/revision-feedback.json"],
+  snapshots: [".qmai/novel/snapshots/", ".qmai/novel/revision-feedback.json"],
   recentChapterContents: ["wiki/chapters/"],
   fallbackRecentSummaries: ["wiki/chapters/"],
   fallbackPreviousEnding: ["wiki/chapters/", ".qmai/novel/snapshots/"],

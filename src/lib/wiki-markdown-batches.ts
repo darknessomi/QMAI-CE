@@ -72,7 +72,7 @@ function readBatch({ files, slots }: MarkdownBatch): Promise<(string | null)[]> 
 /** 同时发出一组读取，依目录顺序在各批就绪时处理正文。 */
 export async function mapWikiMarkdown<T>(
   files: FileNode[],
-  map: (file: FileNode, content: string) => T | null,
+  map: (file: FileNode, content: string) => T | null | Promise<T | null>,
 ): Promise<T[]> {
   const results: T[] = []
   for (const window of batchWindows(files)) {
@@ -86,7 +86,7 @@ export async function mapWikiMarkdown<T>(
       if ("error" in loaded) throw loaded.error
       for (const [offset, content] of loaded.pages.entries()) {
         if (content === null) continue
-        const result = map(batch.files[offset], content)
+        const result = await map(batch.files[offset], content)
         if (result !== null) results.push(result)
       }
     }

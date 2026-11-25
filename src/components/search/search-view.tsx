@@ -67,7 +67,7 @@ async function runWikiPanelSearch(
   signal?: AbortSignal,
 ): Promise<SearchResult[]> {
   const { searchWiki } = await import("@/lib/search")
-  return searchWiki(projectPath, query, { topK: SEARCH_PAGE_TOP_K, signal })
+  return searchWiki(projectPath, query, { topK: SEARCH_PAGE_TOP_K, includePageImages: true, signal })
 }
 
 async function runNovelPanelSearch(
@@ -97,7 +97,6 @@ async function runNovelPanelSearch(
     path: result.path,
     title: result.title,
     snippet: result.snippet,
-    titleMatch: true,
     score: result.relevance,
     images: [],
   }))
@@ -235,7 +234,7 @@ export function SearchView({ onClose, onOpenFile }: SearchViewProps) {
           if (id !== request.current) return
           setCoverage(coverage)
           setResults(hits.map(hit => ({
-            path: hit.path, title: `第${hit.number}章 · ${hit.title}`, snippet: hit.quote, titleMatch: false, score: 1, images: [],
+            path: hit.path, title: `第${hit.number}章 · ${hit.title}`, snippet: hit.quote, score: 1, images: [],
           })))
         } else if (novelMode && !jevConfig && !jevError) {
           const t0 = performance.now()
@@ -505,15 +504,15 @@ export function SearchView({ onClose, onOpenFile }: SearchViewProps) {
             {t("search.pageCount", { count: results.length })}
             {imageHits.length > 0 && (
               <>
-                {" 路 "}
+                {" · "}
                 {t("search.imageMatchCount", { count: matchingImages.length })}
-                {supportingImages.length > 0 && ` 路 ${t("search.supportingImagesHint", { count: supportingImages.length })}`}
+                {supportingImages.length > 0 && ` · ${t("search.supportingImagesHint", { count: supportingImages.length })}`}
               </>
             )}
           </div>
 
           {/* 鈹€鈹€ Images: fixed-height thumbnails, 2 rows visible, scrolls inside 鈹€鈹€ */}
-          {visibleImages.length > 0 && (
+          {imageHits.length > 0 && (
             <>
               <div className="shrink-0 px-3 pt-1">
                 <SectionHeader
@@ -546,7 +545,7 @@ export function SearchView({ onClose, onOpenFile }: SearchViewProps) {
                * vertical scroll inside this container ONLY 鈥?the
                * Pages list below keeps its own scroll independent.
                */}
-              <div className="max-h-[23rem] shrink-0 overflow-y-auto px-3 pt-2 pb-3">
+              {visibleImages.length > 0 && <div className="max-h-[23rem] shrink-0 overflow-y-auto px-3 pt-2 pb-3">
                 <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
                   {visibleImages.map((img) => (
                     <ImageHitCard
@@ -557,7 +556,7 @@ export function SearchView({ onClose, onOpenFile }: SearchViewProps) {
                     />
                   ))}
                 </div>
-              </div>
+              </div>}
             </>
           )}
 

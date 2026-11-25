@@ -97,7 +97,8 @@ it("实际DefaultModelSettingsPanel使用所选提供方的即时思考配置，
     <DefaultModelSettingsPanel draft={{} as SettingsDraft} setDraft={setDraft} />
   </>))
   const defaults = host.querySelector<HTMLElement>(".model-defaults")!
-  expect(defaults.querySelectorAll("select")).toHaveLength(5)
+  expect([...defaults.querySelectorAll("select")].map(select => select.getAttribute("aria-label")))
+    .toEqual(["默认模型（通用）", "审稿模型", "提取模型", "去AI味模型"])
   expect(defaults.querySelector('[role="switch"]')).toBeNull()
   await click(host, "高")
   vi.mocked(testLlmConnection).mockResolvedValue({ ok: true, message: "成功" })

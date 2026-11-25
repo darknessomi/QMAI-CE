@@ -26,14 +26,6 @@ const deepChapter = readFileSync(
   resolve(__dirname, "./novel/deep-chapter-generation.ts"),
   "utf8",
 )
-const chapterIngest = readFileSync(
-  resolve(__dirname, "./novel/chapter-ingest.ts"),
-  "utf8",
-)
-const communitySummary = readFileSync(
-  resolve(__dirname, "./novel/community-summary.ts"),
-  "utf8",
-)
 const revisionFeedback = readFileSync(
   resolve(__dirname, "./novel/revision-feedback.ts"),
   "utf8",
@@ -127,13 +119,9 @@ describe("writing settings still reach runtime", () => {
     expect(deepChapter).not.toContain("novelConfig.deepChapterReview")
   })
 
-  it("keeps community summary, review effort, and task models on live paths", () => {
-    expect(communitySummary).toContain("novelConfig.communitySummaryEnabled")
-    expect(communitySummary).toContain("novelConfig.communitySummaryInterval")
-    expect(chapterIngest).toContain("novelConfig.communitySummaryAsync")
+  it("keeps review effort and task models on live paths", () => {
     expect(reviewAdapter).toContain("reviewReasoningEffort")
     expect(modelResolver).toContain("review: novelConfig.reviewModel")
-    expect(modelResolver).toContain("summary: novelConfig.summaryModel")
     expect(modelResolver).toContain("extract: novelConfig.extractModel")
     expect(modelResolver).toContain("deAi: novelConfig.deAiModel")
     expect(chatPanel).toContain("maxHistoryMessages")

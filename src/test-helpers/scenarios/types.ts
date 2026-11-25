@@ -149,8 +149,8 @@ export interface SearchScenario {
     topResultPaths: string[]
     /** Paths that must NOT appear anywhere in the results. */
     excludedPaths?: string[]
-    /** Paths for which the result's `titleMatch` field must be true. */
-    titleMatchPaths?: string[]
+    /** Additional pages that should appear anywhere in the results. */
+    includedPaths?: string[]
   }
 }
 

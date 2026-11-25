@@ -19,7 +19,8 @@ vi.mock("@/lib/search", () => ({
   tokenizeQuery: (query: string) => query.toLowerCase().split(/\s+/).filter(Boolean),
   searchWiki: vi.fn(),
 }))
-vi.mock("./search-adapter", () => ({
+vi.mock("./search-adapter", async importOriginal => ({
+  ...await importOriginal<typeof import("./search-adapter")>(),
   novelMixedSearch: vi.fn(),
   eligibleLocalSource: vi.fn(() => true),
   isHistoricalProjectionSnippet: vi.fn(() => false),
@@ -47,7 +48,6 @@ describe("searchRelevantContentUnified retrieval noise control", () => {
       path: "/project/wiki/memory/shared.md",
       title: "Shared Memory",
       snippet: "Different index excerpt",
-      titleMatch: false,
       score: 0.5,
       images: [],
     }])
@@ -102,6 +102,30 @@ describe("写作证据", () => {
     expect(searchSagProject).toHaveBeenCalledTimes(1)
     await buildContextPack(project, "写第6章", 6, { ...options, evidence: pack.sagEvidence })
     expect(searchSagProject).toHaveBeenCalledTimes(2)
+  })
+
+  it("SAG2 引文匹配未回收伏笔，复用证据时仅提示一次", async () => {
+    vi.mocked(searchSagProject).mockResolvedValue([{
+      path: "/project/QM/chapters/one.md", title: "渡口", content: "青铜钥匙还挂在门后。", startLine: 5, endLine: 5, score: 1,
+    }])
+    const snapshotOptions = {
+      categories: ["foreshadowing", "plot_tools"] as ("foreshadowing" | "plot_tools")[],
+      loadAdapter: {
+        async load<T>(source: { name: string }, _context: unknown, direct: () => Promise<T>): Promise<T> {
+          return source.name === "snapshots"
+            ? { foreshadowingSignals: ["青铜钥匙：未回收", "白鹤：未回收"] } as T
+            : direct()
+        },
+      },
+    }
+    const first = await buildContextPack(project, "写第5章", 5, snapshotOptions)
+    const reused = await buildContextPack(project, "写第5章", 5, { ...snapshotOptions, evidence: first.sagEvidence })
+    for (const pack of [first, reused]) {
+      const reminders = pack.foreshadowingStates.split("\n").filter(line => line.includes("近期反复出现"))
+      expect(reminders).toHaveLength(1)
+      expect(reminders[0]).toMatch(/：青铜钥匙$/)
+    }
+    expect(searchSagProject).toHaveBeenCalledOnce()
   })
 
   it("失败时保留章纲，警告与证据分开", async () => {

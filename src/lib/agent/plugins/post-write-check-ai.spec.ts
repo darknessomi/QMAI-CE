@@ -27,7 +27,6 @@ vi.mock("@/stores/wiki-store", async () => {
         providerConfigs: {},
         novelConfig: {
           reviewModel: "",
-          summaryModel: "",
           extractModel: "",
         },
       }),

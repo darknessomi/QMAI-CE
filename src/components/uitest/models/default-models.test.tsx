@@ -13,7 +13,7 @@ const initial = useWikiStore.getState()
 let host: HTMLDivElement, unmount: () => Promise<void>
 beforeEach(async () => {
   vi.clearAllMocks(); vi.spyOn(window, "confirm").mockReturnValue(true)
-  useWikiStore.setState({ ...initial, project: { id: "mock-book", path: "/mock/book", name: "模拟小说" }, aiChatModel: "custom-a/chat", novelConfig: { ...initial.novelConfig, defaultLlmModel: "custom-a/chat", reviewModel: "", summaryModel: "", extractModel: "", deAiModel: "" },
+  useWikiStore.setState({ ...initial, project: { id: "mock-book", path: "/mock/book", name: "模拟小说" }, aiChatModel: "custom-a/chat", novelConfig: { ...initial.novelConfig, defaultLlmModel: "custom-a/chat", reviewModel: "", extractModel: "", deAiModel: "" },
     providerConfigs: { "custom-a": { enabled: true, label: "模拟聊天", model: "chat", baseUrl: "https://chat.invalid/v1", apiKey: "mock-chat" }, "custom-b": { enabled: true, label: "模拟审稿", model: "review", baseUrl: "https://review.invalid/v1", apiKey: "mock-review" } },
   })
   ;({ host, unmount } = await mountModel(<UiTestDefaultModels />))

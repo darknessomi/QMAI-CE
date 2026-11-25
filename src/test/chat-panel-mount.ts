@@ -24,7 +24,7 @@ const wikiState = {
   chatEditModeEnabled: false,
   selectedFile: null,
   aiWorkflowMode: "standard",
-  novelConfig: { contextTokenBudget: 0 },
+  novelConfig: {},
   setActiveView: vi.fn(),
   setAiChatModel: vi.fn(),
   setAiWorkflowMode: vi.fn(),

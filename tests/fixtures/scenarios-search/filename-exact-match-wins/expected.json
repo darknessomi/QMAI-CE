@@ -2,7 +2,7 @@
   "topResultPaths": [
     "wiki/attention.md"
   ],
-  "titleMatchPaths": [
+  "includedPaths": [
     "wiki/attention.md",
     "wiki/multi-head-attention.md",
     "wiki/self-attention-history.md"

@@ -9,10 +9,9 @@ import { listDefaultModelOptions, resolveDraftDefaultModel } from "./default-dat
 import "./model-settings.css"
 
 const ROWS = [
-  { field: "defaultLlmModel", label: "默认模型（通用）", hint: "审稿、摘要、提取、去AI味默认使用此模型；不改变正文聊天模型。" },
+  { field: "defaultLlmModel", label: "默认模型（通用）", hint: "审稿、记忆提取和去 AI 味默认使用此模型。正文使用聊天时选择的模型。" },
   { field: "reviewModel", label: "审稿模型", hint: "用于连贯性、人物与文笔审查。" },
-  { field: "summaryModel", label: "摘要模型", hint: "用于章节与上下文摘要。" },
-  { field: "extractModel", label: "提取模型", hint: "用于结构化记忆与初始记忆。" },
+  { field: "extractModel", label: "提取模型", hint: "用于从章节提取摘要和结构化记忆，以及生成初始记忆。" },
   { field: "deAiModel", label: "去AI味模型", hint: "用于文本自然化与候选生成。" },
 ] as const
 export type DefaultModelDraft = Pick<NovelConfig, typeof ROWS[number]["field"]>

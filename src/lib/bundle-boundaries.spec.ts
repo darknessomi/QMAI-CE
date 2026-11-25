@@ -8,15 +8,17 @@ describe("frontend bundle boundaries", () => {
   it("uses focused vendor chunks instead of one forced book-analysis chunk", () => {
     const viteConfig = read("../../vite.config.ts")
 
-    expect(viteConfig).toContain('return "opencc-vendor"')
-    expect(viteConfig).toContain('return "pinyin-vendor"')
     expect(viteConfig).toContain('return "yaml-vendor"')
     expect(viteConfig).not.toContain('return "book-analysis-vendor"')
   })
 
-  it("keeps the graphology chunk for writing memory without visual graph vendors", () => {
+  it("keeps retired graph and text-analysis vendors out of the bundle", () => {
     const viteConfig = read("../../vite.config.ts")
-    expect(viteConfig).toContain('return "graphology-vendor"')
+    const { dependencies } = JSON.parse(read("../../package.json"))
+    for (const name of ["graphology", "graphology-communities-louvain", "pinyin-pro", "opencc-js"]) {
+      expect(dependencies).not.toHaveProperty(name)
+      expect(viteConfig).not.toContain(name)
+    }
     expect(viteConfig).not.toContain('return "sigma-vendor"')
     expect(viteConfig).not.toContain('return "cytoscape-vendor"')
   })

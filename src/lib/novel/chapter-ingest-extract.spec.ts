@@ -115,9 +115,7 @@ describe("chapter ingest reextract path", () => {
   const source = readFileSync(resolve(__dirname, "chapter-ingest.ts"), "utf8")
 
   it("rebuilds derived memory on reextract instead of applying incremental changes twice", () => {
-    expect(source).toContain("const isReingest = existingSnapshot != null")
     expect(source).toContain("await rebuildDerivedMemoryFromSnapshots(pp, syncedSnapshot")
-    expect(source).toContain("if (!isReingest && shouldRebuildCommunitySummaries")
   })
 
   it("sends extract requests with the compact overrides", () => {

@@ -100,13 +100,8 @@ describe("search scenarios (fixture-driven)", () => {
           }
         }
 
-        // 3. Paths that must have titleMatch=true
-        if (scenario.expected.titleMatchPaths) {
-          for (const p of scenario.expected.titleMatchPaths) {
-            const r = resultFor(p)
-            expect(r, `title-match page ${p} missing from results`).toBeTruthy()
-            expect(r!.titleMatch, `${p} should have titleMatch=true`).toBe(true)
-          }
+        for (const p of scenario.expected.includedPaths ?? []) {
+          expect(resultFor(p), `expected page missing: ${p}`).toBeTruthy()
         }
       } catch (err) {
         // eslint-disable-next-line no-console
@@ -115,7 +110,6 @@ describe("search scenarios (fixture-driven)", () => {
             JSON.stringify(
               results.map((r) => ({
                 path: r.path,
-                titleMatch: r.titleMatch,
                 score: r.score,
               })),
               null,

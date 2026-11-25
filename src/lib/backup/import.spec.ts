@@ -7,12 +7,14 @@ const {
   unlistenMock,
   loadRegistryMock,
   upsertProjectInfoMock,
+  loadJevConfigMock,
 } = vi.hoisted(() => ({
   invokeMock: vi.fn(),
   listenMock: vi.fn(),
   unlistenMock: vi.fn(),
   loadRegistryMock: vi.fn(),
   upsertProjectInfoMock: vi.fn(),
+  loadJevConfigMock: vi.fn(),
 }))
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: invokeMock }))
@@ -23,6 +25,7 @@ vi.mock("@/lib/project-identity", () => ({
   upsertProjectInfo: upsertProjectInfoMock,
 }))
 vi.mock("@/lib/project-refresh", () => ({ refreshProjectState: vi.fn() }))
+vi.mock("@/lib/jev-config", () => ({ loadJevConfig: loadJevConfigMock }))
 vi.mock("@/stores/wiki-store", () => ({
   useWikiStore: { getState: () => ({ project: null }) },
 }))
@@ -98,6 +101,14 @@ describe("V2 备份导入适配", () => {
 
     expect(result.success).toBe(true)
     expect(invokeMock).not.toHaveBeenCalledWith("read_backup_manifest", expect.anything())
+    expect(loadJevConfigMock).not.toHaveBeenCalled()
+  })
+
+  it("JEV 配置恢复后立即刷新，即使另有项目恢复失败", async () => {
+    invokeMock.mockResolvedValueOnce(preview)
+      .mockResolvedValueOnce({ ...importResult(false), success: false, jevConfigRestored: true })
+    await importBackup("full", undefined, undefined, "C:/backup/jev.zip")
+    expect(loadJevConfigMock).toHaveBeenCalledOnce()
   })
 
   it("备份带了 qm-uitest- 时整组替换（皮肤跟着备份走）", async () => {

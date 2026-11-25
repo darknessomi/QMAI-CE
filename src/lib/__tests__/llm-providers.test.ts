@@ -159,7 +159,7 @@ describe("Claude Code CLI provider — not reachable via getProviderConfig", () 
       getProviderConfig({
         provider: "claude-code",
         apiKey: "",
-        model: "claude-sonnet-4-6",
+        model: "sonnet",
         ollamaUrl: "",
         customEndpoint: "",
         maxContextSize: 200000,
@@ -349,7 +349,7 @@ describe("Sampling override translation across wires", () => {
     const cfg = getProviderConfig({
       provider: "anthropic",
       apiKey: "k",
-      model: "claude-sonnet-4-5-20250929",
+      model: "claude-haiku-4-5",
       ollamaUrl: "",
       customEndpoint: "",
       maxContextSize: 200000,

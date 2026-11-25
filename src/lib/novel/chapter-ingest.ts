@@ -20,7 +20,6 @@ import { resolveNovelModel } from "./model-resolver"
 import { listChapterSources, refreshProjectMemory, type ChapterSource } from "./refresh-memory"
 export { createRetrievalStore } from "./refresh-memory"
 import { hasUsableLlm } from "@/lib/has-usable-llm"
-import { shouldRebuildCommunitySummaries, generateCommunitySummaries } from "./community-summary"
 import { learnPersonaSkillsFromChapter } from "./persona-skill-learning"
 import { buildChapterIngestOutput, type ChapterIngestOutput } from "./chapter-ingest-output"
 import { isValidMemorySnapshot } from "./memory-rebuild"
@@ -287,7 +286,6 @@ export async function ingestChapter(
     model: runtimeLlmConfig.model,
     provider: runtimeLlmConfig.provider,
   })
-  const existingSnapshotPromise = readCurrentSnapshot(pp, chapterNumber)
   let extraction: MemoryExtraction
   try {
     // 先备好「已建立设定」：物品分类要判断归属（谁是主角/配角/反派）与有无意义
@@ -314,8 +312,6 @@ export async function ingestChapter(
       return logFail("extract_failed", "提取期间章节已修改，请使用新稿重新提取")
     }
     Object.assign(snapshot, filterRemovedMemories(snapshot, await loadMemoryCleanupPolicy(pp)))
-    const existingSnapshot = await existingSnapshotPromise
-    const isReingest = existingSnapshot != null
 
     try {
       const [entityWarnings, canonWarnings] = await Promise.all([
@@ -350,15 +346,7 @@ export async function ingestChapter(
     // 后台异步、不阻塞「提取记忆」按钮；整章所有人物合并成一次 LLM 调用。
     // 这里刻意不 await：学习失败只 warn，绝不能影响章节摄取本身。
     //
-    // 重新提取（isReingest）同样要学习 —— 不能短路：
-    // 旧版这里写着「重新提取不重复学习，避免重复消耗模型」，但那个理由站不住，
-    // 而且有真实代价。学习本身就是幂等的（planPersonaSkillRound 按
-    // lastLearnedChapter 跳过已学过的人；候选池按 chapters[] 去重），
-    // 所以重复摄取不会二次烧模型。反过来，一旦某一轮因为任何原因没建出档案
-    // （定位查不到、模型没返回 JSON、应用被关掉），短路就等于**永久放弃修复**：
-    // 用户手上唯一的补救动作就是重新提取，而那恰好是被跳过的那条路。
-    // 实测就踩了这个坑：第 1 章早已摄取过，重新提取时 isReingest 为真，
-    // 学习整段不执行，技能库永远是空的。
+    // 首次和重新提取都学习，已学过的章节由人物学习流程去重。
     void learnPersonaSkillsFromChapter({
       projectPath: pp,
       chapter: {
@@ -373,28 +361,6 @@ export async function ingestChapter(
       llmConfig: runtimeLlmConfig,
       signal,
     })
-
-    // 重新提取只替换本章快照，不必顺带打一次社区摘要（那是另一次 LLM）。
-    if (!isReingest && shouldRebuildCommunitySummaries(snapshot.chapterNumber, novelConfig)) {
-      const rebuildCommunitySummaries = async () => {
-        try {
-          await generateCommunitySummaries(pp, llmConfig, novelConfig, signal)
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err)
-          console.warn("[Chapter Ingest] 社区摘要生成失败:", message)
-          // 弹窗提示（通过 store 触发 UI 通知）
-          useWikiStore.getState().setCommunitySummaryError(message)
-        }
-      }
-
-      if (novelConfig.communitySummaryAsync) {
-        // 后台异步执行，不阻塞章节摄取
-        void rebuildCommunitySummaries()
-      } else {
-        // 同步等待
-        await rebuildCommunitySummaries()
-      }
-    }
 
     await appendChapterIngestLog(pp, {
       event: "ok",
@@ -538,12 +504,6 @@ function snapshotToMarkdown(snapshot: ChapterSnapshot): string {
     "",
     `## 结尾钩子`,
     snapshot.endingHook || "（无）",
-    "",
-    `## 图谱节点`,
-    ...(snapshot.graphNodes.length > 0 ? snapshot.graphNodes.map(g => `- ${g}`) : ["（无）"]),
-    "",
-    `## 图谱关系边`,
-    ...(snapshot.graphEdges.length > 0 ? snapshot.graphEdges.map(g => `- ${g}`) : ["（无）"]),
   ]
 
   if (snapshot.validationWarnings && snapshot.validationWarnings.length > 0) {

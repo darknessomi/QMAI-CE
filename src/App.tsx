@@ -64,8 +64,6 @@ function App() {
   const uiBodyMarginX = useWikiStore((s) => s.uiBodyMarginX)
   const uiBodySafeBottom = useWikiStore((s) => s.uiBodySafeBottom)
   const visualStyle = useWikiStore((s) => s.visualStyle)
-  const communitySummaryError = useWikiStore((s) => s.communitySummaryError)
-  const setCommunitySummaryError = useWikiStore((s) => s.setCommunitySummaryError)
   const personaSkillLearningError = useWikiStore((s) => s.personaSkillLearningError)
   const setPersonaSkillLearningError = useWikiStore((s) => s.setPersonaSkillLearningError)
   const dataVersion = useWikiStore((s) => s.dataVersion)
@@ -241,14 +239,6 @@ function App() {
   useEffect(() => {
     applyVisualStyle("classic")
   }, [visualStyle])
-
-  // 监听社区摘要生成错误，弹窗提示
-  useEffect(() => {
-    if (communitySummaryError) {
-      toast.error(i18n.t("novel.settings.communitySummaryFailed", { message: communitySummaryError }))
-      setCommunitySummaryError(null)
-    }
-  }, [communitySummaryError, setCommunitySummaryError])
 
   // 监听人物 Skill 学习失败。学习是后台 void 调用，以前只写 console，
   // 用户看到的现象是「提取完了技能库还是空的」，却完全不知道哪里出了问题。

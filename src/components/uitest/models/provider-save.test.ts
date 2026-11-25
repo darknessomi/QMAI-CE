@@ -35,12 +35,12 @@ it("删除当前提供方会清理活动引用，但不重置聊天和正文", a
   expect(saveLlmConfig).not.toHaveBeenCalled()
 })
 it("删除配置清理指向它的默认模型引用，其他模型引用不变", async () => {
-  const novel = { ...useWikiStore.getState().novelConfig, defaultLlmModel: "custom-a/model-a", reviewModel: "custom-a/model-a", summaryModel: "other/model-b", extractModel: "", deAiModel: "" }
+  const novel = { ...useWikiStore.getState().novelConfig, defaultLlmModel: "custom-a/model-a", reviewModel: "custom-a/model-a", extractModel: "other/model-b", deAiModel: "" }
   useWikiStore.setState({ novelConfig: novel, defaultLlmModel: "custom-a/model-a", project: null })
   await saveUiTestProvider("custom-a", null, first)
   expect(saveNovelConfig).toHaveBeenCalledWith({ ...novel, defaultLlmModel: "", reviewModel: "" }, undefined, undefined)
   expect(saveDefaultLlmModel).toHaveBeenCalledWith("")
-  expect(useWikiStore.getState().novelConfig).toMatchObject({ defaultLlmModel: "", reviewModel: "", summaryModel: "other/model-b" })
+  expect(useWikiStore.getState().novelConfig).toMatchObject({ defaultLlmModel: "", reviewModel: "", extractModel: "other/model-b" })
 })
 it("删除过程中引用清理落盘失败时，提供方和引用都保持原值", async () => {
   useWikiStore.setState({ defaultLlmModel: "custom-a/model-a", novelConfig: { ...useWikiStore.getState().novelConfig, defaultLlmModel: "custom-a/model-a" } })

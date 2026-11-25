@@ -317,19 +317,10 @@ interface SourceWatchConfig {
 }
 
 export interface NovelConfig {
-  /** @deprecated Always 0 (auto from model window). Kept for config schema compatibility. */
-  contextTokenBudget: number
   recentSummaryWindow: number
   searchTopK: number
   /** 单章目标字数（按去除空白后的字符数计），章节生成提示词和扩写阈值都按它推算。 */
   chapterTargetChars: number
-  /*
-   * 原先这里有 `autoIngestOnSave`：「保存为正式章节时自动提取记忆」。
-   * 用户指出它与章节/大纲工具栏的「提取记忆」按钮是同一件事，要求取消 ——
-   * 字段、开关与那条自动行为都已移除，提取记忆只由用户点按钮触发。
-   * 旧配置里存着的这个键读取时会被忽略（见 loadNovelConfig 的逐字段取值）。
-   */
-  autoExtractOnImport: boolean
   /** 前情分析：读取并 LLM 分析前几章完整正文。快速模式始终跳过；标准/严格模式跟随此开关。关闭时记忆库的近期摘要与上一章结尾仍会注入（默认关）。 */
   deepPreviousChaptersAnalysis: boolean
   /** 章节写作联网补搜：本地缺实体时自动联网。快速模式始终跳过；标准/严格模式跟随此开关。需先配置网页搜索源（默认开）。 */
@@ -338,22 +329,12 @@ export interface NovelConfig {
   reviewReasoningEffort: "low" | "medium" | "high"
   /** 默认模型（工作流）：审稿、记忆提取、资料去重等。空字符串表示跟随 AI 会话模型。 */
   defaultLlmModel: string
-  writingModel: string
   reviewModel: string
-  summaryModel: string
   extractModel: string
   /** 去 AI 味：章节预览去 AI 味、深度生成阶段6。空字符串表示跟随默认模型。 */
   deAiModel: string
   /** 批量去 AI 味同时运行的章节数，范围 1–5。 */
   deAiBatchConcurrency: number
-  /** 社区摘要自动提取：开启后每 N 章用 LLM 为图谱社区生成叙事摘要，用于回答全局性问题（默认开）。 */
-  communitySummaryEnabled: boolean
-  /** 社区摘要提取间隔：每摄取多少章后自动重建一次社区摘要（默认 5）。 */
-  communitySummaryInterval: number
-  /** 社区摘要后台异步执行：开启后不阻塞章节摄取，关闭则同步等待（默认开）。 */
-  communitySummaryAsync: boolean
-  /** 生成章节时自动输出标题：开启后AI在正文开头输出 # 第X章 标题名 格式的标题，保存时自动使用（默认开）。 */
-  autoGenerateChapterTitle: boolean
   /** 草稿章节是否提示先保存为正式再提取记忆。关闭后不再弹出（默认开）。 */
   draftMemoryHintEnabled: boolean
   /** 这本书的文件夹里是否已经提示过一次。重新打开开关不会清掉。 */
@@ -378,25 +359,17 @@ export interface NovelConfig {
 }
 
 export const DEFAULT_NOVEL_CONFIG: NovelConfig = {
-  contextTokenBudget: 0,
   recentSummaryWindow: 8,
   searchTopK: 5,
   chapterTargetChars: 3000,
-  autoExtractOnImport: true,
   deepPreviousChaptersAnalysis: false,
   writingWebSearchEnabled: true,
   reviewReasoningEffort: "high",
   defaultLlmModel: "",
-  writingModel: "",
   reviewModel: "",
-  summaryModel: "",
   extractModel: "",
   deAiModel: "",
   deAiBatchConcurrency: 3,
-  communitySummaryEnabled: true,
-  communitySummaryInterval: 5,
-  communitySummaryAsync: true,
-  autoGenerateChapterTitle: true,
   draftMemoryHintEnabled: true,
   draftMemoryHintSeen: false,
   inspirationHintEnabled: true,
@@ -667,8 +640,6 @@ interface WikiState {
   aiWorkflowModeBeforeDiscuss: AiWorkflowMode
   outlineWorkflowMode: OutlineWorkflowMode
   novelConfig: NovelConfig
-  /** 社区摘要生成错误信息（UI 层监听并弹窗提示） */
-  communitySummaryError: string | null
   /**
    * 人物 Skill 本轮没建出档案的原因（UI 层监听并弹窗提示）。
    * 学习是后台 `void` 调用，失败以前只写 console，用户在界面上完全看不到 ——
@@ -741,7 +712,6 @@ interface WikiState {
   setAiWorkflowMode: (mode: AiWorkflowMode) => void
   setOutlineWorkflowMode: (mode: OutlineWorkflowMode) => void
   setNovelConfig: (config: Partial<NovelConfig>) => void
-  setCommunitySummaryError: (error: string | null) => void
   setPersonaSkillLearningError: (error: string | null) => void
   setSearchHistory: (history: string[]) => void
   setSearchTrigger: (trigger: { query: string; ts: number } | null) => void
@@ -968,7 +938,6 @@ export const useWikiStore = create<WikiState>((set, get) => ({
   aiWorkflowModeBeforeDiscuss: DEFAULT_AI_WORKFLOW_MODE,
   outlineWorkflowMode: DEFAULT_OUTLINE_WORKFLOW_MODE,
   novelConfig: { ...DEFAULT_NOVEL_CONFIG },
-  communitySummaryError: null,
   personaSkillLearningError: null,
   searchHistory: [],
   searchTrigger: null,
@@ -1034,7 +1003,6 @@ export const useWikiStore = create<WikiState>((set, get) => ({
       ? { defaultLlmModel: config.defaultLlmModel }
       : {}),
   })),
-  setCommunitySummaryError: (communitySummaryError) => set({ communitySummaryError }),
   setPersonaSkillLearningError: (personaSkillLearningError) => set({ personaSkillLearningError }),
   setSearchHistory: (searchHistory) => set({ searchHistory }),
   setSearchTrigger: (searchTrigger) => set({ searchTrigger }),

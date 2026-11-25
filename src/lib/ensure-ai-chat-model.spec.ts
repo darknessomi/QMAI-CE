@@ -16,7 +16,7 @@ function saved(id: string) {
 
 const availableConfigs: ProviderConfigs = {
   openai: { enabled: true, apiKey: "key", savedModels: [saved("gpt-4o"), saved("gpt-4.1")] },
-  anthropic: { enabled: true, apiKey: "key", savedModels: [saved("claude-sonnet")] },
+  "codex-cli": { enabled: true, savedModels: [saved("gpt-6.2-sol")] },
 }
 
 describe("ensureAiChatModelSelected", () => {
@@ -36,12 +36,12 @@ describe("ensureAiChatModelSelected", () => {
 
   it("keeps an already selected chat model", () => {
     useWikiStore.setState({
-      aiChatModel: "anthropic/claude-sonnet",
+      aiChatModel: "codex-cli/gpt-6.2-sol",
       providerConfigs: availableConfigs,
     })
 
-    expect(ensureAiChatModelSelected()).toBe("anthropic/claude-sonnet")
-    expect(useWikiStore.getState().aiChatModel).toBe("anthropic/claude-sonnet")
+    expect(ensureAiChatModelSelected()).toBe("codex-cli/gpt-6.2-sol")
+    expect(useWikiStore.getState().aiChatModel).toBe("codex-cli/gpt-6.2-sol")
     expect(saveAiChatModel).not.toHaveBeenCalled()
   })
 

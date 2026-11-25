@@ -592,6 +592,7 @@ fn stage_tree(
                 && !dest.starts_with(stage.join(".qmai/lancedb"))
                 && dest != stage.join(".qmai/embedding-index.json")
                 && !dest.starts_with(stage.join(".qmai/novel/snapshots"))
+                && !dest.starts_with(stage.join(".qmai/novel/community-summaries"))
             {
                 rewrite_json_file(&dest, original_project)?;
             }
@@ -1516,7 +1517,8 @@ mod tests {
         }
         let community = p.join(".novel/community-summaries");
         fs::create_dir(&community).unwrap();
-        fs::write(community.join("5.json"),json!({"communityId":5,"nodeCount":6,"summary":"摘要","generatedAt":"时间","topNodes":[]}).to_string()).unwrap();
+        let summary = r#"{ "communityId": 5, "nodeCount": 6, "summary": "旧摘要", "generatedAt":"时间", "topNodes":[] }"#;
+        fs::write(community.join("5.json"), summary).unwrap();
         fs::write(p.join(".qmai/ingest-cache.json"), r#"{"entries":{}}"#).unwrap();
         fs::write(p.join(".qmai/dedup-queue.json"), "待执行").unwrap();
         fs::write(p.join(".qmai/.作者.tmp"), "私有备忘").unwrap();
@@ -1526,7 +1528,7 @@ mod tests {
  \"summary\": \"原文\"  }";
         fs::write(snapshots.join("001.snapshot.json"), original).unwrap();
         let report = run(&p, Mode::Apply, |_| (), worker).unwrap();
-        assert_eq!(report.retired_artifacts.len(), 8);
+        assert_eq!(report.retired_artifacts.len(), 7);
         assert!(report.retired_artifacts.values().all(|n| *n == 1));
         assert_eq!(
             fs::read_dir(p.join(".qmai/novel/chapter-ingest-output"))
@@ -1542,7 +1544,10 @@ mod tests {
             positive.get("searchIndexText").is_none() && positive.get("vectorIndexText").is_none()
         );
         assert_eq!(positive["other"], "作者的扩展字段");
-        assert!(!p.join(".qmai/novel/community-summaries").exists());
+        assert_eq!(
+            fs::read_to_string(p.join(".qmai/novel/community-summaries/5.json")).unwrap(),
+            summary
+        );
         assert_eq!(
             fs::read_to_string(p.join(".qmai/novel/snapshots/001.snapshot.json")).unwrap(),
             original

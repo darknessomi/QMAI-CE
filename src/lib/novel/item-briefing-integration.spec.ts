@@ -84,7 +84,7 @@ describe("出场物品进入写作提示词", () => {
     }
     vi.doMock("@/lib/sag-search", async original => ({
       ...await original<typeof import("@/lib/sag-search")>(),
-      prepareSagChapterScope: async () => ({ files: [...chapters.values()], fingerprint: "fixture", chapters }),
+      prepareSagChapterScope: async () => ({ files: [...chapters.values()], fingerprint: "fixture", chapters, pages: new Map() }),
     }))
 
     vi.doMock("@/commands/fs", () => ({

@@ -123,22 +123,6 @@ export function canonicalizeSnapshotCharacters(snapshot: ChapterSnapshot): Chapt
   }
 }
 
-export const NOVEL_NODE_TYPE_LABELS: Record<NovelNodeType, string> = {
-  character: "人物",
-  location: "地点",
-  organization: "组织",
-  item: "物品",
-  event: "事件",
-  chapter: "章节",
-  outline: "大纲",
-  foreshadowing: "伏笔",
-  secret: "秘密",
-  conflict: "冲突",
-  "timeline-point": "时间点",
-  "canon-rule": "正史规则",
-  concept: "概念",
-}
-
 export const NOVEL_RELATION_LABELS: Record<string, string> = {
   APPEARS_IN: "出场于",
   HAPPENS_IN: "发生于",

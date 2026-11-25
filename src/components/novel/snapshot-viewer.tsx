@@ -207,8 +207,6 @@ export function SnapshotViewer({ projectPath, chapterNumber, onClose }: Snapshot
       <Section title={t("novel.snapshot.timelineEvents")} items={data.timelineEvents} />
       <Section title={t("novel.snapshot.conflicts")} items={data.conflicts} />
       <TextSection title={t("novel.snapshot.endingHook")} content={data.endingHook} />
-      <Section title="图谱节点" items={data.graphNodes} />
-      <Section title="图谱关系边" items={data.graphEdges} />
     </div>
   )
 
@@ -228,8 +226,6 @@ export function SnapshotViewer({ projectPath, chapterNumber, onClose }: Snapshot
       <EditableListSection title={t("novel.snapshot.timelineEvents")} value={data.timelineEvents} onChange={(value) => editList("timelineEvents", value)} />
       <EditableListSection title={t("novel.snapshot.conflicts")} value={data.conflicts} onChange={(value) => editList("conflicts", value)} />
       <EditableTextSection title={t("novel.snapshot.endingHook")} value={data.endingHook} onChange={(value) => editText("endingHook", value)} />
-      <EditableListSection title="图谱节点" value={data.graphNodes} onChange={(value) => editList("graphNodes", value)} />
-      <EditableListSection title="图谱关系边" value={data.graphEdges} onChange={(value) => editList("graphEdges", value)} />
     </div>
   )
 
@@ -352,7 +348,7 @@ export function SnapshotViewer({ projectPath, chapterNumber, onClose }: Snapshot
                 </button>
                 {showJson && (
                   <pre className="mt-2 max-h-[200px] overflow-auto whitespace-pre-wrap rounded bg-muted p-2 text-xs text-muted-foreground">
-                    {JSON.stringify(editing && draft ? draft : snapshot, null, 2)}
+                    {JSON.stringify({ ...(editing && draft ? draft : snapshot), graphNodes: undefined, graphEdges: undefined }, null, 2)}
                   </pre>
                 )}
               </div>

@@ -2,7 +2,7 @@
   "topResultPaths": [
     "wiki/zong-zi-chan.md"
   ],
-  "titleMatchPaths": [
+  "includedPaths": [
     "wiki/zong-zi-chan.md"
   ],
   "excludedPaths": [

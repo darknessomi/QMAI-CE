@@ -15,6 +15,7 @@ describe("context source paths", () => {
     ["E:/Novel/wiki/entities/林默.md", "entity"],
     ["E:/Novel/wiki/settings/world.md", "setting"],
     ["E:/Novel/.qmai/novel/snapshots/001.snapshot.json", "snapshot"],
+    ["E:/Novel/.qmai/novel/community-summaries/5.json", "other"],
     ["E:/Novel/.qmai/persona-skills/index.json", "entity"],
     ["E:/Novel/.qmai/novel/cognition-state.json", "entity"],
     ["E:/Novel/.qmai/novel/character-states.json", "entity"],
@@ -45,7 +46,7 @@ describe("context source paths", () => {
 
   it("maps data sources to only their relevant source kinds", () => {
     expect(getDataSourceKinds("outline")).toEqual(["outline"])
-    expect(getDataSourceKinds("relatedSettings")).toEqual(["entity", "setting"])
+    expect(getDataSourceKinds("relatedSettings")).toEqual(["entity", "setting", "reference"])
     expect(getDataSourceKinds("recentChapterContents")).toEqual(["chapter"])
     expect(getDataSourceKinds("retrieval")).toEqual(["retrieval"])
     expect(getDataSourceKinds("searchResults")).toContain("snapshot")

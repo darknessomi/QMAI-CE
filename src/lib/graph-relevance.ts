@@ -177,7 +177,7 @@ function relationNameToType(name: string): string | undefined {
 /**
  * 从 wiki 实体页内容提取带关系类型的链接。
  *
- * 匹配格式（与 wiki-graph.ts 的 extractRelationLinks 保持一致）：
+ * 匹配格式：
  *   - [[target]] — 关系标签
  *   - [[target]] - 关系标签
  *   - [[target]] : 关系标签

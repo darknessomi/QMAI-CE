@@ -8,7 +8,7 @@ import { isPluginProviderInjected } from "@/lib/plugins/provider-sync"
 import { normalizeDeclaredContextSize, normalizeUserLlmConfig, normalizeUserLlmMaxOutputTokens } from "@/lib/llm-context-size"
 import type { AiWorkflowMode } from "@/lib/agent/workflow-mode"
 
-export type NovelTaskType = "writing" | "review" | "summary" | "extract" | "lint" | "deAi"
+export type NovelTaskType = "writing" | "review" | "extract" | "lint" | "deAi"
 
 const UNUSABLE_LLM_CONFIG: Pick<LlmConfig, "provider" | "apiKey" | "model"> = {
   provider: "openai",
@@ -222,7 +222,6 @@ export function resolveNovelModel(
   const modelMap: Record<NovelTaskType, string> = {
     writing: "", // 写作正文属于“聊天写小说”，直接用聊天模型（下方特判）
     review: novelConfig.reviewModel,
-    summary: novelConfig.summaryModel,
     extract: novelConfig.extractModel,
     lint: novelConfig.reviewModel,
     deAi: novelConfig.deAiModel,
@@ -245,7 +244,7 @@ export function resolveNovelModel(
     return toUnusableConfig(llmConfig)
   }
 
-  // 其余任务级模型（审稿/摘要/提取/lint）：
+  // 其余任务级模型（审稿/提取/lint）：
   //   任务单独设置 > 默认模型 > 聊天模型（仅默认未设置时兜底）
   const taskModel = modelMap[taskType]
   if (taskModel?.trim()) {

@@ -17,7 +17,7 @@ import { buildPersonaSkillContext } from "./persona-skill-context"
 import { withMemoryWriteLock } from "./memory-cleanup-policy"
 import { eligibleLocalSource, isAuthoritativeGenerationPath, isHistoricalProjectionSnippet, novelMixedSearch } from "./search-adapter"
 import { getJevConfigState } from "@/lib/jev-config"
-import { fitSagEvidence, formatSagEvidence, prepareSagChapterScope, searchSagProject } from "@/lib/sag-search"
+import { fitSagEvidence, formatSagEvidence, prepareSagChapterScope, searchSagProject, type ChapterScope } from "@/lib/sag-search"
 import {
   DataSourceRegistry,
   type ContextLoadContext,
@@ -156,18 +156,19 @@ export async function buildContextPack(
   const semantic = Boolean(jev.config || jev.error)
   const isSearchSource = (source: { name: string }) => source.name === "searchResults" || source.name === "graphSearchResults"
   const wantsSearch = sources.some(isSearchSource)
+  const wantsPages = wantsSearch || sources.some(({ name }) => ["relatedSettings", "canonRules", "writingStyle"].includes(name))
   const registry = new DataSourceRegistry({ loadAdapter: options?.loadAdapter })
   registry.registerAll(semantic ? sources.filter(source => !isSearchSource(source)) : sources)
   const beforeChapter = context.chapterNumber ?? Number.MAX_SAFE_INTEGER
   let scope: Awaited<ReturnType<typeof prepareSagChapterScope>> | undefined
   let failure = jev.error
   try {
-    scope = await prepareSagChapterScope(pp, beforeChapter, options?.signal, Boolean(jev.config && wantsSearch))
+    scope = await prepareSagChapterScope(pp, beforeChapter, options?.signal, wantsPages)
   } catch (error) {
     options?.signal?.throwIfAborted()
     failure ??= error instanceof Error ? error.message : String(error)
   }
-  context.chapterScope = scope ?? { fingerprint: "unavailable", chapters: new Map() }
+  context.chapterScope = scope ?? { fingerprint: "unavailable", chapters: new Map(), pages: new Map() }
 
   const { pack, chapterOutline } = await withMemoryWriteLock(pp, async () => {
     const rawData = await registry.loadAll(context)
@@ -196,7 +197,13 @@ export async function buildContextPack(
     options?.signal?.throwIfAborted()
     evidence = { chapterNumber: context.chapterNumber, scopeKey, text: "", warning: `本轮未取得 SAG2 原文证据：${error instanceof Error ? error.message : String(error)}` }
   }
-  return { ...pack, sagEvidence: evidence, searchResults: evidence.text, graphSearchResults: "" }
+  return {
+    ...pack,
+    sagEvidence: evidence,
+    searchResults: evidence.text,
+    graphSearchResults: "",
+    foreshadowingStates: mergeForeshadowingSignals(pack.foreshadowingStates.split("\n"), evidence.text),
+  }
 }
 
 /**
@@ -710,7 +717,7 @@ export async function searchRelevantContentUnified(
   task: string,
   chapterNumber: number | undefined,
   limit: number,
-  readableChapters?: ReadonlyMap<number, string>,
+  chapterScope?: ChapterScope,
 ): Promise<string> {
   const tokens = tokenizeQuery(task)
   const entityHints = tokens.filter((t) => t.length >= 2).slice(0, 5)
@@ -730,7 +737,7 @@ export async function searchRelevantContentUnified(
       projectPath: pp,
       query,
       chapterNumber,
-      readableChapters,
+      chapterScope,
       topK: Math.max(limit * 2, 6),
       authoritativeOnly: true,
       includeKeyword: true,
@@ -740,7 +747,7 @@ export async function searchRelevantContentUnified(
     }).catch(() => []),
     searchWiki(pp, task, {
       localOnly: true,
-      acceptFile: (path, content) => eligibleLocalSource(path, content, chapterNumber, readableChapters),
+      acceptFile: (path, content) => eligibleLocalSource(path, content, chapterNumber, chapterScope),
       topK: Math.max(limit, 4),
     }).catch(() => []),
   ])
@@ -796,7 +803,7 @@ export async function searchGraphRelevantContent(
   task: string,
   chapterNumber: number | undefined,
   limit = 10,
-  readableChapters?: ReadonlyMap<number, string>,
+  chapterScope?: ChapterScope,
 ): Promise<string> {
   const topK = Math.max(1, Math.floor(limit) || 10)
   try {
@@ -842,7 +849,7 @@ export async function searchGraphRelevantContent(
           try {
             const content = await readFile(node.path)
             if (isAiExcludedContent(content) || isGeneratedProjection(content)) continue
-            if (chapterNumber && !eligibleLocalSource(node.path, content, chapterNumber, readableChapters)) continue
+            if ((chapterNumber || chapterScope) && !await eligibleLocalSource(node.path, content, chapterNumber, chapterScope)) continue
             scoredNodes.push({
               title: node.title,
               snippet: content.slice(0, 300).replace(/\n/g, " "),

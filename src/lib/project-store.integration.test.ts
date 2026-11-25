@@ -7,7 +7,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
 import { realFs, createTempProject, writeFileRaw, fileExists, readFileRaw } from "@/test-helpers/fs-temp"
-import type { LlmConfig, NovelConfig, ProviderConfigs, RevisionFeedbackWindowConfig, SourceWatchConfig } from "@/stores/wiki-store"
+import { DEFAULT_NOVEL_CONFIG, type LlmConfig, type NovelConfig, type ProviderConfigs, type RevisionFeedbackWindowConfig, type SourceWatchConfig } from "@/stores/wiki-store"
 
 vi.mock("@/commands/fs", () => realFs)
 
@@ -228,30 +228,12 @@ describe("Codex CLI model migration", () => {
 
 function makeNovelConfig(overrides: Partial<NovelConfig> = {}): NovelConfig {
   return {
-    contextTokenBudget: 200000,
+    ...DEFAULT_NOVEL_CONFIG,
     recentSummaryWindow: 16,
     searchTopK: 20,
-    chapterTargetChars: 3000,
-    autoExtractOnImport: true,
-    deepPreviousChaptersAnalysis: false,
-    writingWebSearchEnabled: true,
-    reviewReasoningEffort: "high",
-    writingModel: "claude-4-sonnet",
-    reviewModel: "claude-4-sonnet",
-    summaryModel: "claude-4-sonnet",
-    extractModel: "claude-4-sonnet",
-    communitySummaryEnabled: false,
-    communitySummaryInterval: 5,
-    communitySummaryAsync: false,
-    autoGenerateChapterTitle: true,
-    draftMemoryHintEnabled: true,
-    draftMemoryHintSeen: false,
-    inspirationHintEnabled: true,
-    inspirationHintSeen: false,
+    reviewModel: "gpt-6.2-sol",
+    extractModel: "gpt-6.2-sol",
     ...overrides,
-    defaultLlmModel: overrides.defaultLlmModel ?? "",
-    deAiModel: overrides.deAiModel ?? "",
-    deAiBatchConcurrency: overrides.deAiBatchConcurrency ?? 3,
   }
 }
 
@@ -287,10 +269,10 @@ describe("novelConfig — project-directory persistence", () => {
   })
 
   it("round-trip save then load returns identical config", async () => {
-    const config = makeNovelConfig({ contextTokenBudget: 100000, searchTopK: 15 })
+    const config = makeNovelConfig({ searchTopK: 15 })
     await saveNovelConfig(config, "proj-1", tmp.path)
     const loaded = await loadNovelConfig("proj-1", tmp.path)
-    expect(loaded).toEqual({ ...config, contextTokenBudget: 0 })
+    expect(loaded).toEqual(config)
   })
 
   it("keeps explicit follow-chat (empty defaultLlmModel) even when a legacy global model exists", async () => {
@@ -298,7 +280,6 @@ describe("novelConfig — project-directory persistence", () => {
     const config = makeNovelConfig({
       defaultLlmModel: "",
       reviewModel: "",
-      summaryModel: "",
       extractModel: "",
       deAiModel: "",
     })
@@ -307,7 +288,6 @@ describe("novelConfig — project-directory persistence", () => {
     const loaded = await loadNovelConfig("proj-follow", tmp.path)
     expect(loaded?.defaultLlmModel).toBe("")
     expect(loaded?.reviewModel).toBe("")
-    expect(loaded?.summaryModel).toBe("")
     expect(loaded?.extractModel).toBe("")
     expect(loaded?.deAiModel).toBe("")
   })
@@ -331,7 +311,7 @@ describe("novelConfig — project-directory persistence", () => {
     expect(await fileExists(`${tmp.path}/.qmai/novel-config.json`)).toBe(true)
     const raw = await readFileRaw(`${tmp.path}/.qmai/novel-config.json`)
     const parsed = JSON.parse(raw)
-    expect(parsed.contextTokenBudget).toBe(0)
+    expect(parsed).toEqual(makeNovelConfig())
   })
 
   it("returns null when neither file nor store has data", async () => {
@@ -340,63 +320,68 @@ describe("novelConfig — project-directory persistence", () => {
   })
 
   it("reinstall recovery: loads from project dir when global store is empty", async () => {
-    const config = makeNovelConfig({ searchTopK: 15, writingModel: "custom-model" })
+    const config = makeNovelConfig({ searchTopK: 15, reviewModel: "custom-model" })
     await writeFileRaw(
       `${tmp.path}/.qmai/novel-config.json`,
       JSON.stringify(config),
     )
     const loaded = await loadNovelConfig("proj-r", tmp.path)
     expect(loaded?.searchTopK).toBe(15)
-    expect(loaded?.writingModel).toBe("custom-model")
+    expect(loaded?.reviewModel).toBe("custom-model")
   })
 
   it("project dir file wins over global store (reinstall scenario)", async () => {
     inMemoryStore.set("projectNovelConfigs", { "proj-w": makeNovelConfig({ searchTopK: 5 }) })
-    const dirConfig = makeNovelConfig({ searchTopK: 18, writingModel: "dir-model" })
+    const dirConfig = makeNovelConfig({ searchTopK: 18, reviewModel: "dir-model" })
     await writeFileRaw(
       `${tmp.path}/.qmai/novel-config.json`,
       JSON.stringify(dirConfig),
     )
     const loaded = await loadNovelConfig("proj-w", tmp.path)
     expect(loaded?.searchTopK).toBe(18)
-    expect(loaded?.writingModel).toBe("dir-model")
+    expect(loaded?.reviewModel).toBe("dir-model")
   })
 
   it("migrates: when loaded from global store, writes to project dir", async () => {
-    const config = makeNovelConfig({ searchTopK: 12, writingModel: "migrated-model" })
+    const config = makeNovelConfig({ searchTopK: 12, reviewModel: "migrated-model" })
     inMemoryStore.set("projectNovelConfigs", { "proj-m": config })
     const loaded = await loadNovelConfig("proj-m", tmp.path)
     expect(loaded?.searchTopK).toBe(12)
-    expect(loaded?.writingModel).toBe("migrated-model")
+    expect(loaded?.reviewModel).toBe("migrated-model")
     expect(await fileExists(`${tmp.path}/.qmai/novel-config.json`)).toBe(true)
     const raw = await readFileRaw(`${tmp.path}/.qmai/novel-config.json`)
     expect(JSON.parse(raw).searchTopK).toBe(12)
   })
 
-  it("fills in autoExtractOnImport when loading legacy novel config", async () => {
-    const legacyConfig = {
+  it.each(["项目文件", "应用内的项目配置", "应用默认配置"])("从%s加载旧写作设置时只采用现行字段", async (source) => {
+    const retired = {
       contextTokenBudget: 50000,
-      recentSummaryWindow: 6,
-      searchTopK: 8,
-      /*
-       * 这个键**故意留着**：它已从 NovelConfig 里移除（保存为正式章节不再自动
-       * 提取记忆，用户要求），但老用户的 .qmai/novel-config.json 里还写着它。
-       * 本用例因此顺带钉住「旧配置里存在已删除的键时仍能正常加载」——
-       * 是磁盘上的 JSON，不是 NovelConfig 字面量，所以不参与类型检查。
-       */
       autoIngestOnSave: false,
+      autoExtractOnImport: false,
+      autoGenerateChapterTitle: false,
       writingModel: "writer",
-      reviewModel: "reviewer",
       summaryModel: "summarizer",
-      extractModel: "extractor",
+      communitySummaryEnabled: true,
+      communitySummaryInterval: 1,
+      communitySummaryAsync: false,
     }
-    await writeFileRaw(
-      `${tmp.path}/.qmai/novel-config.json`,
-      JSON.stringify(legacyConfig),
-    )
-    const loaded = await loadNovelConfig("proj-legacy", tmp.path)
-    expect(loaded?.autoExtractOnImport).toBe(true)
-    expect(loaded?.contextTokenBudget).toBe(0)
+    const active = { recentSummaryWindow: 6, searchTopK: 8, reviewModel: "reviewer", extractModel: "extractor" }
+    const legacy = { ...active, ...retired }
+    const path = `${tmp.path}/.qmai/novel-config.json`
+    const projectId = "proj-legacy"
+    if (source === "项目文件") await writeFileRaw(path, JSON.stringify(legacy))
+    if (source === "应用内的项目配置") inMemoryStore.set("projectNovelConfigs", { [projectId]: legacy })
+    if (source === "应用默认配置") inMemoryStore.set("novelConfig", legacy)
+
+    const loaded = await loadNovelConfig(projectId, tmp.path)
+    expect(loaded).toMatchObject(active)
+    for (const key of Object.keys(retired)) expect(loaded).not.toHaveProperty(key)
+
+    await saveNovelConfig({ ...DEFAULT_NOVEL_CONFIG, ...legacy }, projectId, tmp.path)
+    expect(inMemoryStore.get("novelConfig")).toEqual(loaded)
+    expect(inMemoryStore.get("projectNovelConfigs")).toEqual({ [projectId]: loaded })
+    // 共享项目文件保留原版已有字段；从应用配置重建的文件只写当前字段。
+    expect(JSON.parse(await readFileRaw(path))).toEqual(source === "项目文件" ? { ...retired, ...loaded } : loaded)
   })
 
   /*
