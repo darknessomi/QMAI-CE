@@ -79,6 +79,20 @@ const FOUR_POINT_FIVE_ZERO_ZH: string[] = [
   "为会员用户提供更好的使用体验和额度管理能力。",
 ];
 
+const FOUR_POINT_EIGHT_THREE_ZH: string[] = [
+  "回写旧章时，写作上下文会按章号和原文版本筛选设定、正典和文风资料。改写章节或将其设为「AI 不读取」后，旧缓存随之失效。",
+  "维护工具新增「清理当前项目旧社区摘要」。清理后保留章节摘要、记忆快照和作者文件。",
+  "备份和恢复支持 JEV 服务地址与模型。勾选「API Key 和其他凭据」时，备份也会包含 JEV 访问密钥。",
+  "写作设置移除了旧社区摘要选项，章节和大纲的记忆快照视图也移除了图谱节点与关系边。",
+  "项目搜索结果可展开来源页的配图。写作时会结合 SAG2 找到的原文，提醒可能重复铺设的伏笔。",
+];
+
+const FOUR_POINT_EIGHT_THREE_CHANGELOG: ChangelogEntry = {
+  version: "4.8.3",
+  date: "2026-11-25",
+  highlights: { en: FOUR_POINT_EIGHT_THREE_ZH, zh: FOUR_POINT_EIGHT_THREE_ZH },
+};
+
 const FOUR_POINT_EIGHT_TWO_ZH: string[] = [
   "写作、项目搜索和知识库问答改用 SAG2 检索。配置 JEV 后可从原文多轮查找证据并定位到行；未配置时使用本地关键词等基础检索。",
   "普通写作可检索实体和概念。回写旧章时，混有草稿、大纲或后续剧情的页面会按来源章检索，只引用目标章之前允许 AI 读取的定稿原文。",
@@ -2290,6 +2304,8 @@ export function currentVersionChangelog(version: string): ChangelogEntry[] {
    * 才是「当前版本发布说明」的取数口 —— 漏了这里，发布说明会退化成
    * 一行「QMAI x.y.z 发布版本」，scripts/release-notes.spec.mjs 会拦下来。
    */
+  if (version === FOUR_POINT_EIGHT_THREE_CHANGELOG.version)
+    return [FOUR_POINT_EIGHT_THREE_CHANGELOG];
   if (version === FOUR_POINT_EIGHT_TWO_CHANGELOG.version)
     return [FOUR_POINT_EIGHT_TWO_CHANGELOG];
   if (version === FOUR_POINT_EIGHT_ONE_CHANGELOG.version)
@@ -2497,6 +2513,7 @@ export function currentVersionChangelog(version: string): ChangelogEntry[] {
 
 export function allChangelog(): ChangelogEntry[] {
   return [
+    FOUR_POINT_EIGHT_THREE_CHANGELOG,
     FOUR_POINT_EIGHT_TWO_CHANGELOG,
     FOUR_POINT_EIGHT_ONE_CHANGELOG,
     FOUR_POINT_EIGHT_ZERO_CHANGELOG,
