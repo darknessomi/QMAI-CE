@@ -24,7 +24,12 @@
 
 ## 用你已经在用的 AI 写小说
 
-**Claude Code**（`claude`） · **Codex CLI**（`codex`） · **Cursor CLI**（`cursor-agent`） · **Antigravity CLI**（`agy`）
+| 工具 | 命令 |
+| --- | --- |
+| Claude Code | `claude` |
+| Codex CLI | `codex` |
+| Cursor CLI | `cursor-agent` |
+| Antigravity CLI | `agy` |
 
 只要电脑上装好并登录了其中任意一款，就能在青幕里直接让它帮你写。故事往哪走由你拿主意，青幕负责把本章章纲和相关前文交给选中的工具。写完想换另一个 AI 来审稿，面对的依然是同一部书，省去了来回复制大纲和正文的折腾。
 
