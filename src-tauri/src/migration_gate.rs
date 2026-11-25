@@ -56,6 +56,19 @@ static GATE: Mutex<Gate> = Mutex::new(Gate {
 static IDLE: Condvar = Condvar::new();
 static SESSION: Mutex<Option<(PathBuf, fs::File)>> = Mutex::new(None);
 
+pub fn with_open_project<T>(
+    path: &Path,
+    action: impl FnOnce(&Path) -> Result<T, String>,
+) -> Result<T, String> {
+    let requested = path.canonicalize().map_err(|e| format!("无法定位项目：{e}"))?;
+    let session = SESSION.lock().unwrap_or_else(|e| e.into_inner());
+    let (root, _) = session
+        .as_ref()
+        .filter(|(root, _)| *root == requested)
+        .ok_or("当前打开的项目已变化，请重新确认清理范围")?;
+    action(root)
+}
+
 pub fn retain_session(path: &Path) -> Result<(), String> {
     let path = fs::canonicalize(path).map_err(|e| format!("无法定位项目：{e}"))?;
     let mut current = SESSION.lock().unwrap_or_else(|e| e.into_inner());
@@ -154,6 +167,7 @@ pub fn allow_command(name: &str) -> bool {
                 | "leave_novel_migration"
                 | "fail_novel_migration_preparation"
                 | "mcp_respond"
+                | "sag_cancel"
                 | "log_error"
                 | "log_diagnostic"
         )
@@ -336,6 +350,8 @@ mod tests {
         let empty = tempfile::tempdir().unwrap();
         retain_session(book.path()).unwrap();
         assert!(retain_session(empty.path()).is_err());
+        assert!(with_open_project(empty.path(), |_| Ok(())).is_err());
+        assert!(with_open_project(book.path(), |_| Ok(())).is_ok());
         let apply = || project_migration::run(book.path(), Mode::Apply, |_| (), |_| Ok(()));
         assert!(apply().is_err());
         release_project_session();

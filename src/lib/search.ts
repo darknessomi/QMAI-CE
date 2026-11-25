@@ -1,5 +1,8 @@
-import { wikiEmbeddingId, wikiEmbeddingPath, wikiEmbeddingTitle } from "./embedding-page-id"
-import { readFile, listDirectory } from "@/commands/fs"
+import { parseFrontmatter } from "./frontmatter"
+import { isAiExcludedContent } from "./novel/ai-exclude"
+import { getJevConfig } from "./jev-config"
+import { searchSagProject } from "./sag-search"
+import { listDirectory } from "@/commands/fs"
 import type { FileNode } from "@/types/wiki"
 import { normalizePath } from "@/lib/path-utils"
 import { mapWikiMarkdown } from "./wiki-markdown-batches"
@@ -23,6 +26,8 @@ export interface SearchResult {
   path: string
   title: string
   snippet: string
+  startLine?: number
+  endLine?: number
   titleMatch: boolean
   score: number
   /**
@@ -35,30 +40,18 @@ export interface SearchResult {
 }
 
 interface SearchWikiOptions {
-  rerank?: boolean
   topK?: number
-  rerankPurpose?: string
-  includeVector?: boolean
+  localOnly?: boolean
+  /** 仅供内部按章号读取禁读标记。 */
+  includeExcludedMetadata?: boolean
+  signal?: AbortSignal
+  acceptPath?: (path: string) => boolean
+  acceptFile?: (path: string, content: string) => boolean
 }
 
 const MAX_RESULTS = 20
 const SNIPPET_CONTEXT = 80
 
-// ── Reciprocal Rank Fusion ─────────────────────────────────────────────────
-// Token search and vector search produce two independently-ranked lists.
-// Their absolute scores are incommensurable (token score: 1-400, vector
-// cosine: 0-1), so summing them privileges whichever list happens to use
-// the larger numbers. RRF sidesteps that by fusing on RANK only:
-//
-//     fused(p) = sum over lists L of  1 / (K + rank_L(p))
-//
-// A page that ranks #1 in BOTH lists wins handily. A page that's only in
-// one list still surfaces if it ranks high there, but a page in BOTH a
-// little lower can outrank it — exactly what we want for hybrid retrieval.
-//
-// K=60 is the canonical constant from Cormack et al. (SIGIR 2009), large
-// enough that small rank differences near the top don't dominate but
-// small enough that being deep in either list still falls off quickly.
 const RRF_K = 60
 
 // ── Scoring weights ────────────────────────────────────────────────────────
@@ -168,8 +161,8 @@ function flattenMdFiles(nodes: FileNode[]): FileNode[] {
 }
 
 function extractTitle(content: string, fileName: string): string {
-  const title = wikiEmbeddingTitle(content, "")
-  if (title) return title
+  const title = parseFrontmatter(content).frontmatter?.title
+  if (typeof title === "string" && title.trim()) return title.trim()
 
   // Try first heading
   const headingMatch = content.match(/^#\s+(.+)$/m)
@@ -229,173 +222,36 @@ export async function searchWiki(
   options: SearchWikiOptions = {},
 ): Promise<SearchResult[]> {
   if (!query.trim()) return []
-  console.log("[searchWiki] START query=", query, "rerank=", options.rerank)
+  options.signal?.throwIfAborted()
   const pp = normalizePath(projectPath)
+  const topK = options.topK ?? MAX_RESULTS
+  if (!options.localOnly && getJevConfig()) {
+    const hits = await searchSagProject(pp, query, topK, { signal: options.signal })
+    return hits.map(hit => ({
+      path: hit.path, title: hit.title, snippet: hit.content, score: hit.score,
+      startLine: hit.startLine, endLine: hit.endLine, titleMatch: false, images: extractImageRefs(hit.content),
+    }))
+  }
 
   const tokens = tokenizeQuery(query)
-  // Fallback: if all tokens were filtered out, use the trimmed query as a single token
-  const effectiveTokens = tokens.length > 0 ? tokens : [query.trim().toLowerCase()]
-  const results: SearchResult[] = []
-
-  // Search wiki pages.
-  //
-  // We deliberately do NOT also search `raw/sources/` here anymore.
-  // Previously this section walked every file under raw/sources/
-  // (including DOCX / PPTX) and called `readFile` on each,
-  // which triggers the heavy office text-extraction path
-  // — even on cache hits, that's an IPC round-trip per file plus
-  // a cache file read of the now-large combined-markdown output
-  // (text + per-page image refs after the unified extractor
-  // landed). On a project with ~50 office docs this added 5-15s per
-  // search, which the user reported as "very, very slow."
-  //
-  // The content lost: nothing material. Each ingested raw source
-  // produces a `wiki/sources/<slug>.md` summary which is included
-  // in the wiki/ search below; the full extracted text lives in
-  // the embedding chunks and is reachable via vector search. The
-  // raw-files token pass added recall only for raw files that had
-  // never been ingested (and thus had no wiki summary), which is
-  // not a workflow we want to optimize at the cost of every other
-  // search call.
+  const effectiveTokens = tokens.length ? tokens : [query.trim().toLowerCase()]
+  const queryPhrase = query.trim().toLowerCase().replace(TRIM_PUNCT_RE, "")
+  let results: SearchResult[]
   try {
-    console.log("[searchWiki] listing directory...")
-    const t0 = performance.now()
-    const wikiTree = await listDirectory(`${pp}/wiki`)
-    console.log("[searchWiki] listDirectory done in", Math.round(performance.now() - t0), "ms")
-    const wikiFiles = flattenMdFiles(wikiTree)
-    const tList = Math.round(performance.now() - t0)
-    console.log("[searchWiki] wikiFiles:", wikiFiles.length)
-    const t1 = performance.now()
-    const queryPhrase = query.trim().toLowerCase().replace(TRIM_PUNCT_RE, "")
-    const matches = await mapWikiMarkdown(wikiFiles, (file, content) =>
-      scoreFile(file, content, effectiveTokens, queryPhrase, query))
-    for (const match of matches) results.push(match)
-    const tRead = Math.round(performance.now() - t1)
-    console.log("[searchWiki] 读取并匹配页面耗时", tRead, "ms")
-    console.log(
-      `[Search:token] wiki/ ${wikiFiles.length} files | list=${tList}ms read+match=${tRead}ms`,
-    )
+    const allFiles = flattenMdFiles(await listDirectory(`${pp}/wiki`))
+    const files = options.acceptPath ? allFiles.filter(file => options.acceptPath!(file.path)) : allFiles
+    results = await mapWikiMarkdown(files, (file, content) => {
+      options.signal?.throwIfAborted()
+      if (!options.includeExcludedMetadata && isAiExcludedContent(content)) return null
+      if (options.acceptFile && !options.acceptFile(file.path, content)) return null
+      return scoreFile(file, content, effectiveTokens, queryPhrase, query)
+    })
   } catch {
-    // no wiki directory
+    options.signal?.throwIfAborted()
+    return []
   }
-
-  // ── Build the token-side ranking (still based on the score field
-  // populated by the token scan above). Snapshot it BEFORE the vector
-  // step, so adding vector-only pages doesn't shift token ranks.
-  const tokenSorted = [...results].sort((a, b) => b.score - a.score)
-  const tokenRank = new Map<string, number>()
-  tokenSorted.forEach((r, i) => {
-    tokenRank.set(normalizePath(r.path), i + 1) // 1-indexed
-  })
-
-  // ── Vector search: collect ranked list of page-ids and materialize
-  //    pages that token search missed. We do NOT add to results' score
-  //    here — that's done in the RRF step below.
-  let vectorRank = new Map<string, number>()
-  let vectorCount = 0
-  if (options.includeVector !== false) {
-    try {
-      const { useWikiStore } = await import("@/stores/wiki-store")
-      const embCfg = useWikiStore.getState().embeddingConfig
-      console.log(`[Vector Search] Config: enabled=${embCfg.enabled}, model="${embCfg.model}"`)
-      if (embCfg.enabled && embCfg.model) {
-        const t0 = performance.now()
-        const { searchByEmbedding } = await import("@/lib/embedding")
-        const vectorResults = await searchByEmbedding(pp, query, embCfg, 10)
-        const vectorMs = Math.round(performance.now() - t0)
-        vectorCount = vectorResults.length
-
-        console.log(
-          `[Vector Search] query="${query}" | ${vectorResults.length} results in ${vectorMs}ms | model=${embCfg.model}` +
-          (vectorResults.length > 0
-            ? ` | top: ${vectorResults.slice(0, 5).map((r) => `${r.id}(${r.score.toFixed(3)})`).join(", ")}`
-            : "")
-        )
-
-        const knownIds = new Set(results.map(r => wikiEmbeddingId(pp, r.path)))
-        let added = 0
-        for (const [rank, vr] of vectorResults.entries()) {
-          const path = wikiEmbeddingPath(pp, vr.id)
-          if (!path) continue
-          vectorRank.set(vr.id, rank + 1)
-          if (knownIds.has(vr.id)) continue
-          try {
-            const content = await readFile(path)
-            results.push({
-              path, title: extractTitle(content, path.split("/").pop()!), snippet: buildSnippet(content, query),
-              titleMatch: false, score: 0, images: extractImageRefs(content),
-            })
-            knownIds.add(vr.id)
-            added++
-          } catch { /* The page may have been removed since indexing. */ }
-        }
-        if (added > 0) {
-          console.log(`[Vector Search] Added ${added} vector-only pages to candidate set`)
-        }
-      }
-    } catch (err) {
-      console.log(`[Vector Search] Skipped: ${err instanceof Error ? err.message : "not available"}`)
-      vectorRank = new Map()
-    }
-  } else {
-    console.log("[Vector Search] skipped by options")
-  }
-
-  // ── RRF fusion: replace each result's score with
-  //   1/(K + token_rank) + 1/(K + vector_rank)
-  //
-  // Pages absent from either list contribute 0 from that side.
-  // Pages absent from BOTH never make it here (we only iterate the
-  // results array, which already contains every candidate).
-  for (const r of results) {
-    const tRank = tokenRank.get(normalizePath(r.path))
-    const vRank = vectorRank.get(wikiEmbeddingId(pp, r.path) ?? "")
-    let rrf = 0
-    if (tRank !== undefined) rrf += 1 / (RRF_K + tRank)
-    if (vRank !== undefined) rrf += 1 / (RRF_K + vRank)
-    r.score = rrf
-  }
-
-  // Sort by RRF score descending. Ties (e.g. two pages both at vector
-  // rank 1 but neither in token list) are broken by alphabetical path
-  // order so output is deterministic for tests.
-  results.sort((a, b) => {
-    if (b.score !== a.score) return b.score - a.score
-    return a.path.localeCompare(b.path)
-  })
-
-  const tokenHits = tokenRank.size
-  console.log(
-    `[Search] query="${query}" | RRF fused: ${tokenHits} token + ${vectorCount} vector → ${results.length} unique`,
-  )
-
-  const limited = results.slice(0, options.topK ?? MAX_RESULTS)
-  if (!options.rerank || limited.length <= 1) {
-    console.log("[searchWiki] skip rerank, returning", limited.length)
-    return limited
-  }
-
-  try {
-    console.log("[searchWiki] calling rerankCandidates with", limited.length, "candidates...")
-    const { rerankCandidates } = await import("@/lib/rerank")
-    const reranked = await rerankCandidates(
-      query,
-      limited.map((result) => ({
-        ...result,
-        id: normalizePath(result.path),
-        source: result.titleMatch ? "title_match" : "wiki_search",
-      })),
-      {
-        topK: options.topK ?? MAX_RESULTS,
-        purpose: options.rerankPurpose ?? "用于搜索结果展示和知识检索。",
-      },
-    )
-    console.log("[searchWiki] rerankCandidates done, got", reranked.length)
-    return reranked
-  } catch (error) {
-    console.warn("[search] rerank failed, using fused order:", error)
-    return limited
-  }
+  return results.sort((a, b) => b.score - a.score).slice(0, topK)
+    .map((result, index) => ({ ...result, score: 1 / (RRF_K + index + 1) }))
 }
 
 /**

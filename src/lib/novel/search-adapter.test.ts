@@ -1,160 +1,42 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { readFile } from "@/commands/fs"
 import { searchWiki } from "@/lib/search"
-import { searchByEmbedding } from "@/lib/embedding"
 import { useWikiStore } from "@/stores/wiki-store"
 import { novelMixedSearch } from "./search-adapter"
+import { listSnapshots, loadSnapshot } from "./chapter-ingest"
 
-vi.mock("@/commands/fs", () => ({
-  readFile: vi.fn(),
-}))
+vi.mock("@/commands/fs", () => ({ readFile: vi.fn() }))
+vi.mock("@/lib/search", () => ({ searchWiki: vi.fn() }))
+vi.mock("./ai-exclude-chapters", () => ({ listAiExcludedChapterNumbers: vi.fn(async () => new Set()) }))
+vi.mock("./chapter-ingest", () => ({ listSnapshots: vi.fn(), loadSnapshot: vi.fn() }))
+const hit = (path: string, title: string) => ({ path, title, snippet: title, titleMatch: true, score: 1, images: [] })
 
-vi.mock("@/lib/search", () => ({
-  searchWiki: vi.fn(),
-}))
-
-vi.mock("@/lib/embedding", () => ({
-  searchByEmbedding: vi.fn(),
-}))
-
-vi.mock("./chapter-ingest", () => ({
-  listSnapshots: vi.fn(async () => []),
-  loadSnapshot: vi.fn(async () => null),
-}))
-
-const mockReadFile = vi.mocked(readFile)
-const mockSearchWiki = vi.mocked(searchWiki)
-const mockSearchByEmbedding = vi.mocked(searchByEmbedding)
-
-const searchHit = (path: string, title: string, score: number) => ({
-  path,
-  title,
-  snippet: `${title} snippet`,
-  titleMatch: false,
-  score,
-  images: [],
-})
-
-describe("novelMixedSearch", () => {
+describe("基础混合检索", () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    useWikiStore.setState({
-      embeddingConfig: {
-        enabled: true,
-        endpoint: "http://localhost:11434/api/embeddings",
-        apiKey: "",
-        model: "nomic-embed-text",
-      },
-    })
+    useWikiStore.setState({ jevConfig: null })
   })
-
-  it("uses fused ranking instead of always putting keyword results first", async () => {
-    mockSearchWiki.mockResolvedValue([
-      searchHit("/project/wiki/entities/keyword.md", "Keyword Hit", 0.01),
-    ])
-    mockSearchByEmbedding.mockResolvedValue([{ id: "wiki/entities/vector-hit", score: 0.99 }])
-    mockReadFile.mockResolvedValue("# Vector Hit\n\nstrong semantic memory")
-
-    const results = await novelMixedSearch({
-      projectPath: "/project",
-      query: "semantic memory",
-      topK: 2,
-      includeKeyword: true,
-      includeVector: true,
-      includeGraph: false,
-      includeRecentChapters: false,
-      includeCanon: false,
-    })
-
-    expect(results.map((r) => r.title)).toEqual(["Vector Hit", "Keyword Hit"])
+  it("关键词和正史来源的同一文件按原有排名融合", async () => {
+    const canon = "/book/wiki/canon.md"
+    vi.mocked(readFile).mockResolvedValue("设定")
+    vi.mocked(searchWiki).mockResolvedValue([hit("/book/wiki/concepts/a.md", "页面"), hit(canon, "正史")])
+    const hits = await novelMixedSearch({ projectPath: "/book", query: "设定", includeCanon: true })
+    expect(hits.map(item => item.path)).toEqual([canon, "/book/wiki/concepts/a.md"])
   })
-
-  it("merges the same page across retrieval sources and boosts it", async () => {
-    mockSearchWiki.mockResolvedValue([
-      searchHit("/project/wiki/entities/keyword-only.md", "Keyword Only", 0.8),
-      searchHit("/project/wiki/entities/shared.md", "Shared Keyword", 0.7),
-    ])
-    mockSearchByEmbedding.mockResolvedValue([
-      { id: "wiki/entities/shared", score: 0.95 },
-      { id: "wiki/entities/vector-only", score: 0.93 },
-    ])
-    mockReadFile.mockImplementation(async (path) => {
-      if (path.endsWith("/shared.md")) return "# Shared Vector\n\nshared semantic memory"
-      if (path.endsWith("/vector-only.md")) return "# Vector Only\n\nvector semantic memory"
-      throw new Error(`unexpected read: ${path}`)
-    })
-
-    const results = await novelMixedSearch({
-      projectPath: "/project",
-      query: "shared memory",
-      topK: 3,
-      includeKeyword: true,
-      includeVector: true,
-      includeGraph: false,
-      includeRecentChapters: false,
-      includeCanon: false,
-    })
-
-    expect(results[0].path).toBe("/project/wiki/entities/shared.md")
-    expect(results.filter((r) => r.path === "/project/wiki/entities/shared.md")).toHaveLength(1)
+  it("近期快照限制在目标章之前，并按原顺序输出", async () => {
+    vi.mocked(listSnapshots).mockResolvedValue([1, 3, 5, 7])
+    vi.mocked(loadSnapshot).mockImplementation(async (_path, n) => ({ summary: `摘要${n}` } as Awaited<ReturnType<typeof loadSnapshot>>))
+    const hits = await novelMixedSearch({ projectPath: "/book", query: "前情", chapterNumber: 5, includeKeyword: false, includeRecentChapters: true })
+    expect(hits.map(item => item.snippet)).toEqual(["摘要3", "摘要1"])
   })
-
-  it("returns completed sources even when one retrieval branch stalls", async () => {
+  it("一个本地来源超时不会阻断其它来源", async () => {
     vi.useFakeTimers()
     try {
-      mockSearchWiki.mockImplementation(() => new Promise(() => {}))
-      mockSearchByEmbedding.mockResolvedValue([{ id: "wiki/entities/vector-hit", score: 0.99 }])
-      mockReadFile.mockResolvedValue("# Vector Hit\n\nstrong semantic memory")
-
-      const searchPromise = novelMixedSearch({
-        projectPath: "/project",
-        query: "semantic memory",
-        topK: 2,
-        includeKeyword: true,
-        includeVector: true,
-        includeGraph: false,
-        includeRecentChapters: false,
-        includeCanon: false,
-      })
-
-      const timeoutSentinel = Symbol("timeout")
-      const raced = Promise.race([
-        searchPromise,
-        new Promise<typeof timeoutSentinel>((resolve) => {
-          setTimeout(() => resolve(timeoutSentinel), 3000)
-        }),
-      ])
-
-      await vi.advanceTimersByTimeAsync(3000)
-      const results = await raced
-
-      expect(results).not.toBe(timeoutSentinel)
-      expect(Array.isArray(results)).toBe(true)
-      expect((results as Awaited<typeof searchPromise>).map((r) => r.title)).toEqual(["Vector Hit"])
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-
-  it("excludes query-log pages when authoritativeOnly retrieval is enabled", async () => {
-    mockSearchWiki.mockResolvedValue([
-      searchHit("/project/wiki/queries/old-phone-query.md", "Old Query", 0.95),
-      searchHit("/project/wiki/entities/spirit-stone.md", "Spirit Stone", 0.7),
-    ])
-    mockSearchByEmbedding.mockResolvedValue([])
-
-    const results = await novelMixedSearch({
-      projectPath: "/project",
-      query: "write chapter 10 spirit stone",
-      topK: 3,
-      authoritativeOnly: true,
-      includeKeyword: true,
-      includeVector: false,
-      includeGraph: false,
-      includeRecentChapters: false,
-      includeCanon: false,
-    })
-
-    expect(results.map((item) => item.path)).toEqual(["/project/wiki/entities/spirit-stone.md"])
+      vi.mocked(searchWiki).mockImplementation(() => new Promise(() => {}))
+      vi.mocked(readFile).mockResolvedValue("正史")
+      const hits = novelMixedSearch({ projectPath: "/book", query: "正史", includeCanon: true })
+      await vi.advanceTimersByTimeAsync(2600)
+      expect((await hits).map(item => item.type)).toEqual(["canon"])
+    } finally { vi.useRealTimers() }
   })
 })

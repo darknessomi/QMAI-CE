@@ -4,18 +4,16 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import "@/i18n"
 import { LlmProviderSection } from "@/components/settings/sections/llm-provider-section"
 import { useWikiStore } from "@/stores/wiki-store"
-import { saveProviderConfigs, saveEmbeddingConfig, saveRerankConfig } from "@/lib/project-store"
+import { saveProviderConfigs } from "@/lib/project-store"
 import { flushAppState } from "@/lib/web-store"
 import { confirmModelDraftLeave } from "./model-draft-guard"
-import { UiTestEmbeddingModels, UiTestRerankModels } from "./retrieval-models"
 import { UiTestCustomProviders, UiTestProviderCard } from "./provider-custom"
 import { UiTestDefaultModels } from "./default-models"
 import { button, changeInput, click, mountModel, deferred, choose } from "./model-test-utils"
 vi.mock("@/lib/platform", () => ({ isTauri: () => false }))
-vi.mock("@/lib/project-store", () => ({ saveProviderConfigs: vi.fn(), saveActivePresetId: vi.fn(), saveLlmConfig: vi.fn(), saveEmbeddingConfig: vi.fn(), saveRerankConfig: vi.fn(), saveNovelConfig: vi.fn(), saveDefaultLlmModel: vi.fn() }))
+vi.mock("@/lib/project-store", () => ({ saveProviderConfigs: vi.fn(), saveActivePresetId: vi.fn(), saveLlmConfig: vi.fn(), saveNovelConfig: vi.fn(), saveDefaultLlmModel: vi.fn() }))
 vi.mock("@/lib/web-store", () => ({ flushAppState: vi.fn() }))
-vi.mock("@/lib/embedding", () => ({ getEmbeddingCount: vi.fn(), legacyVectorRowCount: vi.fn(), getLastEmbeddingError: vi.fn(), getEmbeddingSkipSummary: vi.fn(), embedAllPages: vi.fn(), dropLegacyVectorTable: vi.fn() }))
-vi.mock("@/lib/settings-model-list", () => ({ fetchLlmModelList: vi.fn(), fetchEmbeddingModelList: vi.fn(), fetchRerankModelList: vi.fn() }))
+vi.mock("@/lib/settings-model-list", () => ({ fetchLlmModelList: vi.fn() }))
 vi.mock("@/lib/connection-tests", () => ({ testLlmConnection: vi.fn(), testLlmFunction: vi.fn() }))
 vi.mock("@/components/settings/resource-link", () => ({ ResourceLink: () => null }))
 const initial = useWikiStore.getState()
@@ -23,7 +21,7 @@ const provider = { enabled: true, label: "测试配置", apiKey: "saved-key", ba
 let host: HTMLDivElement, unmount: (() => Promise<void>) | undefined
 beforeEach(() => {
   vi.resetAllMocks(); vi.spyOn(window, "confirm").mockReturnValue(false)
-  useWikiStore.setState({ ...initial, project: null, activePresetId: null, providerConfigs: { openai: provider, "custom-test": provider }, embeddingConfig: { ...initial.embeddingConfig, enabled: true, endpoint: "https://saved.invalid/v1", model: "embed", apiKey: "saved-key" }, rerankConfig: { ...initial.rerankConfig, enabled: true, customEndpoint: "https://saved.invalid/v1", apiKey: "saved-key", model: "rank" } })
+  useWikiStore.setState({ ...initial, project: null, activePresetId: null, providerConfigs: { openai: provider, "custom-test": provider } })
 })
 afterEach(async () => { if (unmount) await unmount(); unmount = undefined; vi.restoreAllMocks() })
 async function render(node: Parameters<typeof mountModel>[0]) { ({ host, unmount } = await mountModel(node)) }
@@ -52,26 +50,6 @@ it("开关落盘失败保留旧状态和其他草稿，不能显示成功", asyn
   expect(useWikiStore.getState().providerConfigs["custom-test"]).toEqual(provider)
   expect(button(host, "启用此模型配置").getAttribute("aria-checked")).toBe("true")
   expect(host.textContent).toContain("保存失败"); expect(host.textContent).not.toContain("saved-key"); expect(host.textContent).not.toContain("draft-key")
-})
-it.each([false, true])("检索开关只持久化开关，重排=%s", async rerank => {
-  await render(rerank ? <UiTestRerankModels /> : <UiTestEmbeddingModels />)
-  const saved = rerank ? useWikiStore.getState().rerankConfig : useWikiStore.getState().embeddingConfig
-  await changeInput(host, rerank ? "重排 API 密钥" : "向量 API 密钥", "draft-key"); await click(host, rerank ? "启用检索重排" : "启用向量检索")
-  expect(rerank ? useWikiStore.getState().rerankConfig : useWikiStore.getState().embeddingConfig).toEqual({ ...saved, enabled: false })
-  expect(rerank ? saveRerankConfig : saveEmbeddingConfig).toHaveBeenCalled()
-})
-it("启用重排但没填模型时，页面明确提示重排不会生效", async () => {
-  useWikiStore.setState({ rerankConfig: { ...useWikiStore.getState().rerankConfig, enabled: true, model: "" } })
-  await render(<UiTestRerankModels />)
-  expect(host.textContent).toContain("重排不会生效")
-})
-it("重排页不再有「复用主模型」开关，重排模型字段始终可见", async () => {
-  await render(<UiTestRerankModels />)
-  expect(host.querySelector('[aria-label="复用主模型"]')).toBeNull()
-  expect(host.querySelector('input[placeholder="输入重排模型 ID"]')).not.toBeNull()
-  // 「拉取模型」以前只在关闭复用主模型时出现，现在始终可用
-  expect(button(host, "拉取模型")).not.toBeNull()
-  expect(host.textContent).not.toContain("复用主模型")
 })
 it("内置提供方开关立即持久化，已保存配置可删除且目录可重新添加", async () => {
   await render(<LlmProviderSection />)
@@ -170,14 +148,6 @@ it("开关保存待决时不能再次切换或离开，成功后不产生额外�
   expect(await confirmModelDraftLeave()).toBe(false); expect(alert).toHaveBeenCalledOnce()
   await act(async () => pending.resolve())
   expect(await confirmModelDraftLeave()).toBe(true)
-})
-it.each([false, true])("检索配置通过离开弹窗保存，失败保留输入，重排=%s", async rerank => {
-  await render(rerank ? <UiTestRerankModels /> : <UiTestEmbeddingModels />)
-  await changeInput(host, rerank ? "重排 API 密钥" : "向量 API 密钥", "draft-key")
-  vi.mocked(flushAppState).mockRejectedValueOnce(new Error("保存失败"))
-  expect(await leave("保存配置")).toBe(false)
-  expect(await leave("保存配置")).toBe(true)
-  expect((rerank ? useWikiStore.getState().rerankConfig : useWikiStore.getState().embeddingConfig).apiKey).toBe("draft-key")
 })
 it("默认模型也参与统一保存离开，失败不修改运行默认值", async () => {
   await render(<UiTestDefaultModels />)

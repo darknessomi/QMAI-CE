@@ -76,7 +76,6 @@ function collectDynamicKeyWhitelist(): string[] {
     "novel.outline.type.volume",
     "novel.outline.type.chapter",
     "novel.search.keyword",
-    "novel.search.vector",
     "novel.search.graph",
     "novel.search.recentChapters",
     "novel.search.canon",
@@ -212,12 +211,11 @@ describe("i18n referenced-key coverage (zh.json)", () => {
     ).toEqual([])
   })
 
-  it("keeps novel extract model copy explicit and distinct from embedding model", () => {
+  it("explains which materials the memory extraction model processes", () => {
     expect(zhKeys.has("novel.settings.extractModelHint"), "missing zh extract model hint").toBe(true)
-    expect(zh.novel.settings.extractModel).toContain("非嵌入模型")
+    expect(zh.novel.settings.extractModel).toContain("记忆提取")
     expect(zh.novel.settings.extractModelHint).toContain("大纲")
     expect(zh.novel.settings.extractModelHint).toContain("章节")
-    expect(zh.novel.settings.extractModelHint).toContain("不是向量嵌入模型")
   })
 
   it("every leaf value is a non-empty string (no null / empty / placeholder slips)", () => {

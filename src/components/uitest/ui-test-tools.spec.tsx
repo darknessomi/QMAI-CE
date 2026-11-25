@@ -29,7 +29,6 @@ vi.mock("@/lib/ui-test", async (importOriginal) => ({
 vi.mock("@/lib/project-store", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/project-store")>(),
   loadNovelConfig: vi.fn(async () => null),
-  loadRerankConfig: vi.fn(async () => null),
   saveLlmConfig: persistence.saveLlm,
   saveProviderConfigs: modelIo.saveConfigs,
   saveActivePresetId: vi.fn(async () => undefined),
@@ -43,9 +42,7 @@ vi.mock("@/components/settings/sections/llm-provider-section", async (importOrig
   LlmProviderSection: () => <div data-capability="llm" />,
 }))
 vi.mock("@/components/settings/sections/default-model-settings-panel", () => ({ DefaultModelSettingsPanel: () => <div data-capability="default" /> }))
-vi.mock("@/components/settings/sections/embedding-section", () => ({ EmbeddingSection: () => <div data-capability="embedding" /> }))
-vi.mock("@/components/settings/sections/rerank-section", () => ({ RerankSection: () => <div data-capability="rerank" /> }))
-vi.mock("./models/retrieval-models", () => ({ UiTestEmbeddingModels: () => <div data-capability="embedding" />, UiTestRerankModels: () => <div data-capability="rerank" /> }))
+vi.mock("./models/jev-model", () => ({ JevModelSettings: () => <div data-capability="jev" /> }))
 vi.mock("@/components/settings/sections/interface-section", () => ({ InterfaceSection: () => <div data-capability="interface"><h2>外观与界面</h2></div> }))
 vi.mock("@/components/settings/sections/novel-section", () => ({ NovelSection: () => <div data-capability="novel" /> }))
 vi.mock("@/components/settings/sections/network-section", () => ({ NetworkSection: () => <div data-capability="network" /> }))
@@ -136,17 +133,17 @@ describe("测试版设置布局与正式版隔离", () => {
     expect(container.querySelector('[data-capability="interface"]')).not.toBeNull()
   })
 
-  it("四个模型页签保留能力入口、深链、键盘切换及选中语义", async () => {
-    useWikiStore.setState({ activeModelSettingsTab: "embedding" })
+  it("三个模型页签保留能力入口、深链、键盘切换及选中语义", async () => {
+    useWikiStore.setState({ activeModelSettingsTab: "jev" })
     await render(<SettingsView />)
-    expect(container.querySelector('[data-capability="embedding"]')).not.toBeNull()
-    expect(container.querySelectorAll('[role="tablist"] [role="tab"]')).toHaveLength(4)
-    for (const id of ["default", "llm", "rerank", "embedding"]) {
+    expect(container.querySelector('[data-capability="jev"]')).not.toBeNull()
+    expect(container.querySelectorAll('[role="tablist"] [role="tab"]')).toHaveLength(3)
+    for (const id of ["default", "llm", "jev"]) {
       await click(`[data-ui-model-tab="${id}"]`)
       expect(container.querySelector(`[data-capability="${id}"]`)).not.toBeNull()
       expect(container.querySelectorAll('[role="tab"][aria-selected="true"]')).toHaveLength(1)
     }
-    const last = container.querySelector<HTMLElement>('[data-ui-model-tab="embedding"]')!
+    const last = container.querySelector<HTMLElement>('[data-ui-model-tab="jev"]')!
     await act(async () => { last.dispatchEvent(new KeyboardEvent("keydown", { key: "Home", bubbles: true })) })
     expect(container.querySelector('[data-capability="default"]')).not.toBeNull()
     expect(document.activeElement).toBe(container.querySelector('[data-ui-model-tab="default"]'))

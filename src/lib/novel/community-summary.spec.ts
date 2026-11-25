@@ -4,14 +4,12 @@ import type { CommunityInfo, GraphEdge, GraphNode } from "@/lib/wiki-graph"
 import { buildWikiGraph } from "@/lib/wiki-graph"
 import { streamChat } from "@/lib/llm-client"
 import { resolveNovelModel } from "@/lib/novel/model-resolver"
-import { embedPage, searchByEmbedding } from "@/lib/embedding"
-import { useWikiStore, type LlmConfig, type NovelConfig } from "@/stores/wiki-store"
+import type { LlmConfig, NovelConfig } from "@/stores/wiki-store"
 import {
   MIN_COMMUNITY_SUMMARY_NODE_COUNT,
   __resetCommunitySummaryLocksForTesting,
   communityMemberFingerprint,
   generateCommunitySummaries,
-  searchCommunitySummaries,
   shouldRebuildCommunitySummaries,
 } from "./community-summary"
 
@@ -29,10 +27,6 @@ vi.mock("@/lib/llm-client", () => ({
   DEFAULT_LLM_REQUEST_TIMEOUT_MS: 45000,
 }))
 vi.mock("@/lib/novel/model-resolver", () => ({ resolveNovelModel: vi.fn() }))
-vi.mock("@/lib/embedding", () => ({
-  embedPage: vi.fn(),
-  searchByEmbedding: vi.fn(),
-}))
 
 const mockReadFile = vi.mocked(readFile)
 const mockWriteFile = vi.mocked(writeFile)
@@ -41,8 +35,6 @@ const mockListDirectory = vi.mocked(listDirectory)
 const mockBuildWikiGraph = vi.mocked(buildWikiGraph)
 const mockStreamChat = vi.mocked(streamChat)
 const mockResolveNovelModel = vi.mocked(resolveNovelModel)
-const mockEmbedPage = vi.mocked(embedPage)
-const mockSearchByEmbedding = vi.mocked(searchByEmbedding)
 
 const llmConfig: LlmConfig = {
   provider: "openai",
@@ -151,15 +143,6 @@ describe("community summary incremental rebuild", () => {
       cb.onToken("A community summary.")
       cb.onDone()
     })
-    mockEmbedPage.mockResolvedValue(true)
-    useWikiStore.setState({
-      embeddingConfig: {
-        enabled: true,
-        endpoint: "http://localhost:11434/api/embeddings",
-        apiKey: "",
-        model: "nomic-embed-text",
-      },
-    })
   })
 
   it("locks the minimum community size at 5", () => {
@@ -176,7 +159,6 @@ describe("community summary incremental rebuild", () => {
     })
     await generateCommunitySummaries("/project", llmConfig, novelConfig)
     expect(mockWriteFile).not.toHaveBeenCalled()
-    expect(mockEmbedPage).not.toHaveBeenCalled()
   })
 
   it("skips communities smaller than the minimum size", async () => {
@@ -188,7 +170,7 @@ describe("community summary incremental rebuild", () => {
     expect(mockWriteFile).not.toHaveBeenCalled()
   })
 
-  it("skips LLM and embed when the member fingerprint already exists", async () => {
+  it("skips regeneration when the member fingerprint already exists", async () => {
     const members = ["a", "b", "c", "d", "e"]
     const fingerprint = communityMemberFingerprint(members)
     mockBuildWikiGraph.mockResolvedValue(graphWithCommunity(7, members))
@@ -215,7 +197,6 @@ describe("community summary incremental rebuild", () => {
     await generateCommunitySummaries("/project", llmConfig, novelConfig)
 
     expect(mockStreamChat).not.toHaveBeenCalled()
-    expect(mockEmbedPage).not.toHaveBeenCalled()
     expect(mockWriteFile).not.toHaveBeenCalled()
   })
 
@@ -260,13 +241,6 @@ describe("community summary incremental rebuild", () => {
       `/project/.qmai/novel/community-summaries/${fingerprint}.json`,
       expect.stringContaining(fingerprint),
     )
-    expect(mockEmbedPage).toHaveBeenCalledWith(
-      "/project",
-      `community:${fingerprint}`,
-      expect.stringContaining("社区摘要"),
-      "A community summary.",
-      expect.anything(),
-    )
   })
 
   it("coalesces concurrent rebuilds for the same project", async () => {
@@ -301,55 +275,5 @@ describe("community summary incremental rebuild", () => {
       generateCommunitySummaries("/project", llmConfig, novelConfig, controller.signal),
     ).rejects.toMatchObject({ name: "AbortError" })
     expect(mockStreamChat).not.toHaveBeenCalled()
-  })
-})
-
-describe("community summary vector noise control", () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    vi.mocked(fileExists).mockResolvedValue(false)
-    useWikiStore.setState({
-      embeddingConfig: {
-        enabled: true,
-        endpoint: "http://localhost:11434/api/embeddings",
-        apiKey: "",
-        model: "nomic-embed-text",
-      },
-    })
-  })
-
-  it("returns only community summaries with a strong raw chunk match", async () => {
-    mockSearchByEmbedding.mockResolvedValue([
-      {
-        id: "community:1",
-        score: 0.99,
-        matchedChunks: [{ text: "Weak neighboring faction", headingPath: "Weak", score: 0.4 }],
-      },
-      {
-        id: "community:2",
-        score: 0.88,
-        matchedChunks: [{
-          text: "The northern faction controls the seal and opposes Lin.",
-          headingPath: "Northern faction",
-          score: 0.8,
-        }],
-      },
-    ])
-
-    const output = await searchCommunitySummaries("/project", "who controls the seal", 3)
-
-    expect(output).toContain("社区摘要")
-    expect(output).toContain("Northern faction")
-    expect(output).not.toContain("Weak neighboring faction")
-  })
-
-  it("returns empty context when every community match is weak", async () => {
-    mockSearchByEmbedding.mockResolvedValue([{
-      id: "community:1",
-      score: 0.95,
-      matchedChunks: [{ text: "Weak neighboring faction", headingPath: "Weak", score: 0.4 }],
-    }])
-
-    await expect(searchCommunitySummaries("/project", "unrelated chapter task", 3)).resolves.toBe("")
   })
 })

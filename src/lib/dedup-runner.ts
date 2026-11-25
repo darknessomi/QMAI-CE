@@ -6,8 +6,8 @@
  */
 import { listDirectory, readFile, writeFileAtomic, deleteFile, fileExists } from "@/commands/fs"
 import { streamChat } from "@/lib/llm-client"
-import { normalizePath } from "@/lib/path-utils"
-import { useWikiStore, type EmbeddingConfig, type LlmConfig } from "@/stores/wiki-store"
+import { normalizeComparablePath, normalizePath } from "@/lib/path-utils"
+import type { LlmConfig } from "@/stores/wiki-store"
 import type { FileNode } from "@/types/wiki"
 import {
   DedupRollbackError,
@@ -20,7 +20,9 @@ import {
   type EntitySummary,
   type MergeResult,
 } from "./dedup"
-import { buildDetectionBatches, checkDedupSignal, waitForDedupResult } from "./dedup-candidates"
+import { getJevConfig, type JevConfig } from "./jev-config"
+import { isAiExcludedContent } from "./novel/ai-exclude"
+import { buildBasicDetectionBatches, checkDedupSignal, waitForDedupResult, detectSagDuplicates } from "./dedup-candidates"
 import { loadNotDuplicates } from "./dedup-storage"
 import { advanceBatchDrafts, getBatchMergeDraft, type DedupMergeBatch } from "./dedup-merge-batch"
 
@@ -44,7 +46,7 @@ interface ExecuteMergeOptions {
 interface RunDuplicateDetectionOptions {
   signal?: AbortSignal
   summaries?: EntitySummary[]
-  embeddingConfig?: EmbeddingConfig | null
+  jevConfig?: JevConfig | null
   onProgress?: (stage: DedupScanStage) => void
   onLog?: DedupLogFn
 }
@@ -59,6 +61,7 @@ interface DuplicateDetectionResult {
   groups: DuplicateGroup[]
   scannedPageCount: number
   coverage?: string
+  manualReview?: string[]
 }
 
 /**
@@ -149,13 +152,13 @@ function buildDedupLlmCall(llmConfig: LlmConfig, maxTokens: number, intactInputW
 }
 
 /** Walk a FileNode tree, yielding every .md file under a given prefix. */
-function* walkMd(nodes: FileNode[], prefix: string): Generator<FileNode> {
+function* walkMd(nodes: FileNode[], projectPath: string, include: RegExp): Generator<FileNode> {
   for (const node of nodes) {
     if (node.is_dir) {
-      if (node.children) yield* walkMd(node.children, prefix)
+      if (node.children) yield* walkMd(node.children, projectPath, include)
       continue
     }
-    if (node.name.endsWith(".md") && node.path.includes(`${prefix}/`)) {
+    if (node.name.endsWith(".md") && include.test(toWikiRelative(projectPath, node.path))) {
       yield node
     }
   }
@@ -164,7 +167,7 @@ function* walkMd(nodes: FileNode[], prefix: string): Generator<FileNode> {
 /** Convert an absolute filesystem path to a wiki-relative one
  *  (`<project>/wiki/entities/foo.md` → `wiki/entities/foo.md`). */
 function toWikiRelative(projectPath: string, absPath: string): string {
-  const pp = normalizePath(projectPath)
+  const pp = normalizeComparablePath(projectPath)
   const norm = normalizePath(absPath)
   if (norm.startsWith(`${pp}/`)) return norm.slice(pp.length + 1)
   return norm
@@ -172,7 +175,7 @@ function toWikiRelative(projectPath: string, absPath: string): string {
 
 async function listEntityNodes(projectPath: string): Promise<FileNode[]> {
   const tree = await listDirectory(projectPath)
-  return [...walkMd(tree, "wiki/entities"), ...walkMd(tree, "wiki/concepts")]
+  return [...walkMd(tree, projectPath, /^(wiki|QM)\/(entities|concepts)\//)]
 }
 
 /** Re-check stale result cards without reading or modifying a page body. */
@@ -198,6 +201,7 @@ export async function loadAllEntitySummaries(
     checkDedupSignal(signal)
     try {
       const content = await readFile(node.path)
+      if (isAiExcludedContent(content)) return null
       const rel = toWikiRelative(pp, node.path)
       const summary = extractEntitySummary(rel, content)
       if (!summary) onSkipped?.()
@@ -218,7 +222,7 @@ export async function loadAllWikiPages(
 ): Promise<{ path: string; content: string }[]> {
   const pp = normalizePath(projectPath)
   const tree = await listDirectory(pp)
-  const nodes = [...walkMd(tree, "wiki")]
+  const nodes = [...walkMd(tree, pp, /^(wiki|QM)\//)]
 
   return mapWithConcurrency(nodes, WIKI_READ_CONCURRENCY, async (node) => {
     checkDedupSignal(signal)
@@ -243,7 +247,8 @@ export async function runDuplicateDetection(
   options: RunDuplicateDetectionOptions = {},
 ): Promise<DuplicateDetectionResult> {
   const log = options.onLog
-  log?.(`开始扫描，模型：${describeLlm(llmConfig)}`)
+  const config = options.jevConfig === undefined ? getJevConfig() : options.jevConfig
+  log?.(`开始扫描，模型：${config ? "JEV/" + config.model : describeLlm(llmConfig)}`)
   checkDedupSignal(options.signal)
   options.onProgress?.("loading")
   log?.("正在读取实体 / 概念页面…")
@@ -263,10 +268,14 @@ export async function runDuplicateDetection(
   if (notDup.length > 0) {
     log?.(`已加载 ${notDup.length} 组「非重复」白名单`)
   }
-  const llm = buildDedupLlmCall(llmConfig, 8192)
-  const config = options.embeddingConfig === undefined ? useWikiStore.getState().embeddingConfig : options.embeddingConfig
   const ordered = [...summaries].sort((a, b) => a.path.localeCompare(b.path))
-  const { batches, coverage } = await buildDetectionBatches(projectPath, ordered, config, notDup, log ?? (() => {}), options.signal)
+  if (config) {
+    const result = await detectSagDuplicates(projectPath, ordered, config, notDup, log ?? (() => {}), options.signal)
+    return { ...result, coverage: result.coverage + skippedNote, scannedPageCount: summaries.length }
+  }
+  const llm = buildDedupLlmCall(llmConfig, 8192)
+  const batches = buildBasicDetectionBatches(ordered, notDup)
+  const coverage = `基础查重：按名称和别名对 ${ordered.length} 页分批检测`
   const unique = new Map<string, DuplicateGroup>()
   for (const [i, batch] of batches.entries()) {
     checkDedupSignal(options.signal)
@@ -337,7 +346,14 @@ export async function executeMerge(
   log?.("正在读取 wiki 页面…")
   const allPages = await waitForDedupResult(() => loadAllWikiPages(pp, true, signal), signal)
   log?.(`已读取 ${allPages.length} 个 wiki 页面`)
-  const resolve = indexDedupPages(allPages)
+  const resolvePages = indexDedupPages(allPages)
+  const resolve = (slugs: string[]) => {
+    const sources = resolvePages(slugs)
+    if (sources.some(page => isAiExcludedContent(page.content))) {
+      throw new Error("待合并条目已设为 AI 不读取，请重新扫描。")
+    }
+    return sources
+  }
   const groupPages = resolve(group.slugs)
   checkDedupSignal(signal)
 

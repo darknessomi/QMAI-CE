@@ -8,7 +8,7 @@ export type WritingRunStatus = "running" | "needs_input" | "completed" | "failed
 type ProgressStage = Pick<AgentStageTrace, "id" | "title" | "status" | "startedAt" | "finishedAt">
 type ProgressTool = Pick<AgentRunRecord["toolCalls"][number], "id" | "parentCallId" | "name" | "status" | "startedAt" | "finishedAt">
 export interface WritingProgressIssue {
-  kind: "tool_error" | "approval_required" | "input_required" | "error"
+  kind: "tool_error" | "approval_required" | "input_required" | "error" | "retrieval_warning"
   message: string
   toolCallId?: string
 }
@@ -140,6 +140,10 @@ export function createWritingProgressStore(io: WritingProgressIo = { read: readF
     }
     return {
       snapshot, flush,
+      retrievalWarning() {
+        issue({ kind: "retrieval_warning", message: "本轮未取得 SAG2 原文证据，请检查决策模型服务和项目文件。" })
+        schedule()
+      },
       activity(event: AgentActivityEvent) {
         if (state.status !== "running") return
         stages = applyAgentActivityEvent(stages, {

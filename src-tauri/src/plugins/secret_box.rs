@@ -8,8 +8,7 @@
 //!
 //! ── 信封格式 ──────────────────────────────────────────────
 //! `enc1:` + base64(nonce ‖ 密文 ‖ tag)，nonce 12 字节、tag 16 字节（GCM 标准值）。
-//! 前缀存在的意义是「将来换算法时能认出旧格式」；判断口径只在 [`is_envelope`]
-//! 一处，别处不要各自 `starts_with("enc1:")`。
+//! [`ENVELOPE_PREFIX`] 标识格式版本，供加密和解密共用。
 //!
 //! ── 解密失败只有一种文案 ────────────────────────────────────
 //! 密钥文件被删/被换之后，旧密文**永远解不开**（能解开就等于有明文）。这不是
@@ -40,16 +39,6 @@ const TAG_LEN: usize = 16;
 
 /// 解密失败的统一文案：指向「重新登录」这个用户真能做的动作。
 pub const DECRYPT_FAILED: &str = "凭证解密失败（密钥文件可能已更换），请重新登录该账号";
-
-/// 这段文本是不是本模块产出的密文。
-///
-/// 生产路径里信封与明文的区分发生在 `AccountStore`（它按列判定整条记录的形态），
-/// 因此这里目前只有测试在用。留着是因为它把「什么算信封」这个**格式契约**留在
-/// 本模块内部 —— 将来换 `enc2:` 时只需要改这一个判断。
-#[allow(dead_code)]
-pub fn is_envelope(text: &str) -> bool {
-    text.starts_with(ENVELOPE_PREFIX)
-}
 
 /// 加密一段明文，返回 `enc1:…` 信封。密钥不存在时会自动生成。
 pub fn seal(key_path: &Path, plaintext: &[u8]) -> Result<String, String> {
@@ -167,7 +156,6 @@ mod tests {
         let key = dir.join("k.key");
         let envelope = seal(&key, b"hello").unwrap();
         assert!(envelope.starts_with(ENVELOPE_PREFIX));
-        assert!(is_envelope(&envelope));
         assert_eq!(open(&key, &envelope).unwrap(), b"hello");
     }
 

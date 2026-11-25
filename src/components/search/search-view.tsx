@@ -22,7 +22,6 @@ const STOP_WORDS = new Set([
 
 interface NovelSearchUiOptions {
   includeKeyword: boolean
-  includeVector: boolean
   includeGraph: boolean
   includeRecentChapters: boolean
   includeCanon: boolean
@@ -55,7 +54,6 @@ function tokenizeSearchQuery(query: string): string[] {
 
 function shouldUseAdvancedNovelSearch(options: NovelSearchUiOptions): boolean {
   return (
-    options.includeVector ||
     options.includeGraph ||
     options.includeRecentChapters ||
     options.includeCanon ||
@@ -66,25 +64,20 @@ function shouldUseAdvancedNovelSearch(options: NovelSearchUiOptions): boolean {
 async function runWikiPanelSearch(
   projectPath: string,
   query: string,
-  options?: { rerank?: boolean; includeVector?: boolean },
+  signal?: AbortSignal,
 ): Promise<SearchResult[]> {
   const { searchWiki } = await import("@/lib/search")
-  return searchWiki(projectPath, query, {
-    topK: SEARCH_PAGE_TOP_K,
-    rerank: options?.rerank,
-    includeVector: options?.includeVector,
-    rerankPurpose: "用于搜索面板展示最相关的知识页面。",
-  })
+  return searchWiki(projectPath, query, { topK: SEARCH_PAGE_TOP_K, signal })
 }
 
 async function runNovelPanelSearch(
   projectPath: string,
   query: string,
   options: NovelSearchUiOptions,
+  signal?: AbortSignal,
 ): Promise<SearchResult[]> {
   if (
     !options.includeKeyword &&
-    !options.includeVector &&
     !options.includeGraph &&
     !options.includeRecentChapters &&
     !options.includeCanon
@@ -94,12 +87,12 @@ async function runNovelPanelSearch(
 
   if (!shouldUseAdvancedNovelSearch(options)) {
     console.log("[Search] using minimal novel keyword search")
-    return runWikiPanelSearch(projectPath, query, { rerank: false, includeVector: false })
+    return runWikiPanelSearch(projectPath, query, signal)
   }
 
   console.log("[Search] using advanced novel mixed search")
   const { searchPlot } = await import("@/lib/novel/search-adapter")
-  const novelResults = await searchPlot(projectPath, query, options)
+  const novelResults = await searchPlot(projectPath, query, { ...options, signal })
   return novelResults.map((result) => ({
     path: result.path,
     title: result.title,
@@ -156,6 +149,8 @@ interface SearchViewProps {
 export function SearchView({ onClose, onOpenFile }: SearchViewProps) {
   const { t } = useTranslation()
   const novelMode = useWikiStore((s) => s.novelMode)
+  const jevConfig = useWikiStore((s) => s.jevConfig)
+  const jevError = useWikiStore((s) => s.jevConfigLoadError)
   const project = useWikiStore((s) => s.project)
   const setActiveView = useWikiStore((s) => s.setActiveView)
   const setSelectedFile = useWikiStore((s) => s.setSelectedFile)
@@ -188,11 +183,10 @@ export function SearchView({ onClose, onOpenFile }: SearchViewProps) {
       request.current++
       evidenceScan.current?.abort()
     }
-  }, [project?.id, evidenceOnly, fromChapter, toChapter])
+  }, [project?.id, evidenceOnly, fromChapter, toChapter, jevConfig, jevError])
 
   const [searchOpts, setSearchOpts] = useState<NovelSearchUiOptions>({
     includeKeyword: true,
-    includeVector: false,
     includeGraph: false,
     includeRecentChapters: false,
     includeCanon: false,
@@ -231,9 +225,9 @@ export function SearchView({ onClose, onOpenFile }: SearchViewProps) {
       setSearchHistory(next)
       try {
         const projectPath = normalizePath(project.path)
+        const controller = new AbortController()
+        evidenceScan.current = controller
         if (novelMode && evidenceOnly) {
-          const controller = new AbortController()
-          evidenceScan.current = controller
           const { chapterBound, searchChapterEvidence } = await import("@/lib/novel/chapter-evidence")
           const { hits, coverage } = await searchChapterEvidence(`${projectPath}/wiki/chapters`, trimmedQuery, {
             from: chapterBound(fromChapter), to: chapterBound(toChapter), signal: controller.signal,
@@ -243,20 +237,20 @@ export function SearchView({ onClose, onOpenFile }: SearchViewProps) {
           setResults(hits.map(hit => ({
             path: hit.path, title: `第${hit.number}章 · ${hit.title}`, snippet: hit.quote, titleMatch: false, score: 1, images: [],
           })))
-        } else if (novelMode) {
+        } else if (novelMode && !jevConfig && !jevError) {
           const t0 = performance.now()
-          const novelResults = await runNovelPanelSearch(projectPath, q, searchOpts)
+          const novelResults = await runNovelPanelSearch(projectPath, q, searchOpts, controller.signal)
           console.log("[Search] novel panel search done in", Math.round(performance.now() - t0), "ms, got", novelResults.length, "results")
           if (id === request.current) setResults(novelResults)
         } else {
           const t0 = performance.now()
-          const found = await runWikiPanelSearch(projectPath, q, { rerank: true, includeVector: true })
+          const found = await runWikiPanelSearch(projectPath, q, controller.signal)
           console.log("[Search] searchWiki done in", Math.round(performance.now() - t0), "ms, got", found.length, "results")
           if (id === request.current) setResults(found)
         }
       } catch (err) {
         if (id !== request.current) return
-        if (evidenceOnly) setCoverage(`原文查证未完成：${err instanceof Error ? err.message : String(err)}`)
+        setCoverage(`${evidenceOnly ? "原文查证未完成" : "搜索未完成"}：${err instanceof Error ? err.message : String(err)}`)
         console.error("[Search] FAILED:", err)
         setResults([])
       } finally {
@@ -264,7 +258,7 @@ export function SearchView({ onClose, onOpenFile }: SearchViewProps) {
         if (id === request.current) setSearching(false)
       }
     },
-    [project, novelMode, searchOpts, setSearchHistory, evidenceOnly, fromChapter, toChapter],
+    [project, novelMode, jevConfig, jevError, searchOpts, setSearchHistory, evidenceOnly, fromChapter, toChapter],
   )
 
   useEffect(() => {
@@ -458,9 +452,8 @@ export function SearchView({ onClose, onOpenFile }: SearchViewProps) {
                 onChange={e => setFromChapter(e.target.value)} className="w-20 rounded border px-1 text-xs" />
               <input type="number" min="1" aria-label="结束章号" placeholder="结束章" value={toChapter}
                 onChange={e => setToChapter(e.target.value)} className="w-20 rounded border px-1 text-xs" />
-            </> : ([
+            </> : jevError || jevConfig ? <span className="text-xs text-muted-foreground">{jevError || "SAG2 原文检索"}</span> : ([
               ["keyword", "includeKeyword"],
-              ["vector", "includeVector"],
               ["graph", "includeGraph"],
               ["recentChapters", "includeRecentChapters"],
               ["canon", "includeCanon"],
@@ -504,7 +497,7 @@ export function SearchView({ onClose, onOpenFile }: SearchViewProps) {
         </div>
       ) : results.length === 0 ? (
         <div className="flex-1 p-4 text-center text-sm text-muted-foreground">
-          {!(novelMode && evidenceOnly) && <>{t(novelMode ? "novel.search.noResults" : "search.noResults")} <span className="font-medium">"{query}"</span></>}
+          {!coverage && !(novelMode && evidenceOnly) && <>{t(novelMode ? "novel.search.noResults" : "search.noResults")} <span className="font-medium">"{query}"</span></>}
         </div>
       ) : (
         <div className="flex min-h-0 flex-1 flex-col">
@@ -580,7 +573,7 @@ export function SearchView({ onClose, onOpenFile }: SearchViewProps) {
             <div className="flex flex-col gap-1">
               {results.map((result) => (
                 <SearchResultCard
-                  key={result.path}
+                  key={JSON.stringify([result.path, result.startLine, result.endLine])}
                   result={result}
                   query={query}
                   path={result.path}
@@ -801,6 +794,7 @@ const SearchResultCard = memo(function SearchResultCard({
         </div>
       </div>
       <p className="text-xs text-muted-foreground line-clamp-2">
+        {result.startLine !== undefined && <span className="mr-1">第 {result.startLine}–{result.endLine} 行</span>}
         <HighlightedText text={result.snippet} query={query} />
       </p>
     </button>

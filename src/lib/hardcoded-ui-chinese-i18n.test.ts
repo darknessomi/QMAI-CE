@@ -125,7 +125,7 @@ describe("user-facing hardcoded chinese strings", () => {
     expect(maintenanceSection).toContain('defaultValue: "检测重复实体 / 概念"')
     expect(maintenanceSection).toContain('t("settings.sections.maintenance.dedup.description", {')
     expect(maintenanceSection).toContain(
-      'defaultValue:\n              "分批复核名称不同、可能属于同一人物或概念的条目。启用向量模型后会优先筛选语义相近的候选。每组由你确认后才进入合并队列。",'
+      'defaultValue:\n              "分批复核名称不同、可能属于同一人物或概念的条目。配置 JEV 后，SAG 检索相关条目并根据双方原文复核身份。每组由你确认后才进入合并队列。",'
     )
     expect(maintenanceSection).toContain('t("settings.sections.maintenance.noProject", {')
     expect(maintenanceSection).toContain('defaultValue: "请先打开一个项目。"')

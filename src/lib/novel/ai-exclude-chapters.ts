@@ -3,6 +3,24 @@ import { parseFrontmatter } from "@/lib/frontmatter"
 import { searchWiki } from "@/lib/search"
 import { isAiExcludedContent } from "./ai-exclude"
 import { parseChapterMeta } from "./chapter-meta"
+import { eligibleChapterNumber } from "@/lib/sag-search"
+
+/** 累计状态只有在整个来源区间可读时才可作为前情。 */
+export function hasReadableHistory(through: number, readable: ReadonlyMap<number, string>): boolean {
+  if (!Number.isSafeInteger(through) || through <= 0 || through > readable.size) return false
+  for (let n = 1; n <= through; n++) if (!readable.has(n)) return false
+  return true
+}
+
+export async function readVisibleChapter(projectPath: string, number: number, readable?: ReadonlyMap<number, string>): Promise<string> {
+  const matches = (path: string, text: string) => eligibleChapterNumber(path, text, number + 1) === number
+  const path = readable
+    ? readable.get(number)
+    : (await searchWiki(projectPath, `chapter_number:${number}`, { localOnly: true, topK: 1, acceptFile: matches }))[0]?.path
+  if (!path) return ""
+  const text = await readFile(path).catch(() => "")
+  return matches(path, text) ? text : ""
+}
 
 /**
  * 按**章号**判断「这一章是否被选中（AI 不读取）」。
@@ -25,7 +43,7 @@ export async function isChapterNumberAiExcluded(
 ): Promise<boolean> {
   if (!Number.isFinite(chapterNumber) || chapterNumber <= 0) return false
   try {
-    const results = await searchWiki(projectPath, `chapter_number:${chapterNumber}`)
+    const results = await searchWiki(projectPath, `chapter_number:${chapterNumber}`, { localOnly: true, includeExcludedMetadata: true })
     for (const result of results.slice(0, MAX_CANDIDATES_PER_CHAPTER)) {
       const content = await readFile(result.path).catch(() => "")
       if (!content) continue
@@ -46,7 +64,9 @@ export async function isChapterNumberAiExcluded(
 export async function listAiExcludedChapterNumbers(
   projectPath: string,
   chapterNumbers: readonly number[],
+  readable?: ReadonlyMap<number, string>,
 ): Promise<Set<number>> {
+  if (readable) return new Set(chapterNumbers.filter(n => !readable.has(n)))
   const unique = [...new Set(chapterNumbers.filter((value) => Number.isFinite(value) && value > 0))]
   if (unique.length === 0) return new Set()
   const flags = await Promise.all(

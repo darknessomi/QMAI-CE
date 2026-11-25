@@ -8,6 +8,7 @@ import { loadPersonaSkillIndex } from "./persona-skill-store"
 import { normalizePersonaName } from "./persona-skill-types"
 import { readContextMd } from "./tracking-files"
 import { loadCharacterStates } from "./character-state"
+import { hasReadableHistory } from "./ai-exclude-chapters"
 import { loadForeshadowingTracker } from "./foreshadowing-tracker"
 import {
   selectRelevantCharacterBriefs,
@@ -52,10 +53,11 @@ const MAX_BRIEFING_ITEMS = 20
 async function loadRecentChapterSnapshots(
   projectPath: string,
   chapterNumber: number,
+  readable?: ReadonlyMap<number, string>,
 ): Promise<ChapterSnapshot[]> {
   try {
     const numbers = chapterSnapshotNumbersFrom(await listSnapshots(projectPath))
-      .filter((n) => n < chapterNumber)
+      .filter((n) => n < chapterNumber && (!readable || readable.has(n)))
       .slice(-ITEM_LOOKBACK_SNAPSHOTS)
     const snapshots = await Promise.all(numbers.map((n) => loadSnapshot(projectPath, n)))
     return snapshots.filter((snapshot): snapshot is ChapterSnapshot => Boolean(snapshot))
@@ -125,6 +127,7 @@ export async function buildSectionBriefing(
   chapterNumber: number | undefined,
   chapterOutlineContent: string,
   task = "",
+  readable?: ReadonlyMap<number, string>,
 ): Promise<{ text: string; characterBriefs: OutlineCharacterBrief[] }> {
   const sections: string[] = []
   let characterBriefs: OutlineCharacterBrief[] = []
@@ -143,7 +146,7 @@ export async function buildSectionBriefing(
         const match = charStore.characters.find(
           (c) => c.characterName.includes(name) || name.includes(c.characterName),
         )
-        if (match) {
+        if (match && (!chapterNumber || match.lastUpdatedChapter < chapterNumber) && (!readable || readable.has(match.lastUpdatedChapter))) {
           const parts: string[] = [`**${match.characterName}**`]
           parts.push(match.status || "正常")
           if (match.currentLocation && match.currentLocation !== "未知") {
@@ -193,6 +196,8 @@ export async function buildSectionBriefing(
 
   const relevantForeshadowing = fStore.items.filter((f) => {
     if (f.status === "abandoned") return false
+    const sources = [f.plantedChapter, ...f.advancedChapters, ...(f.resolvedChapter ? [f.resolvedChapter] : [])]
+    if (sources.some(n => n >= chapterNumber || (readable && !readable.has(n)))) return false
     // 细纲中明确提到了该伏笔的描述
     if (foreshadowingHints.some((hint) => f.description.includes(hint) || hint.includes(f.description.slice(0, 10)))) {
       return true
@@ -252,7 +257,7 @@ export async function buildSectionBriefing(
   // 巧合的是 `sectionBriefing` 的依赖前缀**本来就含 `.qmai/novel/snapshots/`**，
   // 且它已在 TASK_SCOPED_SOURCES 里，故新读快照不需要动缓存接线。
   const itemBriefings = selectBriefingItems(
-    collectItemRecords(await loadRecentChapterSnapshots(projectPath, chapterNumber)),
+    collectItemRecords(await loadRecentChapterSnapshots(projectPath, chapterNumber, readable)),
     { characterNames, matchingText, limit: MAX_BRIEFING_ITEMS },
   )
   if (itemBriefings.length > 0) {
@@ -269,7 +274,7 @@ export async function buildSectionBriefing(
 
   // ── 3. 加载世界观约束 ──────────────────────────────
   const progress = await readContextMd(projectPath)
-  if (progress) {
+  if (progress && progress.lastCompletedChapter < chapterNumber && (!readable || hasReadableHistory(progress.lastCompletedChapter, readable))) {
     const constraints: string[] = []
     if (progress.currentArc && progress.currentArc !== "尚未开始") {
       constraints.push(`当前剧情阶段：${progress.currentArc}`)

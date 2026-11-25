@@ -37,7 +37,7 @@ const SECTION_LABELS: Record<ProjectBackupSection, string> = {
   content: "项目正文与资料",
   memory: "结构化记忆与章节快照",
   analysis: "AI 工作数据",
-  indexes: "向量与检索索引",
+  indexes: "检索索引",
   trash: "回收站",
 }
 
@@ -186,7 +186,7 @@ export function BackupExportDialog({
               />
               <span>
                 <span className="block font-medium">模型与 AI 配置</span>
-                <span className="text-xs text-muted-foreground">模型供应商、Embedding、Rerank、搜索和写作配置</span>
+                <span className="text-xs text-muted-foreground">模型供应商、搜索和写作配置</span>
               </span>
             </label>
             <label className="flex items-start gap-3 border px-3 py-2 text-sm">

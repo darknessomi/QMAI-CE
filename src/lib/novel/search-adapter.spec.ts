@@ -1,141 +1,39 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { readFile } from "@/commands/fs"
-import { searchWiki } from "@/lib/search"
-import { searchByEmbedding } from "@/lib/embedding"
 import { useWikiStore } from "@/stores/wiki-store"
-import { novelMixedSearch } from "./search-adapter"
+import { searchSagProject } from "@/lib/sag-search"
+import { searchWiki } from "@/lib/search"
+import { eligibleLocalSource, novelMixedSearch } from "./search-adapter"
 
-vi.mock("@/commands/fs", () => ({ readFile: vi.fn() }))
+vi.mock("@/lib/sag-search", async importOriginal => ({
+  ...await importOriginal<typeof import("@/lib/sag-search")>(), searchSagProject: vi.fn(),
+}))
 vi.mock("@/lib/search", () => ({ searchWiki: vi.fn() }))
-vi.mock("@/lib/embedding", () => ({ searchByEmbedding: vi.fn() }))
-vi.mock("@/lib/rerank", () => ({
-  rerankCandidates: vi.fn(async (_query, candidates, options) =>
-    candidates.slice(0, options?.topK ?? candidates.length)),
-}))
-vi.mock("./chapter-ingest", () => ({
-  listSnapshots: vi.fn(async () => []),
-  loadSnapshot: vi.fn(async () => null),
-}))
+beforeEach(() => {
+  vi.clearAllMocks()
+  useWikiStore.setState({ jevConfig: { endpoint: "http://test", model: "model" } })
+})
 
-const mockReadFile = vi.mocked(readFile)
-const mockSearchWiki = vi.mocked(searchWiki)
-const mockSearchByEmbedding = vi.mocked(searchByEmbedding)
-
-describe("novelMixedSearch vector noise control", () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    useWikiStore.setState({
-      embeddingConfig: {
-        enabled: true,
-        endpoint: "http://localhost:11434/api/embeddings",
-        apiKey: "",
-        model: "nomic-embed-text",
-      },
-    })
-    mockSearchWiki.mockResolvedValue([])
+describe("小说剧情检索", () => {
+  it("配置后只走 SAG2，同一章多个不同段落均保留", async () => {
+    vi.mocked(searchSagProject).mockResolvedValue([2, 9].map(startLine => ({
+      title: "前情", path: "/book/QM/chapters/one.md", score: 0.9, content: "原文", startLine, endLine: startLine,
+    })))
+    const hits = await novelMixedSearch({ projectPath: "/book", query: "前情", chapterNumber: 12, authoritativeOnly: true })
+    expect(hits.map(hit => hit.startLine)).toEqual([2, 9])
+    expect(searchSagProject).toHaveBeenCalledWith("/book", "前情", 5, expect.objectContaining({ beforeChapter: 12 }))
+    expect(searchWiki).not.toHaveBeenCalled()
   })
-
-  it("keeps the keyword branch lexical-only", async () => {
-    mockSearchByEmbedding.mockResolvedValue([])
-
-    await novelMixedSearch({
-      projectPath: "/project",
-      query: "semantic memory",
-      topK: 2,
-      includeKeyword: true,
-      includeVector: true,
-      includeGraph: false,
-      includeRecentChapters: false,
-      includeCanon: false,
-    })
-
-    expect(mockSearchWiki).toHaveBeenCalledWith(
-      "/project",
-      "semantic memory",
-      { includeVector: false },
-    )
+  it("服务出错时不静默执行关键词检索", async () => {
+    vi.mocked(searchSagProject).mockRejectedValue(new Error("失败"))
+    await expect(novelMixedSearch({ projectPath: "/book", query: "问题" })).rejects.toThrow("失败")
+    expect(searchWiki).not.toHaveBeenCalled()
   })
-
-  it("rejects a high blended page score when the best raw chunk score is weak", async () => {
-    mockSearchByEmbedding.mockResolvedValue([{
-      id: "wiki/memory/noisy-hit",
-      score: 0.99,
-      matchedChunks: [{ text: "weak semantic neighbor", headingPath: "Noise", score: 0.4 }],
-    }])
-    mockReadFile.mockResolvedValue("# Noisy Hit\n\nUnrelated page text.")
-
-    const results = await novelMixedSearch({
-      projectPath: "/project",
-      query: "current chapter goal",
-      topK: 2,
-      includeKeyword: true,
-      includeVector: true,
-      includeGraph: false,
-      includeRecentChapters: false,
-      includeCanon: false,
-    })
-
-    expect(results).toEqual([])
-    expect(mockReadFile).not.toHaveBeenCalled()
-  })
-
-  it("uses the actual matched chunk as the vector result snippet", async () => {
-    mockSearchByEmbedding.mockResolvedValue([{
-      id: "wiki/memory/seal-memory",
-      score: 0.92,
-      matchedChunks: [{
-        text: "Lin discovers that the northern faction owns the seal.",
-        headingPath: "Chapter 12 / Seal",
-        score: 0.82,
-      }],
-    }])
-    mockReadFile.mockResolvedValue("# Unrelated Page Introduction\n\nThe relevant detail appears much later.")
-
-    const results = await novelMixedSearch({
-      projectPath: "/project",
-      query: "who controls the seal",
-      topK: 2,
-      includeKeyword: true,
-      includeVector: true,
-      includeGraph: false,
-      includeRecentChapters: false,
-      includeCanon: false,
-    })
-
-    expect(results).toHaveLength(1)
-    expect(results[0].snippet).toContain("Chapter 12 / Seal")
-    expect(results[0].snippet).toContain("northern faction owns the seal")
-    expect(results[0].snippet).not.toContain("Unrelated Page Introduction")
-  })
-
-  /*
-   * 「选中（AI 不读取）」：检索命中也不能把被排除的内容当"参考资料"送进模型。
-   * 语义检索这一路是模型最容易被"顺手泄漏"的入口 —— 它不经过大纲/正文注入，
-   * 命中就直接进上下文。
-   */
-  it("被选中（AI 不读取）的文档不会作为检索结果返回", async () => {
-    mockSearchByEmbedding.mockResolvedValue([{
-      id: "wiki/memory/seal-memory",
-      score: 0.92,
-      matchedChunks: [{
-        text: "Lin discovers that the northern faction owns the seal.",
-        headingPath: "Chapter 12 / Seal",
-        score: 0.82,
-      }],
-    }])
-    mockReadFile.mockResolvedValue("---\ntitle: Seal\ntype: concept\nai_exclude: true\n---\n\n# Seal\n\nnorthern faction owns the seal")
-
-    const results = await novelMixedSearch({
-      projectPath: "/project",
-      query: "who controls the seal",
-      topK: 2,
-      includeKeyword: true,
-      includeVector: true,
-      includeGraph: false,
-      includeRecentChapters: false,
-      includeCanon: false,
-    })
-
-    expect(results).toEqual([])
+  it("本地写作检索接受 QM 布局，并且仅允许前文定稿", () => {
+    const content = "---\nchapter_number: 3\nchapter_status: final\n---\n原文"
+    const path = "/book/QM/chapters/three.md"
+    expect(eligibleLocalSource(path, content, 4)).toBe(true)
+    expect(eligibleLocalSource(path, content, 3)).toBe(false)
+    expect(eligibleLocalSource(path, content.replace("final", "draft"), 4)).toBe(false)
+    expect(eligibleLocalSource(path, content.replace("chapter_status", "ai_exclude: true\nchapter_status"), 4)).toBe(false)
   })
 })

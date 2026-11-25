@@ -62,6 +62,7 @@ describe("出场物品进入写作提示词", () => {
   })
 
   afterEach(() => {
+    vi.doUnmock("@/lib/sag-search")
     vi.doUnmock("@/commands/fs")
     vi.doUnmock("@/lib/search")
     vi.resetModules()
@@ -72,6 +73,19 @@ describe("出场物品进入写作提示词", () => {
     const normalizedFiles = new Map(
       Object.entries(files).map(([path, content]) => [path.replace(/\\/g, "/"), content]),
     )
+    const chapters = new Map<number, string>()
+    for (const path of Object.keys(files)) {
+      const match = path.match(/\/(\d+)\.snapshot\.json$/)
+      if (!match) continue
+      const n = Number(match[1])
+      const document = `${PROJECT}/wiki/chapters/第${n}章.md`
+      normalizedFiles.set(document, `---\nchapter_number: ${n}\nchapter_status: final\n---\n正文`)
+      if (n < chapterNumber) chapters.set(n, document)
+    }
+    vi.doMock("@/lib/sag-search", async original => ({
+      ...await original<typeof import("@/lib/sag-search")>(),
+      prepareSagChapterScope: async () => ({ files: [...chapters.values()], fingerprint: "fixture", chapters }),
+    }))
 
     vi.doMock("@/commands/fs", () => ({
       readFile: vi.fn(async (path: string) => {

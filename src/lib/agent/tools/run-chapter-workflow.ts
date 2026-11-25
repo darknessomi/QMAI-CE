@@ -146,7 +146,8 @@ export function createRunChapterWorkflowTool(options: RunChapterWorkflowToolOpti
         {
           projectPath: options.projectPath,
           userRequest,
-          chapterNumber: params.chapterNumber,
+          chapterNumber: params.chapterNumber ?? context?.chapterEvidence?.chapterNumber,
+          ...(context?.chapterEvidence ? { chapterEvidence: context.chapterEvidence } : {}),
           llmConfig: options.llmConfig,
           aiWorkflowMode: params.workflowMode ?? options.aiWorkflowMode,
           planBlueprint,

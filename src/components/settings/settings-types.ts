@@ -1,5 +1,5 @@
 import type { CustomApiMode, LlmProviderId } from "./llm-presets"
-import type { AzureModelFamily, ReasoningConfig, RevisionFeedbackWindowConfig, NovelConfig, RerankConfig, OutputLanguage } from "@/stores/wiki-store"
+import type { AzureModelFamily, ReasoningConfig, RevisionFeedbackWindowConfig, NovelConfig, OutputLanguage } from "@/stores/wiki-store"
 import type { SidebarNavConfig } from "@/lib/sidebar-nav-preferences"
 import type { VisualStyle } from "@/lib/visual-style-settings"
 
@@ -23,18 +23,6 @@ export interface SettingsDraft {
   apiMode: CustomApiMode | undefined
   reasoning: ReasoningConfig | undefined
   localCliIsolation: boolean
-
-  // Embedding
-  embeddingEnabled: boolean
-  embeddingEndpoint: string
-  embeddingApiKey: string
-  embeddingModel: string
-  /** Optional Gemini native output_dimensionality. Empty = provider default. */
-  embeddingOutputDimensionality: number | undefined
-  /** Target characters per chunk. Empty = use chunker default (1000). */
-  embeddingMaxChunkChars: number | undefined
-  /** Overlap characters between adjacent chunks. Empty = default (200). */
-  embeddingOverlapChunkChars: number | undefined
 
   // Multimodal (image captioning at ingest time)
   multimodalEnabled: boolean
@@ -81,9 +69,6 @@ export interface SettingsDraft {
 
   // Novel config
   novelConfig: NovelConfig
-
-  // Retrieval rerank config
-  rerankConfig: RerankConfig
 }
 
 export type DraftSetter = <K extends keyof SettingsDraft>(

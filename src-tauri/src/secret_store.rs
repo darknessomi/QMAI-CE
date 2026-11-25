@@ -77,6 +77,35 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
+// JEV 与旧版模型配置分别存储，切换检索引擎不会改写旧模型的凭据。
+fn jev_config_dir<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
+    app.path().app_local_data_dir().map(|path| path.join("secrets/jev"))
+        .map_err(|_| "无法定位 JEV 配置目录".to_string())
+}
+
+#[tauri::command]
+pub fn jev_config_save<R: Runtime>(app: AppHandle<R>, contents: String) -> Result<(), String> {
+    if contents.len() > MAX_STATE_SECRET_BYTES {
+        return Err("JEV 配置内容过大".to_string());
+    }
+    let dir = jev_config_dir(&app)?;
+    let envelope = crate::plugins::secret_box::seal(&dir.join("key.bin"), contents.as_bytes())?;
+    crate::atomic_file::write_bytes_atomically(&dir.join("config.enc"), envelope.as_bytes())
+}
+
+#[tauri::command]
+pub fn jev_config_load<R: Runtime>(app: AppHandle<R>) -> Result<Option<String>, String> {
+    let dir = jev_config_dir(&app)?;
+    let envelope = match fs::read_to_string(dir.join("config.enc")) {
+        Ok(value) => value,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(_) => return Err("无法读取 JEV 配置".to_string()),
+    };
+    let bytes = crate::plugins::secret_box::open(&dir.join("key.bin"), &envelope)
+        .map_err(|_| "JEV 配置无法解密，请重新配置。".to_string())?;
+    String::from_utf8(bytes).map(Some).map_err(|_| "JEV 配置格式无效".to_string())
+}
+
 /// 模型配置的本地密文文件名。
 pub(crate) const MODEL_CONFIGS_FILE: &str = "secrets/model-configs.bin";
 /// 单份模型配置上限：10 个 provider 约 10KB，256KB 足够并且能兜住异常膨胀。

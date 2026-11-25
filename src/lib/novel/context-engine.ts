@@ -1,4 +1,3 @@
-import { buildMemoryProjection } from "./memory-rebuild"
 import {
   charsPerTokenForLanguage,
   resolveContextPackTokenBudget,
@@ -8,25 +7,23 @@ import i18n from "@/i18n"
 import { searchWiki, tokenizeQuery } from "@/lib/search"
 import { normalizePath } from "@/lib/path-utils"
 import { useWikiStore } from "@/stores/wiki-store"
-import { parseChapterMeta } from "./chapter-meta"
 import { isAiExcludedContent } from "./ai-exclude"
 import { listAiExcludedChapterNumbers } from "./ai-exclude-chapters"
 import { parseFrontmatter } from "@/lib/frontmatter"
-import { listSnapshots, loadSnapshot, type ChapterSnapshot } from "./chapter-ingest"
 import { buildRevisionDirectives } from "./revision-feedback"
 import { extractChapterOutlineStatus } from "./outline-quality-check"
-import { loadCognitionState, cognitionToContextText } from "./character-cognition"
 import { isGeneratedProjection } from "./persona-projection"
 import { buildPersonaSkillContext } from "./persona-skill-context"
 import { withMemoryWriteLock } from "./memory-cleanup-policy"
-import { isAuthoritativeGenerationPath, isHistoricalProjectionSnippet, novelMixedSearch } from "./search-adapter"
-import { rerankCandidates } from "@/lib/rerank"
+import { eligibleLocalSource, isAuthoritativeGenerationPath, isHistoricalProjectionSnippet, novelMixedSearch } from "./search-adapter"
+import { getJevConfigState } from "@/lib/jev-config"
+import { fitSagEvidence, formatSagEvidence, prepareSagChapterScope, searchSagProject } from "@/lib/sag-search"
 import {
   DataSourceRegistry,
   type ContextLoadContext,
   type DataSourceLoadAdapter,
 } from "./context-data-source"
-import { getAllDataSources, getDataSourcesForCategories } from "./context-data-sources"
+import { getDataSourcesForCategories } from "./context-data-sources"
 import type { DataSourceCategory } from "./classification"
 import {
   buildOutlineContext,
@@ -94,7 +91,15 @@ export interface TrimResult {
   finalChars: number
 }
 
+export interface ChapterSearchEvidence {
+  chapterNumber?: number
+  scopeKey?: string
+  text: string
+  warning?: string
+}
+
 export interface ContextPack {
+  sagEvidence?: ChapterSearchEvidence
   task: string
   chapterGoal: string
   outline: string
@@ -141,25 +146,57 @@ export async function buildContextPack(
   projectPath: string,
   task: string,
   chapterNumber?: number,
-  options?: { categories?: DataSourceCategory[]; loadAdapter?: DataSourceLoadAdapter },
+  options?: { categories?: DataSourceCategory[]; loadAdapter?: DataSourceLoadAdapter; signal?: AbortSignal; evidence?: ChapterSearchEvidence },
 ): Promise<ContextPack> {
   const pp = normalizePath(projectPath)
-  return withMemoryWriteLock(pp, async () => {
-    const novelMode = useWikiStore.getState().novelMode
-    if (!novelMode) {
-      return emptyPack(task)
-    }
+  if (!useWikiStore.getState().novelMode) return emptyPack(task)
+  const context = buildLoadContext(pp, task, chapterNumber)
+  const sources = getDataSourcesForCategories(options?.categories)
+  const jev = getJevConfigState()
+  const semantic = Boolean(jev.config || jev.error)
+  const isSearchSource = (source: { name: string }) => source.name === "searchResults" || source.name === "graphSearchResults"
+  const wantsSearch = sources.some(isSearchSource)
+  const registry = new DataSourceRegistry({ loadAdapter: options?.loadAdapter })
+  registry.registerAll(semantic ? sources.filter(source => !isSearchSource(source)) : sources)
+  const beforeChapter = context.chapterNumber ?? Number.MAX_SAFE_INTEGER
+  let scope: Awaited<ReturnType<typeof prepareSagChapterScope>> | undefined
+  let failure = jev.error
+  try {
+    scope = await prepareSagChapterScope(pp, beforeChapter, options?.signal, Boolean(jev.config && wantsSearch))
+  } catch (error) {
+    options?.signal?.throwIfAborted()
+    failure ??= error instanceof Error ? error.message : String(error)
+  }
+  context.chapterScope = scope ?? { fingerprint: "unavailable", chapters: new Map() }
 
-    // 构建加载上下文
-    const context = buildLoadContext(pp, task, chapterNumber)
-  
-    // 创建数据源注册器并加载所有数据
-    const registry = createDataSourceRegistry(options?.categories, options?.loadAdapter)
+  const { pack, chapterOutline } = await withMemoryWriteLock(pp, async () => {
     const rawData = await registry.loadAll(context)
-  
-    // 从原始数据构建上下文包
-    return buildContextPackFromRawData(rawData, context)
+    return { pack: await buildContextPackFromRawData(rawData, context), chapterOutline: rawData.chapterOutline ?? "" }
   })
+  options?.signal?.throwIfAborted()
+  if (!semantic || !wantsSearch) return pack
+
+  let scopeKey: string | undefined
+  let evidence: ChapterSearchEvidence
+  try {
+    if (failure || !scope) throw new Error(failure || "未能校验可读取章节")
+    const outline = chapterOutline.slice(0, 950)
+    const goal = pack.chapterGoal.slice(0, 350)
+    scopeKey = JSON.stringify([pp, beforeChapter, scope.fingerprint, outline, goal, context.config.searchTopK, jev.config?.endpoint, jev.config?.model])
+    if (options?.evidence?.scopeKey === scopeKey) {
+      evidence = options.evidence
+    } else {
+      const query = [context.task.slice(0, 650), goal, outline].filter(Boolean).join("\n")
+      const hits = await searchSagProject(pp, query, context.config.searchTopK, {
+        beforeChapter, signal: options?.signal, scope,
+      })
+      evidence = { chapterNumber: context.chapterNumber, scopeKey, text: formatSagEvidence(pp, hits) }
+    }
+  } catch (error) {
+    options?.signal?.throwIfAborted()
+    evidence = { chapterNumber: context.chapterNumber, scopeKey, text: "", warning: `本轮未取得 SAG2 原文证据：${error instanceof Error ? error.message : String(error)}` }
+  }
+  return { ...pack, sagEvidence: evidence, searchResults: evidence.text, graphSearchResults: "" }
 }
 
 /**
@@ -184,19 +221,6 @@ function buildLoadContext(
       revisionFeedbackWindowConfig,
     },
   }
-}
-
-/**
- * 创建并配置数据源注册器
- */
-function createDataSourceRegistry(
-  categories?: DataSourceCategory[],
-  loadAdapter?: DataSourceLoadAdapter,
-): DataSourceRegistry {
-  const registry = new DataSourceRegistry({ loadAdapter })
-  registry.registerAll(categories?.length ? getDataSourcesForCategories(categories) : getAllDataSources())
-  
-  return registry
 }
 
 /**
@@ -239,6 +263,7 @@ async function buildContextPackFromRawData(
   const excludedRetrievalNumbers = await listAiExcludedChapterNumbers(
     context.projectPath,
     [...summaryEntries, ...lookbackEntries].map((entry) => entry.chapterNumber),
+    context.chapterScope?.chapters,
   )
   const visibleSummaryEntries = summaryEntries.filter((entry) => !excludedRetrievalNumbers.has(entry.chapterNumber))
   const visibleLookbackEntries = lookbackEntries.filter((entry) => !excludedRetrievalNumbers.has(entry.chapterNumber))
@@ -269,13 +294,13 @@ async function buildContextPackFromRawData(
     ? retrievalRecentSummaries
     : snapshotRecentSummaries.length > 0 
     ? snapshotRecentSummaries 
-    : rawData.fallbackRecentSummaries
+    : rawData.fallbackRecentSummaries ?? []
   const recentChapterContents = Array.isArray(rawData.recentChapterContents)
     ? rawData.recentChapterContents
     : []
   
-  const previousChapterEnding = rawData.snapshots.previousChapterEnding 
-    || rawData.fallbackPreviousEnding
+  const previousChapterEnding = rawData.snapshots?.previousChapterEnding
+    || rawData.fallbackPreviousEnding || ""
   
   const snapshotCharacterStates = rawData.snapshots?.characterStates || ""
   const characterStates = retrievalCharacterStates || snapshotCharacterStates || rawData.fallbackCharacterStates || ""
@@ -319,12 +344,12 @@ async function buildContextPackFromRawData(
   // 合并大纲信息
   const mergedOutline = joinNonEmpty([
     outline,
-    rawData.volumeContext,
-    rawData.chapterOutline
+    rawData.volumeContext ?? "",
+    rawData.chapterOutline ?? ""
   ], "\n\n")
   
   // 构建修订指令
-  const revisionDirectives = buildRevisionDirectives(rawData.revisionFeedback)
+  const revisionDirectives = rawData.revisionFeedback?.mustFix ? buildRevisionDirectives(rawData.revisionFeedback) : ""
   
   const briefing = rawData.sectionBriefing
   const briefs: OutlineCharacterBrief[] = briefing?.characterBriefs ?? []
@@ -333,6 +358,7 @@ async function buildContextPackFromRawData(
     joinNonEmpty([context.task, chapterGoal, rawData.chapterOutline ?? ""], "\n"),
     joinNonEmpty([characterStates, rawData.cognitionText ?? ""], "\n"),
     briefs,
+    context.chapterScope?.chapters,
   ).catch(() => ({ skills: "", profileFacts: new Map<string, string>() }))
   const characterBriefs = renderCharacterBriefs(briefs, persona.profileFacts)
   const sectionBriefing = joinNonEmpty([
@@ -368,17 +394,17 @@ async function buildContextPackFromRawData(
     characterStates,
     sectionBriefing,
     ...(persona.skills ? { personaSkills: persona.skills } : {}),
-    cognitionStates: rawData.cognitionText,
+    cognitionStates: rawData.cognitionText ?? "",
     foreshadowingStates,
     timeline,
-    relatedSettings: rawData.relatedSettings,
-    canonRules: rawData.canonRules,
+    relatedSettings: rawData.relatedSettings ?? "",
+    canonRules: rawData.canonRules ?? "",
     sourceCanon: typeof rawData.sourceCanon === "string" ? rawData.sourceCanon : "",
-    writingStyle: rawData.writingStyle,
+    writingStyle: rawData.writingStyle ?? "",
     searchResults,
-    graphSearchResults: rawData.graphSearchResults,
+    graphSearchResults: rawData.graphSearchResults ?? "",
     mustDo: buildMustDo(chapterGoal, previousChapterEnding, foreshadowingStates),
-    mustAvoid: buildMustAvoid(rawData.canonRules, timeline, characterStates, rawData.sourceCanon),
+    mustAvoid: buildMustAvoid(rawData.canonRules ?? "", timeline, characterStates, rawData.sourceCanon),
     nextChapterAdvice: buildNextChapterAdvice({
       chapterGoal,
       recentSummaries,
@@ -679,222 +705,12 @@ export function annotateChapterOutlineStatus(content: string): string {
   ].join("\n")
 }
 
-// 以下函数已被数据源模式使用，但通过动态导入，TypeScript 无法检测到
-// @ts-expect-error - 函数通过动态导入在 context-data-sources.ts 中使用
-async function readSnapshotContext(
-  pp: string,
-  chapterNumber: number | undefined,
-  recentSummaryWindow: number,
-  snapshotLookback: number,
-): Promise<{
-  recentSummaries: string[]
-  previousChapterEnding: string
-  characterStates: string
-  foreshadowingSignals: string[]
-  timeline: string
-}> {
-  const snapshotNumbers = await listSnapshots(pp)
-  if (snapshotNumbers.length === 0) {
-    return {
-      recentSummaries: [],
-      previousChapterEnding: "",
-      characterStates: "",
-      foreshadowingSignals: [],
-      timeline: "",
-    }
-  }
-
-  const lookbackNumbers = chapterNumber
-    ? selectLookbackChapterNumbers(chapterNumber, snapshotLookback)
-    : [...snapshotNumbers].sort((a, b) => b - a).slice(0, snapshotLookback)
-  const summaryNumbers = chapterNumber
-    ? snapshotNumbers.filter((n) => n < chapterNumber).slice(-recentSummaryWindow)
-    : snapshotNumbers.slice(-recentSummaryWindow)
-
-  const [lookbackSnapshots, summarySnapshots] = await Promise.all([
-    Promise.all(lookbackNumbers.map((n) => loadSnapshot(pp, n))),
-    Promise.all(summaryNumbers.map((n) => loadSnapshot(pp, n))),
-  ])
-
-  // 「选中（AI 不读取）」：被选中章节的派生快照一并不进上下文（口径见 ai-exclude-chapters.ts）。
-  const excludedSnapshotNumbers = await listAiExcludedChapterNumbers(pp, [...lookbackNumbers, ...summaryNumbers])
-
-  const validLookback = lookbackSnapshots
-    .filter((snapshot): snapshot is ChapterSnapshot => Boolean(snapshot))
-    .filter((snapshot) => !excludedSnapshotNumbers.has(snapshot.chapterNumber))
-  const validSummarySnapshots = summarySnapshots
-    .filter((snapshot): snapshot is ChapterSnapshot => Boolean(snapshot))
-    .filter((snapshot) => !excludedSnapshotNumbers.has(snapshot.chapterNumber))
-
-  const previousSnapshot = validLookback[0]
-    const official = buildMemoryProjection(validLookback).officialSnapshots
-  const recentSummaries = validSummarySnapshots.map((snapshot) => `第${snapshot.chapterNumber}章：${snapshot.summary}`)
-  const characterStates = joinNonEmpty(
-    official
-      .flatMap((snapshot) => snapshot.characterStateChanges.map((change) => `第${snapshot.chapterNumber}章：${change}`)),
-    "\n",
-  )
-  const foreshadowingSignals = official.flatMap((snapshot) => snapshot.foreshadowingChanges)
-  const timeline = joinNonEmpty(
-    official
-      .flatMap((snapshot) => snapshot.timelineEvents.map((event) => `第${snapshot.chapterNumber}章：${event}`)),
-    "\n",
-  )
-
-  return {
-    recentSummaries,
-    previousChapterEnding: previousSnapshot?.endingHook || "",
-    characterStates,
-    foreshadowingSignals,
-    timeline,
-  }
-}
-
-// @ts-expect-error - 函数通过动态导入在 context-data-sources.ts 中使用
-async function readRecentChapterSummaries(pp: string, count: number): Promise<string[]> {
-  const summaries: string[] = []
-  try {
-    const results = await searchWiki(pp, "type:chapter")
-    for (const r of results.slice(0, count)) {
-      try {
-        const content = await readFile(r.path)
-        // 「选中（AI 不读取）」：被排除的章节不进摘要。
-        if (isAiExcludedContent(content)) continue
-        const parsed = parseFrontmatter(content)
-        const fm = parsed.frontmatter as Record<string, unknown> | null
-        const meta = fm ? parseChapterMeta(fm) : null
-        if (meta) {
-          const bodyStart = content.indexOf("---", 4)
-          const body = bodyStart >= 0 ? content.slice(bodyStart + 3).trim() : content
-          summaries.push(`第${meta.chapterNumber}章 (${meta.status}): ${body.slice(0, 500)}`)
-        }
-      } catch {}
-    }
-  } catch {}
-  return summaries
-}
-
-// @ts-expect-error - 函数通过动态导入在 context-data-sources.ts 中使用
-async function readPreviousChapterEnding(pp: string, chapterNumber?: number): Promise<string> {
-  if (!chapterNumber || chapterNumber <= 1) return ""
-  try {
-    const results = await searchWiki(pp, `chapter_number:${chapterNumber - 1}`)
-    if (results.length > 0) {
-      const content = await readFile(results[0].path)
-      // 「选中（AI 不读取）」：被排除的章节连结尾钩子都不给。
-      if (isAiExcludedContent(content)) return ""
-      const lines = content.split("\n")
-      const lastLines = lines.slice(-10).join("\n")
-      return lastLines
-    }
-  } catch {}
-  return ""
-}
-
-// @ts-expect-error - 函数通过动态导入在 context-data-sources.ts 中使用
-async function readCharacterStates(pp: string): Promise<string> {
-  try {
-    const results = await searchWiki(pp, "type:entity character")
-    if (results.length > 0) {
-      const contents = await Promise.all(results.slice(0, 5).map(r => readFile(r.path).catch(() => "")))
-      return contents.filter(Boolean).join("\n---\n").slice(0, 3000)
-    }
-  } catch {}
-  return ""
-}
-
-// @ts-expect-error - 函数通过动态导入在 context-data-sources.ts 中使用
-async function readCognitionStates(pp: string): Promise<string> {
-  try {
-    const state = await loadCognitionState(pp)
-    if (!state) return ""
-    return cognitionToContextText(state)
-  } catch {}
-  return ""
-}
-
-// @ts-expect-error - 函数通过动态导入在 context-data-sources.ts 中使用
-async function readForeshadowingStates(pp: string): Promise<string> {
-  try {
-    const results = await searchWiki(pp, "伏笔 foreshadowing")
-    if (results.length > 0) {
-      const contents = await Promise.all(results.slice(0, 3).map(r => readFile(r.path).catch(() => "")))
-      return contents.filter(Boolean).join("\n---\n").slice(0, 2000)
-    }
-  } catch {}
-  return ""
-}
-
-// @ts-expect-error - 函数通过动态导入在 context-data-sources.ts 中使用
-async function readTimeline(pp: string): Promise<string> {
-  try {
-    const results = await searchWiki(pp, "timeline 时间线")
-    if (results.length > 0) {
-      const content = await readFile(results[0].path)
-      return content.slice(0, 2000)
-    }
-  } catch {}
-  return ""
-}
-
-// @ts-expect-error - 函数通过动态导入在 context-data-sources.ts 中使用
-async function readRelatedSettings(pp: string): Promise<string> {
-  try {
-    const results = await searchWiki(pp, "setting 设定 location 地点")
-    if (results.length > 0) {
-      const contents = await Promise.all(results.slice(0, 3).map(r => readFile(r.path).catch(() => "")))
-      return contents.filter(Boolean).join("\n---\n").slice(0, 2000)
-    }
-  } catch {}
-  return ""
-}
-
-// @ts-expect-error - 函数通过动态导入在 context-data-sources.ts 中使用
-async function readCanonRules(pp: string): Promise<string> {
-  try {
-    const results = await searchWiki(pp, "canon 正史 rule 规则")
-    if (results.length > 0) {
-      const content = await readFile(results[0].path)
-      return content.slice(0, 2000)
-    }
-  } catch {}
-  return ""
-}
-
-// @ts-expect-error - 函数通过动态导入在 context-data-sources.ts 中使用
-async function readWritingStyle(pp: string): Promise<string> {
-  // 优先：已启用的文风预设。
-  // buildWritingStyleContext 内部已做长度上限与"只学文风不借剧情"硬约束。
-  try {
-    const { buildWritingStyleContext } = await import("./writing-style-store")
-    const styleContext = await buildWritingStyleContext(pp)
-    if (styleContext.trim()) return styleContext
-  } catch {}
-  // 回退：wiki 中的风格页（旧行为）。
-  try {
-    const results = await searchWiki(pp, "style 风格 writing 写作")
-    if (results.length > 0) {
-      const content = await readFile(results[0].path)
-      return content.slice(0, 1000)
-    }
-  } catch {}
-  return ""
-}
-
-// @ts-expect-error - 函数通过动态导入在 context-data-sources.ts 中使用
-async function readVolumeContext(
-  pp: string,
-  chapterNumber: number | undefined,
-): Promise<string> {
-  if (!chapterNumber) return ""
-  return readVolumeContextContent(pp, chapterNumber)
-}
-
 export async function searchRelevantContentUnified(
   pp: string,
   task: string,
   chapterNumber: number | undefined,
   limit: number,
+  readableChapters?: ReadonlyMap<number, string>,
 ): Promise<string> {
   const tokens = tokenizeQuery(task)
   const entityHints = tokens.filter((t) => t.length >= 2).slice(0, 5)
@@ -914,19 +730,18 @@ export async function searchRelevantContentUnified(
       projectPath: pp,
       query,
       chapterNumber,
+      readableChapters,
       topK: Math.max(limit * 2, 6),
       authoritativeOnly: true,
       includeKeyword: true,
-      includeVector: true,
       includeGraph: true,
       includeRecentChapters: true,
       includeCanon: true,
     }).catch(() => []),
-    searchWiki(pp, `关键词索引 向量索引 ${task}`, {
-      includeVector: false,
-      rerank: true,
+    searchWiki(pp, task, {
+      localOnly: true,
+      acceptFile: (path, content) => eligibleLocalSource(path, content, chapterNumber, readableChapters),
       topK: Math.max(limit, 4),
-      rerankPurpose: "用于补充剧情上下文中的索引和记忆条目。",
     }).catch(() => []),
   ])
 
@@ -962,14 +777,9 @@ export async function searchRelevantContentUnified(
     )) === index
   })
 
-  const reranked = await rerankCandidates(query, deduplicatedCandidates, {
-    topK: Math.max(limit * 2, limit),
-    purpose: "用于构建小说写作上下文，优先保留最能支撑当前章节任务的记忆、设定、伏笔和正史约束。",
-  }).catch(() => deduplicatedCandidates)
-
   const merged: string[] = []
   const seen = new Set<string>()
-  for (const result of reranked) {
+  for (const result of deduplicatedCandidates) {
     const key = result.path
       ? normalizePath(result.path)
       : `${result.title}|${result.snippet.slice(0, 50)}`
@@ -984,8 +794,9 @@ export async function searchRelevantContentUnified(
 export async function searchGraphRelevantContent(
   pp: string,
   task: string,
-  _chapterNumber: number | undefined,
+  chapterNumber: number | undefined,
   limit = 10,
+  readableChapters?: ReadonlyMap<number, string>,
 ): Promise<string> {
   const topK = Math.max(1, Math.floor(limit) || 10)
   try {
@@ -1031,6 +842,7 @@ export async function searchGraphRelevantContent(
           try {
             const content = await readFile(node.path)
             if (isAiExcludedContent(content) || isGeneratedProjection(content)) continue
+            if (chapterNumber && !eligibleLocalSource(node.path, content, chapterNumber, readableChapters)) continue
             scoredNodes.push({
               title: node.title,
               snippet: content.slice(0, 300).replace(/\n/g, " "),
@@ -1042,37 +854,14 @@ export async function searchGraphRelevantContent(
     }
 
     scoredNodes.sort((a, b) => b.relevance - a.relevance)
-    const topNodes = await rerankCandidates(
-      task,
-      scoredNodes.slice(0, topK).map((node, index) => ({
-        id: `graph:${index}:${node.title}`,
-        title: node.title,
-        snippet: node.snippet,
-        source: "graph_context",
-        relevance: node.relevance,
-      })),
-      {
-        topK,
-        purpose: "用于补充图谱关联上下文，优先保留和当前任务最直接相关的关联节点。",
-      },
-    ).catch(() => scoredNodes.slice(0, topK))
-
+    const topNodes = scoredNodes.slice(0, topK)
     const nodeResults = topNodes.length > 0
       ? topNodes.map(
           n => `- 【${n.title}】(关联度 ${n.relevance}): ${n.snippet}`,
         ).join("\n")
       : ""
 
-    // 追加社区摘要向量检索
-    let communityResults = ""
-    try {
-      const { searchCommunitySummaries } = await import("./community-summary")
-      communityResults = await searchCommunitySummaries(pp, task, topK)
-    } catch {
-      // 社区摘要检索失败不影响主流程
-    }
-
-    return [nodeResults, communityResults].filter(Boolean).join("\n")
+    return nodeResults
   } catch {
     return ""
   }
@@ -1248,6 +1037,10 @@ export function trimContextPack(
   sections.push(i18n.t("novel.contextPack.title"))
   sections.push("")
 
+  const resolvedTokenBudget = tokenBudget && tokenBudget > 0
+    ? tokenBudget
+    : resolveContextPackTokenBudget({ maxContextSize: options?.maxContextSize })
+  const targetChars = Math.floor(resolvedTokenBudget * charsPerTokenForLanguage())
   const fieldData: { fieldKey: string; title: string; content: string | string[]; priority: number; charCount: number }[] = []
   for (const config of FIELD_CONFIGS) {
     if (options?.excludeOutline && config.fieldKey === "outline") {
@@ -1259,7 +1052,10 @@ export function trimContextPack(
     }
 
     const rawContent = pack[config.fieldKey as keyof ContextPack] as string | string[] | undefined
-    const content = Array.isArray(rawContent) ? rawContent : rawContent ?? ""
+    const sag = config.fieldKey === "searchResults" && Boolean(pack.sagEvidence?.text)
+    const content = sag && typeof rawContent === "string"
+      ? fitSagEvidence(rawContent, Math.floor(targetChars / 5))
+      : rawContent ?? ""
     const hasContent = Array.isArray(content) ? content.length > 0 : Boolean(content)
     if (!hasContent) continue
 
@@ -1271,7 +1067,7 @@ export function trimContextPack(
       fieldKey: config.fieldKey,
       title: i18n.t(config.titleKey),
       content,
-      priority: FIELD_PRIORITY[config.fieldKey] ?? 999,
+      priority: sag ? 4.75 : FIELD_PRIORITY[config.fieldKey] ?? 999,
       charCount,
     })
   }
@@ -1293,13 +1089,6 @@ export function trimContextPack(
   let totalChars = headerChars + fieldData.reduce((sum, f) => sum + f.charCount + f.title.length + 3, 0)
   const originalChars = totalChars
   const trimmedFields: string[] = []
-
-  const resolvedTokenBudget = tokenBudget && tokenBudget > 0
-    ? tokenBudget
-    : resolveContextPackTokenBudget({ maxContextSize: options?.maxContextSize })
-  // Match the token estimator: CJK ≈ 1 char/token, English ≈ 4 chars/token.
-  // A hardcoded ×4 over-admits Chinese after maxContextSize became real tokens.
-  const targetChars = Math.floor(resolvedTokenBudget * charsPerTokenForLanguage())
 
   if (totalChars <= targetChars) {
     for (const { title, content } of [...fieldData].sort((a, b) => emitRank(a.fieldKey) - emitRank(b.fieldKey))) {
@@ -1351,7 +1140,9 @@ export function trimContextPack(
     if (targetContentChars > minKeepChars && nextField.charCount > targetContentChars) {
       const trimmedContent = nextField.fieldKey === "outline" && typeof nextField.content === "string"
         ? capOutlineSourcesToBudget(nextField.content, targetContentChars)
-        : trimFieldContent(nextField.content, targetContentChars)
+        : nextField.fieldKey === "searchResults" && pack.sagEvidence?.text && typeof nextField.content === "string"
+          ? fitSagEvidence(nextField.content, targetContentChars)
+          : trimFieldContent(nextField.content, targetContentChars)
       const keptContentChars = Array.isArray(trimmedContent)
         ? trimmedContent.reduce((sum, item) => sum + item.length, 0)
         : trimmedContent.length

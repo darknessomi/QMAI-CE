@@ -1,6 +1,6 @@
 {
   "bundle": {
-    "resources": ["../skills", "migration/runtime"],
+    "resources": ["../skills", "migration/runtime", "src/commands/sag/LICENSE"],
     "windows": {
       "webviewInstallMode": {
         "type": "skip"

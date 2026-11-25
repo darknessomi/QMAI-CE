@@ -1,6 +1,6 @@
+import { hashTextHex } from "./text-hash"
 import { splitSourceIntoSemanticChunks, type SourceChunk } from "./semantic-source-chunks"
 export { splitSourceIntoSemanticChunks } from "./semantic-source-chunks"
-import { wikiEmbeddingId, wikiEmbeddingTitle } from "./embedding-page-id"
 import {
   createDirectory,
   deleteFile,
@@ -449,13 +449,6 @@ async function autoIngestImpl(
             }
           }
           await injectImagesIntoSourceSummary(pp, fileName, savedImages)
-          // Re-embed the source-summary page so caption text lands
-          // in the search index. Without this step, search by image
-          // content stays empty for files ingested before captioning
-          // was added — the safety-net section was just rewritten
-          // with captions, but the embeddings still reflect the old
-          // empty-alt content.
-          await reembedSourceSummary(pp, fileName)
         }
       } else {
         console.log(`[ingest:diag] cache-hit branch: skipping injection (no images returned from extraction)`)
@@ -886,28 +879,6 @@ async function autoIngestImpl(
     )
   }
 
-  // ── Step 6: Generate embeddings (if enabled) ───────────────
-  const embCfg = useWikiStore.getState().embeddingConfig
-  if (embCfg.enabled && embCfg.model && writtenPaths.length > 0) {
-    try {
-      const { embedPage } = await import("@/lib/embedding")
-      for (const wpath of writtenPaths) {
-        const pageId = wikiEmbeddingId(pp, wpath)
-        const stem = getFileName(wpath).replace(/\.md$/, "")
-        if (!pageId || ["index", "log", "overview"].includes(stem)) continue
-        try {
-          const content = await readFile(wpath.startsWith(pp + "/") ? wpath : pp + "/" + wpath)
-          const title = wikiEmbeddingTitle(content, stem)
-          await embedPage(pp, pageId, title, content, embCfg)
-        } catch {
-          // non-critical
-        }
-      }
-    } catch {
-      // embedding module not available
-    }
-  }
-
   const detail = writtenPaths.length > 0
     ? (reviewItems.length > 0
         ? i18n.t("activity.ingest.filesWrittenWithReview", { fileCount: writtenPaths.length, reviewCount: reviewItems.length })
@@ -1297,16 +1268,6 @@ export function fitIngestOutputToWindow(
 function trimLongText(text: string, maxChars: number): string {
   if (text.length <= maxChars) return text
   return `${text.slice(0, maxChars).trimEnd()}\n\n[...trimmed for prompt budget...]`
-}
-
-function hashTextHex(text: string): string {
-  let hash = 0xcbf29ce484222325n
-  const prime = 0x100000001b3n
-  for (let i = 0; i < text.length; i++) {
-    hash ^= BigInt(text.charCodeAt(i))
-    hash = BigInt.asUintN(64, hash * prime)
-  }
-  return hash.toString(16).padStart(16, "0")
 }
 
 function longSourceCheckpointPath(
@@ -1954,7 +1915,7 @@ async function injectImagesIntoSourceSummary(
     const existing = await tryReadFile(sourceSummaryFullPath)
     console.log(`[ingest:diag] injectImagesIntoSourceSummary: existing file ${existing ? `read OK (${existing.length} chars)` : "MISSING (will write stub)"}`)
     // Load captions from the on-disk cache so the safety-net
-    // section embeds caption text as alt — the embedding pipeline
+    // section embeds caption text as alt — project search
     // indexes whatever's in the wiki page, so without this, search
     // by image content (e.g. "find the chart with revenue data")
     // never matches because alt text was empty.
@@ -2000,40 +1961,6 @@ async function injectImagesIntoSourceSummary(
   } catch (err) {
     console.warn(
       `[ingest:images] 向 ${sourceSummaryPath} 追加图片引用失败：`,
-      err instanceof Error ? err.message : err,
-    )
-  }
-}
-
-/**
- * Re-embed the source-summary page after we've rewritten its
- * `## Embedded Images` safety-net section with captions. The full
- * autoIngest pipeline calls `embedPage` at step 6 unconditionally;
- * this is the cache-hit equivalent (where step 6 is skipped) and
- * exists specifically to keep the search index in sync after a
- * caption refresh.
- *
- * Why not just call `embedPage` inline at the call site: the
- * embedding store + config lookup, the readFile-then-parse-title
- * dance, and the no-op behavior when embedding is disabled all
- * already exist in the step-6 logic. Wrapping them once here
- * avoids drift between the two paths if either side changes.
- */
-async function reembedSourceSummary(pp: string, fileName: string): Promise<void> {
-  const embCfg = useWikiStore.getState().embeddingConfig
-  if (!embCfg.enabled || !embCfg.model) return
-  const sourceBaseName = fileName.replace(/\.[^.]+$/, "")
-  const sourceSummaryFullPath = `${pp}/wiki/sources/${sourceBaseName}.md`
-  try {
-    const content = await readFile(sourceSummaryFullPath)
-    const { embedPage } = await import("@/lib/embedding")
-    const id = wikiEmbeddingId(pp, sourceSummaryFullPath)
-    if (!id) return
-    await embedPage(pp, id, wikiEmbeddingTitle(content, sourceBaseName), content, embCfg)
-    console.log(`[ingest:caption] re-embedded ${sourceBaseName} with captioned alt text`)
-  } catch (err) {
-    console.warn(
-      `[ingest:caption] 重新嵌入 ${sourceBaseName} 失败：`,
       err instanceof Error ? err.message : err,
     )
   }

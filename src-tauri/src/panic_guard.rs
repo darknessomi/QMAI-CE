@@ -4,8 +4,8 @@
 //! known to panic on malformed input instead of returning Err. Under
 //! `panic = "abort"` that kills the whole app; even with `panic =
 //! "unwind"`, letting a panic propagate through the `extern "C"` Tauri
-//! command boundary is UB. These helpers catch panics at the command
-//! boundary and convert them into a Tauri Err the frontend can display.
+//! command boundary is UB. This helper catches panics at the command
+//! boundary and converts them into a Tauri Err the frontend can display.
 
 use std::any::Any;
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -17,19 +17,6 @@ where
 {
     let _lease = crate::migration_gate::enter_io()?;
     match catch_unwind(AssertUnwindSafe(f)) {
-        Ok(r) => r,
-        Err(payload) => Err(report(label, payload)),
-    }
-}
-
-/// Run an async command body, converting any panic into an Err.
-pub async fn run_guarded_async<T, Fut>(label: &str, fut: Fut) -> Result<T, String>
-where
-    Fut: std::future::Future<Output = Result<T, String>>,
-{
-    use futures::FutureExt;
-    let _lease = crate::migration_gate::enter_io()?;
-    match AssertUnwindSafe(fut).catch_unwind().await {
         Ok(r) => r,
         Err(payload) => Err(report(label, payload)),
     }
@@ -79,26 +66,5 @@ mod tests {
     fn sync_passes_through_ok() {
         let result = run_guarded("test", || Ok::<_, String>(7));
         assert_eq!(result.unwrap(), 7);
-    }
-
-    #[tokio::test]
-    async fn async_catches_panic() {
-        let result: Result<(), String> = run_guarded_async("test", async {
-            panic!("async boom");
-        })
-        .await;
-        let err = result.expect_err("panic should produce Err");
-        assert!(err.contains("async boom"), "got: {err}");
-    }
-
-    #[tokio::test]
-    async fn async_catches_panic_after_await_point() {
-        let result: Result<(), String> = run_guarded_async("test", async {
-            tokio::task::yield_now().await;
-            panic!("post-await boom");
-        })
-        .await;
-        let err = result.expect_err("panic should produce Err");
-        assert!(err.contains("post-await boom"), "got: {err}");
     }
 }

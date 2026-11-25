@@ -23,7 +23,6 @@ vi.mock("@/commands/fs", () => {
   }
 })
 vi.mock("@/lib/llm-client", () => ({ streamChat: vi.fn(), DEFAULT_LLM_REQUEST_TIMEOUT_MS: 30000 }))
-vi.mock("@/lib/embedding", () => ({ removePageEmbeddingStrict: vi.fn(async () => {}), embedPage: vi.fn(), searchByEmbedding: vi.fn(async () => []) }))
 
 import { useWikiStore } from "@/stores/wiki-store"
 import { applyMemoryCleanup, loadMemoryCleanupScan, runMemoryCleanupScan, undoLastMemoryCleanup } from "./memory-cleanup-runner"
@@ -31,7 +30,6 @@ import { collectMemoryRecords, type MemoryCleanupIssue, type MemoryCleanupScan }
 import { loadSnapshot, rebuildDerivedMemoryFromSnapshots, syncSnapshotToMemory, type ChapterSnapshot } from "./chapter-ingest"
 import { DEFAULT_MEMORY_MAINTENANCE, REMINDER_COOLDOWN_MS, claimMemoryMaintenanceReminder, loadMemoryMaintenanceSettings, loadMemoryMaintenanceOverview, memoryMaintenanceWarnings, shouldRemindMemoryMaintenance, updateMemoryMaintenanceSettings } from "./memory-maintenance"
 import { streamChat } from "@/lib/llm-client"
-import { removePageEmbeddingStrict, embedPage } from "@/lib/embedding"
 import { syncPersonaSkillChapterFacts } from "./persona-skill-facts"
 
 const source = (n: number): ChapterSnapshot => ({
@@ -47,7 +45,7 @@ async function scanFixture(): Promise<MemoryCleanupScan> {
 }
 beforeEach(async () => {
   vi.clearAllMocks(); fs.files.clear(); fs.failPath = ""
-  useWikiStore.setState({ novelMode: true, embeddingConfig: { ...useWikiStore.getState().embeddingConfig, enabled: false } })
+  useWikiStore.setState({ novelMode: true })
   for (const n of [1, 2]) fs.files.set(snapPath(n), JSON.stringify(source(n)))
   fs.files.set("/project/wiki/entities/林默.md", "---\ntype: entity\n---\n# 林默\n\n## 章节信息\n- **角色认知**: 认知噪声\n\n## 作者备注\n私有设定保留\n")
   await rebuildDerivedMemoryFromSnapshots("/project")
@@ -159,36 +157,15 @@ describe("来源删除与派生文件同步", () => {
     await syncPersonaSkillChapterFacts("/project", source(1))
     expect(fs.files.get(path)).not.toContain("噪声")
   })
-  it("清除旧向量；索引失效失败时报告错误并恢复文件", async () => {
-    fs.files.set("/project/.qmai/lancedb/.keep", "")
-    const scan = await scanFixture(), before = fs.files.get(snapPath(1))
-    vi.mocked(removePageEmbeddingStrict).mockRejectedValueOnce(new Error("向量索引不可写"))
-    await expect(applyMemoryCleanup("/project", scan, scan.issues)).rejects.toThrow("向量索引不可写")
-    expect(fs.files.get(snapPath(1))).toBe(before)
-    expect(removePageEmbeddingStrict).toHaveBeenCalled()
-  })
-  it("启用向量检索时，用清理后的内容重新索引，保留有效事实的语义召回", async () => {
-    fs.files.set("/project/.qmai/lancedb/.keep", "")
-    useWikiStore.setState({ embeddingConfig: { ...useWikiStore.getState().embeddingConfig, enabled: true, model: "embed" } })
-    vi.mocked(embedPage).mockResolvedValue(true)
+  it("项目有旧索引时可清理和撤销，原索引保留且不调用旧模型", async () => {
+    const oldIndex = "/project/.qmai/lancedb/.keep"
+    fs.files.set(oldIndex, "legacy")
     const scan = await scanFixture()
-    await applyMemoryCleanup("/project", scan, scan.issues)
-    expect(embedPage).toHaveBeenCalled()
-    for (const call of vi.mocked(embedPage).mock.calls) expect(call[3]).not.toContain("噪声")
-    expect(vi.mocked(embedPage).mock.calls.some((call) => call[3].includes("密室位置"))).toBe(true)
-  })
-  it("旧向量清除后，嵌入服务不可用只警告，不撤回已经完成的来源清理", async () => {
-    fs.files.set("/project/.qmai/lancedb/.keep", "")
-    useWikiStore.setState({ embeddingConfig: { ...useWikiStore.getState().embeddingConfig, enabled: true, model: "embed" } })
-    vi.mocked(embedPage).mockResolvedValue(false)
-    const scan = await scanFixture(), log = vi.fn()
-    await expect(applyMemoryCleanup("/project", scan, scan.issues, log)).resolves.toBe(6)
-    expect(log).toHaveBeenCalledWith(expect.stringContaining("正在清除旧向量 1/"))
-    expect(log).toHaveBeenCalledWith(expect.stringContaining("警告：旧向量已清除"))
-    expect(removePageEmbeddingStrict).toHaveBeenCalled()
+    await expect(applyMemoryCleanup("/project", scan, scan.issues)).resolves.toBe(6)
     expect((await loadSnapshot("/project", 1))?.knowledgeChanges).toEqual([])
-    await expect(undoLastMemoryCleanup("/project", log)).resolves.toBeUndefined()
+    await undoLastMemoryCleanup("/project")
     expect((await loadSnapshot("/project", 1))?.knowledgeChanges).toEqual(source(1).knowledgeChanges)
+    expect(fs.files.get(oldIndex)).toBe("legacy")
   })
   it("只删伏笔时不重写不受影响的人物实体", async () => {
     const path = "/project/wiki/entities/林默.md", before = fs.files.get(path)

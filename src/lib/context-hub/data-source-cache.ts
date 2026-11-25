@@ -59,7 +59,6 @@ const STATIC_SOURCES = new Set([
   "writingStyle",
   "relatedSettings",
   // 以下源加载的是项目级数据（不依赖章节号），改用恒定 key 跨章节/跨消息复用
-  "fallbackRecentSummaries",
   // retrieval 现在返回项目级原始条目（按章节过滤移到构建阶段），同样跨章节复用
   "retrieval",
 ])
@@ -76,6 +75,7 @@ const TASK_SCOPED_SOURCES = new Set([
 ])
 
 const CHAPTER_SCOPED_SOURCES = new Set([
+  "fallbackRecentSummaries",
   "outline",
   "chapterOutline",
   "volumeContext",
@@ -97,13 +97,19 @@ const SOURCE_CACHE_VERSIONS: Partial<Record<string, number>> = {
   chapterOutline: 3,
   volumeContext: 2,
   // 速记缓存保留候选小传来源，组包时再与当前人物档案合并。
-  sectionBriefing: 5,
-  graphSearchResults: 1,
+  sectionBriefing: 6,
+  graphSearchResults: 2,
+  searchResults: 1,
   snapshots: 2,
   retrieval: 2,
   fallbackCharacterStates: 2,
   fallbackForeshadowingStates: 2,
   fallbackTimeline: 2,
+  recentChapterContents: 1,
+  fallbackPreviousEnding: 1,
+  fallbackRecentSummaries: 1,
+  relatedSettings: 1,
+  canonRules: 1,
 }
 
 function canonicalize(value: unknown): unknown {
@@ -124,7 +130,9 @@ async function sourceRequestKey(sourceName: string, context: ContextLoadContext)
       : { task: context.task, chapterNumber: context.chapterNumber ?? null, config: context.config }
   const version = SOURCE_CACHE_VERSIONS[sourceName]
   const versionSuffix = version ? `:v${version}` : ""
-  return `data-source:${sourceName}${versionSuffix}:${await sha256Text(JSON.stringify(canonicalize(scope)))}`
+  const visibleScope = !STATIC_SOURCES.has(sourceName) && context.chapterScope?.fingerprint
+  const key = visibleScope ? { ...scope, visibleScope } : scope
+  return `data-source:${sourceName}${versionSuffix}:${await sha256Text(JSON.stringify(canonicalize(key)))}`
 }
 
 function dependencyStampsMatch(cached: DependencyStamp, current: DependencyStamp): boolean {

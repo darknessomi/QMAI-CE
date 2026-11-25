@@ -19,6 +19,7 @@ interface DedupScanCache {
   projectId: string
   scannedAt: number
   coverage?: string
+  manualReview?: string[]
   scannedPageCount: number | null
   /** Detection model used for the last scan. */
   modelId?: string
@@ -81,6 +82,7 @@ function parseCache(raw: unknown): DedupScanCache | null {
     projectId: obj.projectId,
     scannedAt: obj.scannedAt,
     scannedPageCount,
+    ...(Array.isArray(obj.manualReview) ? { manualReview: obj.manualReview.filter((v): v is string => typeof v === "string") } : {}),
     ...(typeof obj.coverage === "string" ? { coverage: obj.coverage } : {}),
     modelId,
     mergeModelId,

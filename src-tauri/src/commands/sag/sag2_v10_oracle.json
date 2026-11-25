@@ -1,0 +1,343 @@
+{
+  "corpus": [
+    [
+      "Anchor",
+      "Anchor birthplace depicts Alice Paul. Alice Paul. Bob Smith."
+    ],
+    [
+      "Single",
+      "Alice Paul birthplace missing text."
+    ],
+    [
+      "Multiple",
+      "Alice Paul birthplace Bob Smith."
+    ],
+    [
+      "Bridge",
+      "Bob Smith settled in New Jersey. New Jersey is home to Carol Jones."
+    ],
+    [
+      "Destination",
+      "Carol Jones was born at café half-ounce."
+    ],
+    [
+      "Initials",
+      "A.H.G. Alston was born in West Ashby."
+    ],
+    [
+      "Series",
+      "Anchor lowname commonname."
+    ],
+    [
+      "High",
+      "Anchor highname commonname."
+    ],
+    [
+      "Record 0",
+      "Bob Smith."
+    ],
+    [
+      "Record 1",
+      "Alice Paul."
+    ],
+    [
+      "Record 2",
+      "Bob Smith."
+    ],
+    [
+      "Record 3",
+      "Alice Paul."
+    ],
+    [
+      "Record 4",
+      "Bob Smith."
+    ],
+    [
+      "Record 5",
+      "Alice Paul."
+    ],
+    [
+      "Record 6",
+      "Bob Smith."
+    ],
+    [
+      "Record 7",
+      "Alice Paul."
+    ],
+    [
+      "Record 8",
+      "Bob Smith."
+    ],
+    [
+      "Record 9",
+      "Alice Paul."
+    ],
+    [
+      "Record 10",
+      "Bob Smith."
+    ],
+    [
+      "Record 11",
+      "Alice Paul."
+    ],
+    [
+      "Record 12",
+      "Bob Smith."
+    ],
+    [
+      "Record 13",
+      "Alice Paul."
+    ],
+    [
+      "René Descartes",
+      "René Descartes was born in La Haye en Touraine."
+    ]
+  ],
+  "tokenizer": [
+    {
+      "text": "half-ounce café. A.H.G. Alston",
+      "tokens": [
+        "half",
+        "ounce",
+        "half-ounce",
+        "caf",
+        "é",
+        "a.h.g",
+        "alston"
+      ]
+    },
+    {
+      "text": "Chester A. Arthur's Jean-Luc Picard",
+      "tokens": [
+        "chester",
+        "arthur",
+        "s",
+        "jean",
+        "luc",
+        "jean-luc",
+        "picard"
+      ]
+    },
+    {
+      "text": "Anchor 北京数据库",
+      "tokens": [
+        "anchor",
+        "北京",
+        "数据",
+        "据库",
+        "数据库"
+      ]
+    },
+    {
+      "text": "foo-bar-baz a_b foo.bar +test #tag C++ 3.14 1,000 -foo-",
+      "tokens": [
+        "foo",
+        "bar",
+        "baz",
+        "foo-bar-baz",
+        "a_b",
+        "foo",
+        "bar",
+        "foo.bar",
+        "test",
+        "tag",
+        "c++",
+        "3.14",
+        "1",
+        "000",
+        "foo"
+      ]
+    }
+  ],
+  "cases": [
+    {
+      "query": "Anchor birthplace depicts",
+      "options": {
+        "candidate_k": 3,
+        "seed_k": 1,
+        "max_hops": 2,
+        "expansion_term_limit": 2
+      },
+      "requests": [
+        "f1ff9083c9eb10e866db7deca953cdb8d42157adba5fe9edd5ae62bef1959efd",
+        "7de51b192d5b8750f1ce0d9bd1fe69f6f38ca29302b6fa5d796ea9b72e04525e",
+        "398edc94f721b351437ffb36eefa1e67935814c07a12519040b037f6b83ea93d"
+      ],
+      "rounds": [
+        {
+          "ids": [
+            1,
+            7,
+            8
+          ],
+          "terms": []
+        },
+        {
+          "ids": [
+            3,
+            2,
+            9
+          ],
+          "terms": [
+            "alice paul",
+            "bob smith"
+          ]
+        },
+        {
+          "ids": [
+            10,
+            11,
+            12
+          ],
+          "terms": [
+            "alice paul",
+            "bob smith"
+          ]
+        }
+      ],
+      "ids": [
+        3,
+        8,
+        1
+      ],
+      "scores": [
+        0.95,
+        0.7,
+        0.8
+      ]
+    },
+    {
+      "query": "Anchor",
+      "options": {
+        "candidate_k": 3,
+        "seed_k": 1,
+        "max_hops": 2,
+        "expansion_term_limit": 2
+      },
+      "requests": [
+        "fd8e1e9f3d6d7064d4c82a92f7d28dff47400130b4fb69bb5a0b02dd94bdc2b4",
+        "e8640b629e2d5e1a402b8efa072b69ef07713ec5e0f6b0e21e405c7e8ad661a4",
+        "80f382a20df5190588bc68871c8b21422ba49683470490175ce1ed1e4fd93035"
+      ],
+      "rounds": [
+        {
+          "ids": [
+            1,
+            7,
+            8
+          ],
+          "terms": []
+        },
+        {
+          "ids": [
+            2,
+            3
+          ],
+          "terms": [
+            "depicts",
+            "birthplace"
+          ]
+        },
+        {
+          "ids": [
+            10,
+            12,
+            14
+          ],
+          "terms": [
+            "birthplace",
+            "alice paul"
+          ]
+        }
+      ],
+      "ids": [
+        3,
+        8,
+        1
+      ],
+      "scores": [
+        0.95,
+        0.7,
+        0.8
+      ]
+    },
+    {
+      "query": "Where was Alston born?",
+      "options": {
+        "candidate_k": 3,
+        "seed_k": 1,
+        "max_hops": 2,
+        "expansion_term_limit": 2
+      },
+      "requests": [
+        "972da5370b22a7d9cb089e6e4bea9830ffce2da99988aa96d6737aa4b08896d4"
+      ],
+      "rounds": [
+        {
+          "ids": [
+            6,
+            5,
+            23
+          ],
+          "terms": []
+        },
+        {
+          "ids": [],
+          "terms": [
+            "a.h",
+            "g alston"
+          ]
+        }
+      ],
+      "ids": [
+        6,
+        5,
+        23
+      ],
+      "scores": [
+        0.01,
+        0.01,
+        0.01
+      ]
+    },
+    {
+      "query": "Where was Rene Descartes born?",
+      "options": {
+        "candidate_k": 3,
+        "seed_k": 1,
+        "max_hops": 2,
+        "expansion_term_limit": 2
+      },
+      "requests": [
+        "5590045717859896416bee5b0fd00d04e2b8ae4c31d706e7f8c8c506d81f3262"
+      ],
+      "rounds": [
+        {
+          "ids": [
+            23,
+            5,
+            6
+          ],
+          "terms": []
+        },
+        {
+          "ids": [],
+          "terms": [
+            "en",
+            "la haye"
+          ]
+        }
+      ],
+      "ids": [
+        23,
+        5,
+        6
+      ],
+      "scores": [
+        0.01,
+        0.01,
+        0.01
+      ]
+    }
+  ]
+}

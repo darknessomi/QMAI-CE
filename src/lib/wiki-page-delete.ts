@@ -1,25 +1,5 @@
-import { wikiEmbeddingId } from "./embedding-page-id"
-/**
- * Cascade delete for wiki pages.
- *
- * Whenever a wiki page is removed from disk we ALSO need to drop its
- * vector chunks from LanceDB; otherwise the chunks become "phantom"
- * search hits — `searchByEmbedding` returns the orphaned `page_id`
- * but `search.ts` then can't find a matching .md file and silently
- * discards the result, wasting topK slots.
- *
- * This helper consolidates that two-step cleanup so every wiki-page
- * delete path (source-delete cascade in sources-view, orphan-page
- * delete in lint-view, cancelled-ingest cleanup in ingest-queue)
- * uses the same directory-qualified vector key and order of operations.
- *
- * Errors are propagated, NOT swallowed — callers wrap in try/catch
- * to apply their own fault-tolerance policy (e.g. continue with the
- * next file in a batch, or surface to the user via toast).
- */
 import { deleteFile, listDirectory, readFile, writeFile } from "@/commands/fs"
 import { getFileStem, normalizePath } from "@/lib/path-utils"
-import { removePageEmbedding } from "@/lib/embedding"
 import {
   buildDeletedKeys,
   cleanIndexListing,
@@ -48,37 +28,13 @@ function isSourcePage(pagePath: string): boolean {
   return normalized.includes("/wiki/sources/")
 }
 
-/**
- * Delete a wiki page from disk and drop its embedding chunks. If the
- * page is a source-summary (`wiki/sources/<slug>.md`), ALSO removes
- * the corresponding `wiki/media/<slug>/` directory containing the
- * source's extracted images — those are owned by the source and have
- * no other consumer once the source page is gone.
- *
- * `projectPath` is the project root (used to scope the embedding
- * cascade to the right LanceDB instance, and to locate the media
- * directory).
- *
- * The embedding identity uses the path under wiki/ or QM/. The disk
- * delete uses the supplied path verbatim.
- */
 export async function cascadeDeleteWikiPage(
   projectPath: string,
   pagePath: string,
 ): Promise<void> {
   await deleteFile(pagePath)
   const slug = getFileStem(pagePath)
-  const id = wikiEmbeddingId(projectPath, pagePath)
-  if (id) await removePageEmbedding(projectPath, id)
 
-  // Media cascade: source-summary deletion → drop the source's
-  // image directory. Done AFTER the file delete (and after the
-  // embedding cascade) so a failure in either of those — already
-  // best-effort tolerated by callers — leaves us in a consistent
-  // state. Failures here are logged + swallowed because the source
-  // page is already gone; an orphaned media directory is a leak,
-  // not a correctness problem.
-  //
   // Defensive on the slug: must be non-empty AND not start with `.`
   // — a path like `wiki/sources/.md` (pure extension, no name) or
   // `.git`-style hidden entries should NEVER produce a media path
@@ -125,7 +81,7 @@ interface CascadeDeleteResult {
 
 /**
  * Delete one or more wiki pages and clean up every reference to them
- * in the rest of the wiki: file delete, embedding drop, media-dir
+ * in the rest of the wiki: file delete, media-dir
  * cascade for source pages, plus
  *
  *   - `wiki/index.md` listing entries whose primary `[[target]]`
@@ -146,7 +102,7 @@ interface CascadeDeleteResult {
  * Order of operations:
  *   1. Read each target's content first to extract the title (need
  *      it for index-listing match) and snapshot the slug.
- *   2. Cascade-delete each target (file + embeddings + media dir).
+ *   2. Cascade-delete each target (file + media dir).
  *   3. Sweep all surviving wiki .md files and rewrite them.
  *
  * Best-effort on the sweep — a single un-readable file does not abort

@@ -1,32 +1,30 @@
-import { wikiEmbeddingPath } from "../embedding-page-id"
+import { eligibleChapterNumber, searchSagProject } from "@/lib/sag-search"
+import { getJevConfig } from "@/lib/jev-config"
 import { searchWiki } from "@/lib/search"
+import { parseFrontmatter } from "@/lib/frontmatter"
 import { readFile } from "@/commands/fs"
 import { normalizePath } from "@/lib/path-utils"
-import { rerankCandidates } from "@/lib/rerank"
-import { useWikiStore } from "@/stores/wiki-store"
 import { loadSnapshot, listSnapshots } from "./chapter-ingest"
 import { isAiExcludedContent } from "./ai-exclude"
-import { listAiExcludedChapterNumbers } from "./ai-exclude-chapters"
-import {
-  buildNovelVectorSnippet,
-  selectRelevantNovelVectorResults,
-} from "./vector-relevance"
-
+import { hasReadableHistory, listAiExcludedChapterNumbers } from "./ai-exclude-chapters"
 interface NovelSearchParams {
   projectPath: string
   query: string
   chapterNumber?: number
+  readableChapters?: ReadonlyMap<number, string>
   topK?: number
   authoritativeOnly?: boolean
   includeGraph?: boolean
-  includeVector?: boolean
+  signal?: AbortSignal
   includeKeyword?: boolean
   includeRecentChapters?: boolean
   includeCanon?: boolean
 }
 
 interface NovelSearchResult {
-  type: "keyword" | "vector" | "graph" | "recent_chapter" | "canon"
+  startLine?: number
+  endLine?: number
+  type: "keyword" | "sag" | "graph" | "recent_chapter" | "canon"
   path: string
   title: string
   snippet: string
@@ -41,7 +39,7 @@ const SOURCE_RRF_K = 60
 const SEARCH_SOURCE_TIMEOUT_MS = 2500
 const SOURCE_WEIGHTS: Record<NovelSearchResult["type"], number> = {
   keyword: 1,
-  vector: 1,
+  sag: 1,
   graph: 0.95,
   canon: 0.9,
   recent_chapter: 0.75,
@@ -49,15 +47,15 @@ const SOURCE_WEIGHTS: Record<NovelSearchResult["type"], number> = {
 
 const SOURCE_TIE_PRIORITY: Record<NovelSearchResult["type"], number> = {
   keyword: 0,
-  vector: 1,
+  sag: 1,
   graph: 2,
   canon: 3,
   recent_chapter: 4,
 }
 
 export function isAuthoritativeGenerationPath(path: string): boolean {
-  return /\/wiki\/(entities|concepts|memory|chapters)\//.test(path)
-    || /\/wiki\/canon\.md$/.test(path)
+  return /\/(?:wiki|QM)\/(entities|concepts|memory|chapters)\//.test(path)
+    || /\/(?:wiki|QM)\/canon\.md$/.test(path)
     || /\/\.qmai\/novel\/snapshots\//.test(path)
 }
 
@@ -66,16 +64,27 @@ export function isHistoricalProjectionSnippet(path: string, snippet: string): bo
 }
 
 export async function novelMixedSearch(params: NovelSearchParams): Promise<NovelSearchResult[]> {
-  console.log("[novelMixedSearch] START, includeKeyword=", params.includeKeyword, "includeVector=", params.includeVector, "includeGraph=", params.includeGraph, "includeRecentChapters=", params.includeRecentChapters, "includeCanon=", params.includeCanon)
   const pp = normalizePath(params.projectPath)
   const topK = params.topK ?? 5
+  if (getJevConfig()) {
+    const hits = await searchSagProject(pp, params.query, topK, {
+      beforeChapter: params.authoritativeOnly ? params.chapterNumber : undefined, signal: params.signal,
+    })
+    return hits.map(hit => ({
+      type: "sag", path: hit.path, title: hit.title, snippet: hit.content, relevance: hit.score,
+      startLine: hit.startLine, endLine: hit.endLine,
+    }))
+  }
   const results: RankedNovelSearchResult[] = []
 
   const promises: Promise<void>[] = []
 
   if (params.includeKeyword !== false) {
     const pKeyword = runSearchBranch("keyword", searchWiki(pp, params.query, {
-      includeVector: false,
+      localOnly: true,
+      signal: params.signal,
+      acceptFile: (path, content) => !isAiExcludedContent(content)
+        && (!params.authoritativeOnly || eligibleLocalSource(path, content, params.chapterNumber, params.readableChapters)),
     })).then(items => {
       console.log("[novelMixedSearch] keyword done, got", items.length)
       results.push(...items.slice(0, topK).map((item, sourceRank) => ({
@@ -90,16 +99,8 @@ export async function novelMixedSearch(params: NovelSearchParams): Promise<Novel
     promises.push(pKeyword)
   }
 
-  if (params.includeVector) {
-    const pVector = runSearchBranch("vector", runVectorSearch(pp, params.query, topK)).then(items => {
-      console.log("[novelMixedSearch] vector done, got", items.length)
-      results.push(...rankSourceResults(items))
-    })
-    promises.push(pVector)
-  }
-
   if (params.includeGraph) {
-    const pGraph = runSearchBranch("graph", runGraphSearch(pp, params.query, topK)).then(items => {
+    const pGraph = runSearchBranch("graph", runGraphSearch(pp, params.query, topK, params.authoritativeOnly ? params.chapterNumber : undefined, params.readableChapters)).then(items => {
       console.log("[novelMixedSearch] graph done, got", items.length)
       results.push(...rankSourceResults(items))
     })
@@ -107,7 +108,7 @@ export async function novelMixedSearch(params: NovelSearchParams): Promise<Novel
   }
 
   if (params.includeRecentChapters) {
-    const pRecent = runSearchBranch("recent_chapter", runRecentChapterSearch(pp, topK)).then(items => {
+    const pRecent = runSearchBranch("recent_chapter", runRecentChapterSearch(pp, topK, params.chapterNumber, params.readableChapters)).then(items => {
       console.log("[novelMixedSearch] recent_chapter done, got", items.length)
       results.push(...rankSourceResults(items))
     })
@@ -136,21 +137,24 @@ export async function novelMixedSearch(params: NovelSearchParams): Promise<Novel
     : merged
   console.log("[novelMixedSearch] dedup done, merged:", merged.length, "filtered:", filtered.length)
 
-  console.log("[novelMixedSearch] calling rerankCandidates...")
-  const reranked = await rerankCandidates(
-    params.query,
-    filtered.map((item) => ({
-      ...item,
-      id: `${item.type}:${normalizeResultPath(item.path)}`,
-      source: item.type,
-    })),
-    {
-      topK,
-      purpose: "用于小说剧情搜索，优先返回最能支撑当前剧情推进、设定一致性和记忆调用的结果。",
-    },
-  )
-  console.log("[novelMixedSearch] rerank done, got", reranked.length)
-  return reranked
+  params.signal?.throwIfAborted()
+  return filtered
+}
+
+export function eligibleLocalSource(path: string, content: string, chapterNumber?: number, readable?: ReadonlyMap<number, string>): boolean {
+  if (isAiExcludedContent(content) || isHistoricalProjectionSnippet(path, content)) return false
+  if (chapterNumber && /\/(?:wiki|QM)\/chapters\//.test(normalizePath(path))) {
+    return eligibleChapterNumber(path, content, chapterNumber) !== null
+  }
+  if (chapterNumber) {
+    const { frontmatter } = parseFrontmatter(content)
+    if (frontmatter?.snapshot_id || /\/(?:wiki|QM)\/memory\//.test(normalizePath(path))) {
+      const through = Number(frontmatter?.source_sequence ?? frontmatter?.chapter_number)
+      return frontmatter?.source_type !== "outline" && through > 0 && through < chapterNumber
+        && (!readable || hasReadableHistory(through, readable))
+    }
+  }
+  return isAuthoritativeGenerationPath(normalizePath(path))
 }
 
 async function runSearchBranch<T>(label: string, promise: Promise<T>): Promise<T> {
@@ -189,51 +193,12 @@ function rankSourceResults(items: NovelSearchResult[]): RankedNovelSearchResult[
   return items.map((item, sourceRank) => ({ ...item, sourceRank }))
 }
 
-async function runVectorSearch(
-  pp: string,
-  query: string,
-  topK: number,
-): Promise<NovelSearchResult[]> {
-  const embCfg = useWikiStore.getState().embeddingConfig
-  if (!embCfg.enabled || !embCfg.model) return []
-
-  try {
-    const { searchByEmbedding } = await import("@/lib/embedding")
-    const vectorResults = await searchByEmbedding(pp, query, embCfg, Math.max(topK * 2, 10))
-    const relevantResults = selectRelevantNovelVectorResults(vectorResults, topK)
-    if (relevantResults.length === 0) return []
-
-    const items: NovelSearchResult[] = []
-    for (const vr of relevantResults) {
-      try {
-        const foundPath = wikiEmbeddingPath(pp, vr.id)
-        if (!foundPath) continue
-        const content = await readFile(foundPath)
-        if (content) {
-          // 「选中（AI 不读取）」：检索命中也不能把被排除的内容当"参考资料"送进模型。
-          if (isAiExcludedContent(content)) continue
-          const title = extractTitle(content, foundPath.split("/").pop()!.slice(0, -3))
-          const matchedSnippet = buildNovelVectorSnippet(vr)
-          items.push({
-            type: "vector",
-            path: foundPath,
-            title,
-            snippet: matchedSnippet || content.slice(0, 300).replace(/\n/g, " "),
-            relevance: vr.score,
-          })
-        }
-      } catch {}
-    }
-    return items
-  } catch {
-    return []
-  }
-}
-
 async function runGraphSearch(
   pp: string,
   query: string,
   topK: number,
+  chapterNumber?: number,
+  readable?: ReadonlyMap<number, string>,
 ): Promise<NovelSearchResult[]> {
   try {
     const { buildRetrievalGraph, getRelatedNodes } = await import("@/lib/graph-relevance")
@@ -272,7 +237,7 @@ async function runGraphSearch(
           seenIds.add(node.id)
           try {
             const content = await readFile(node.path)
-            if (isAiExcludedContent(content)) continue
+            if (isAiExcludedContent(content) || (chapterNumber && !eligibleLocalSource(node.path, content, chapterNumber, readable))) continue
             scoredNodes.push({
               title: node.title,
               path: node.path,
@@ -300,15 +265,17 @@ async function runGraphSearch(
 async function runRecentChapterSearch(
   pp: string,
   topK: number,
+  beforeChapter?: number,
+  readable?: ReadonlyMap<number, string>,
 ): Promise<NovelSearchResult[]> {
   try {
     const chapterNumbers = await listSnapshots(pp)
     if (chapterNumbers.length === 0) return []
 
-    const recentNumbers = chapterNumbers.slice(-topK).reverse()
+    const recentNumbers = chapterNumbers.filter(n => n > 0 && (!beforeChapter || n < beforeChapter) && (!readable || readable.has(n))).slice(-topK).reverse()
     const items: NovelSearchResult[] = []
     // 「选中（AI 不读取）」：快照也是从被排除的章节里提炼的，检索里同样不出现。
-    const excludedNumbers = await listAiExcludedChapterNumbers(pp, recentNumbers)
+    const excludedNumbers = await listAiExcludedChapterNumbers(pp, recentNumbers, readable)
 
     for (const num of recentNumbers) {
       if (excludedNumbers.has(num)) continue
@@ -337,7 +304,7 @@ async function runCanonSearch(
   const canonPath = `${pp}/wiki/canon.md`
   try {
     const content = await readFile(canonPath)
-    if (!content.trim()) return []
+    if (!content.trim() || isAiExcludedContent(content)) return []
 
     const queryLower = query.toLowerCase()
     const lines = content.split("\n")
@@ -458,19 +425,11 @@ function shouldReplaceRepresentative(
   return (SOURCE_TIE_PRIORITY[candidate.type] ?? 9) < existing.bestTypePriority
 }
 
-function extractTitle(content: string, fallback: string): string {
-  const match = content.match(/^#\s+(.+)/m)
-  if (match) return match[1].trim()
-  const fmMatch = content.match(/^---\ntitle:\s*(.+)/m)
-  if (fmMatch) return fmMatch[1].trim()
-  return fallback
-}
-
 interface SearchPlotOptions {
   scene?: string
   topK?: number
   includeKeyword?: boolean
-  includeVector?: boolean
+  signal?: AbortSignal
   includeGraph?: boolean
   includeRecentChapters?: boolean
   includeCanon?: boolean
@@ -486,7 +445,7 @@ export async function searchPlot(
     query,
     topK: options?.topK ?? 10,
     includeKeyword: options?.includeKeyword ?? true,
-    includeVector: options?.includeVector ?? true,
+    signal: options?.signal,
     includeGraph: options?.includeGraph ?? true,
     includeRecentChapters: options?.includeRecentChapters ?? true,
     includeCanon: options?.includeCanon ?? false,

@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{Map, Value};
@@ -10,6 +11,10 @@ use crate::atomic_file::write_bytes_atomically;
 
 pub const PRIMARY_FILE_NAME: &str = "app-state.json";
 pub const BAK_FILE_NAME: &str = "app-state.json.bak";
+
+const LEGACY_RETRIEVAL_KEYS: [&str; 3] = ["embeddingConfig", "rerankConfig", "projectRerankConfigs"];
+// 同步桌面各窗口的延迟写盘、退出前保存和手动清理。
+static LIVE_STATE_WRITE: Mutex<()> = Mutex::new(());
 
 const SUBSTANTIVE_KEYS: &[&str] = &[
     "llmConfig",
@@ -237,6 +242,7 @@ fn open_app_state_store<R: Runtime>(
 }
 
 pub fn persist_plugin_store<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
+    let _write = LIVE_STATE_WRITE.lock().unwrap_or_else(|e| e.into_inner());
     let dir = app
         .path()
         .app_data_dir()
@@ -280,15 +286,98 @@ pub async fn write_app_state_atomic(
         .path()
         .app_data_dir()
         .map_err(|error| format!("无法获取 app_data_dir: {error}"))?;
-    tauri::async_runtime::spawn_blocking(move || persist_app_state_object(&dir, &entries))
+    tauri::async_runtime::spawn_blocking(move || {
+        let _write = LIVE_STATE_WRITE.lock().unwrap_or_else(|e| e.into_inner());
+        let mut entries = entries;
+        if let Some(map) = entries.as_object_mut() {
+            if LEGACY_RETRIEVAL_KEYS.iter().any(|key| map.contains_key(*key)) {
+                let store = open_app_state_store(&app)?;
+                // 延迟保存的快照可能在用户确认清理之前就已生成。
+                map.retain(|key, _| !LEGACY_RETRIEVAL_KEYS.contains(&key.as_str()) || store.has(key));
+            }
+        }
+        persist_app_state_object(&dir, &entries)
+    })
         .await
         .map_err(|error| format!("write_app_state_atomic join error: {error}"))?
+}
+
+fn scrub_legacy_file(path: &Path) -> Result<bool, String> {
+    use std::io::Write;
+    let meta = match fs::symlink_metadata(path) {
+        Ok(value) => value,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(e) => return Err(format!("无法检查应用配置：{e}")),
+    };
+    if !meta.is_file() {
+        return Err("应用配置文件类型异常".into());
+    }
+    let bytes = fs::read(path).map_err(|e| format!("无法读取应用配置：{e}"))?;
+    let mut entries: Map<String, Value> = serde_json::from_slice(&bytes)
+        .map_err(|_| "应用配置格式异常，已保留原文件".to_string())?;
+    let before = entries.len();
+    for key in LEGACY_RETRIEVAL_KEYS {
+        entries.remove(key);
+    }
+    if entries.len() == before {
+        return Ok(false);
+    }
+    let parent = path.parent().ok_or("无法定位应用配置目录")?;
+    let mut temp = tempfile::NamedTempFile::new_in(parent)
+        .map_err(|e| format!("无法创建临时配置文件：{e}"))?;
+    temp.write_all(&object_bytes(&Value::Object(entries))?)
+        .and_then(|_| temp.as_file().set_permissions(meta.permissions()))
+        .and_then(|_| temp.as_file().sync_all())
+        .map_err(|e| format!("无法保存清理后的配置：{e}"))?;
+    temp.persist(path).map_err(|e| format!("无法替换应用配置：{e}"))?;
+    Ok(true)
+}
+
+#[tauri::command]
+pub async fn clear_legacy_retrieval_credentials(app: AppHandle) -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let _write = LIVE_STATE_WRITE.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = app.path().app_data_dir().map_err(|_| "无法定位应用配置目录")?;
+        let store = open_app_state_store(&app)?;
+        let mut changed = false;
+        // 先清恢复副本，再清主文件；重试时只处理剩余项。
+        for name in [BAK_FILE_NAME, PRIMARY_FILE_NAME] {
+            changed |= scrub_legacy_file(&dir.join(name))
+                .map_err(|e| format!("清理 {name} 失败：{e}。可重试。"))?;
+        }
+        for key in LEGACY_RETRIEVAL_KEYS {
+            changed |= store.delete(key);
+        }
+        Ok(changed)
+    })
+    .await
+    .map_err(|_| "清理旧模型凭据的任务异常终止".to_string())?
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::atomic_file::write_bytes_atomically_with_replace;
+
+    #[test]
+    fn scrub_only_retired_keys_without_decrypting_or_replacing_other_settings() {
+        let dir = tempfile::tempdir().unwrap();
+        for name in [PRIMARY_FILE_NAME, BAK_FILE_NAME] {
+            let path = dir.path().join(name);
+            let keep = serde_json::json!({"llmConfig":{"__qmaiEnc":"active"}, "other":name});
+            let mut old = keep.clone();
+            old["embeddingConfig"] = serde_json::json!({"apiKey":"legacy"});
+            old["rerankConfig"] = Value::Null;
+            old["projectRerankConfigs"] = serde_json::json!({"__qmaiEnc":"unreadable"});
+            write_value(&path, &old).unwrap();
+            assert!(scrub_legacy_file(&path).unwrap());
+            assert_eq!(serde_json::from_slice::<Value>(&fs::read(&path).unwrap()).unwrap(), keep);
+            assert!(!scrub_legacy_file(&path).unwrap());
+            fs::write(&path, b"broken").unwrap();
+            assert!(scrub_legacy_file(&path).is_err());
+            assert_eq!(fs::read(&path).unwrap(), b"broken");
+        }
+    }
 
     fn unique_test_dir(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!(

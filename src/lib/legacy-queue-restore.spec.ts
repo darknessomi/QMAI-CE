@@ -7,11 +7,10 @@ import {
   retryForeshadowingCleanupTask,
 } from "./foreshadowing-cleanup-queue"
 
-const { disk, chat, apply, embedding, indexed, slowRead } = vi.hoisted(() => ({
+const { disk, chat, apply, indexed, slowRead } = vi.hoisted(() => ({
   disk: new Map<string, string>(),
   chat: vi.fn(),
   apply: vi.fn(),
-  embedding: vi.fn(),
   indexed: { value: true },
   slowRead: { wait: null as Promise<void> | null },
 }))
@@ -54,13 +53,8 @@ beforeEach(async () => {
   disk.clear()
   chat.mockReset()
   apply.mockReset()
-  embedding.mockReset()
   indexed.value = true
   slowRead.wait = null
-  useWikiStore.getState().setEmbeddingConfig({ enabled: true, endpoint: "mock", apiKey: "", model: "e" })
-  apply.mockImplementation(async () => {
-    if (indexed.value && useWikiStore.getState().embeddingConfig.enabled) embedding()
-  })
 })
 
 it("restores legacy maintenance jobs with zero model work on open; each resumes only on request", async () => {
@@ -70,30 +64,26 @@ it("restores legacy maintenance jobs with zero model work on open; each resumes 
   await flushMicrotasks(20)
   expect(chat).not.toHaveBeenCalled()
   expect(apply).not.toHaveBeenCalled()
-  expect(embedding).not.toHaveBeenCalled()
   expect(getQueue().map(t => t.status)).toEqual(["awaiting_resume", "failed"])
   expect(getForeshadowingCleanupQueue()[0].status).toBe("awaiting_resume")
   await closeProject()
   await openProject("A")
   expect(chat).not.toHaveBeenCalled()
-  expect(embedding).not.toHaveBeenCalled()
   await retryTask(merge.id)
   await flushMicrotasks(30)
   expect(chat).toHaveBeenCalledTimes(1)
-  expect(embedding).not.toHaveBeenCalled()
   await retryForeshadowingCleanupTask(cleanup.id)
   await flushMicrotasks(30)
-  expect(embedding).toHaveBeenCalledTimes(1)
+  expect(apply).toHaveBeenCalledTimes(1)
   expect(getQueue().map(t => t.id)).toEqual(["old-failed"])
 })
 
-it("only gates model-backed legacy cleanup; opening without a vector database retains local cleanup", async () => {
+it("只暂停带旧索引的历史删除任务，其余本地清理照常恢复", async () => {
   indexed.value = false
   disk.set(cleanupPath, JSON.stringify([cleanup]))
   await openProject("A")
   await flushMicrotasks(25)
   expect(apply).toHaveBeenCalledTimes(1)
-  expect(embedding).not.toHaveBeenCalled()
 })
 
 it("hydrates newly created interrupted tasks after switching away and back, keeping legacy neighbors held", async () => {
@@ -101,7 +91,7 @@ it("hydrates newly created interrupted tasks after switching away and back, keep
   disk.set(cleanupPath, JSON.stringify([cleanup, { ...cleanup, id: "new-cleanup", autoResume: true, status: "processing" }]))
   await openProject("A")
   await flushMicrotasks(25)
-  expect(embedding).toHaveBeenCalledTimes(1)
+  expect(apply).toHaveBeenCalledTimes(1)
   chat.mockImplementationOnce(() => new Promise(() => {}))
   const newId = await enqueueMerge("A", { ...merge.group, slugs: ["c", "d"] }, "c")
   await flushMicrotasks(10)

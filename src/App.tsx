@@ -1,3 +1,4 @@
+import { loadJevConfig } from "@/lib/jev-config"
 import { invoke } from "@tauri-apps/api/core"
 import { getMigrationView, MigrationReturned, restoreDesktopMigration, setMigrationShelfReturn } from "@/lib/novel-migration"
 import { useState, useEffect, useRef } from "react"
@@ -8,7 +9,7 @@ import { isTauri, pickDirectory } from "@/lib/platform"
 import { useChatStore } from "@/stores/chat-store"
 import { useOutlineChatStore } from "@/stores/outline-chat-store"
 import { openProject, fileExists } from "@/commands/fs"
-import { getLastProject, saveLastProject, loadLlmConfig, loadAiChatModel, loadAiWorkflowMode, loadAiWorkflowModeBeforeDiscuss, loadDefaultLlmModel, loadEmbeddingConfig, loadProviderConfigs, loadActivePresetId, loadProxyConfig, loadNovelMode, loadNovelConfig, loadRevisionFeedbackWindowConfig, loadTheme, loadMaxHistoryMessages, loadUiFontSizeScale, loadUiBodyFontPx, loadUiBodyLineHeight, loadUiBodyLetterSpacing, loadUiBodyMarginX, loadUiBodySafeBottom, loadVisualStyle, saveLlmConfig, loadLastReadChapter, loadSearchApiConfig, loadOutlineWorkflowMode } from "@/lib/project-store"
+import { getLastProject, saveLastProject, loadLlmConfig, loadAiChatModel, loadAiWorkflowMode, loadAiWorkflowModeBeforeDiscuss, loadDefaultLlmModel, loadProviderConfigs, loadActivePresetId, loadProxyConfig, loadNovelMode, loadNovelConfig, loadRevisionFeedbackWindowConfig, loadTheme, loadMaxHistoryMessages, loadUiFontSizeScale, loadUiBodyFontPx, loadUiBodyLineHeight, loadUiBodyLetterSpacing, loadUiBodyMarginX, loadUiBodySafeBottom, loadVisualStyle, saveLlmConfig, loadLastReadChapter, loadSearchApiConfig, loadOutlineWorkflowMode } from "@/lib/project-store"
 import { openProjectWithPluginSync, syncPluginsProject } from "@/lib/plugins/project-sync"
 import { loadReviewItems, loadChatHistory, saveChatHistory, saveReviewItems } from "@/lib/persist"
 import { initializeAiOutlineModelFromStorage } from "@/lib/ai-outline-model-initialization"
@@ -481,10 +482,7 @@ function App() {
             await saveLlmConfig(resolved)
           }
         }
-        const savedEmbeddingConfig = await loadEmbeddingConfig()
-        if (savedEmbeddingConfig) {
-          useWikiStore.getState().setEmbeddingConfig(savedEmbeddingConfig)
-        }
+        if (isTauri()) await loadJevConfig()
         const savedSearchApiConfig = await loadSearchApiConfig()
         if (savedSearchApiConfig) {
           useWikiStore.getState().setSearchApiConfig(savedSearchApiConfig)
@@ -620,13 +618,6 @@ function App() {
     await resetProjectState()
     await initializeProjectContextCache(proj.path)
 
-    if (isTauri()) {
-      try {
-        await invoke("vector_prepare_page_ids", { projectPath: proj.path })
-      } catch (err) {
-        console.warn("本地向量索引升级将在下次访问时重试", err)
-      }
-    }
     setProject(proj)
     useWikiStore.getState().clearTransientTaskState()
     // 默认开启小说模式

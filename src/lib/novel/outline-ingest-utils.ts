@@ -1,5 +1,5 @@
 import { fileExists, listDirectory, readFile, writeFileAtomic } from "@/commands/fs"
-import { hashEmbeddingText } from "@/lib/embedding-batch"
+import { hashTextHex } from "@/lib/text-hash"
 import { getRelativePath, normalizePath } from "@/lib/path-utils"
 import { flattenMdFiles } from "./chapter-utils"
 
@@ -22,7 +22,7 @@ export function legacyOutlineNumber(outlinePath: string): number {
 
 export function getOutlineSnapshotNumberFromPath(outlinePath: string, projectPath?: string): number {
   // Keep legacy slots 1..999 reserved. 13 hex digits fit exactly in a JS number.
-  return -(1000 + parseInt(hashEmbeddingText(outlineKey(outlinePath, projectPath)).slice(0, 13), 16))
+  return -(1000 + parseInt(hashTextHex(outlineKey(outlinePath, projectPath)).slice(0, 13), 16))
 }
 
 function identity(projectPath: string, path: string, chapterNumber: number) {

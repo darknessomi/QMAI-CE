@@ -1,4 +1,5 @@
 import { resolveContextPackTokenBudget } from "@/lib/context-budget"
+import { fitSagEvidence } from "@/lib/sag-search"
 import { SourceCanonOverflowError, type ContextPack } from "@/lib/novel/context-engine"
 import { estimateContextTokens } from "./token-estimator"
 import {
@@ -34,6 +35,7 @@ interface ContextFragment {
   title: string
   text: string
   required?: boolean
+  sourceEvidence?: boolean
   layer: "stable" | "summary" | "dynamic"
 }
 
@@ -99,7 +101,7 @@ function dynamicFragments(input: ComposeContextInput, expanded: boolean): Contex
     { title: "时间线", text: pack.timeline, layer: "dynamic" },
     { title: "人物认知", text: pack.cognitionStates, layer: "dynamic" },
     { title: "下一章建议", text: pack.nextChapterAdvice, layer: "dynamic" },
-    { title: "任务检索命中", text: pack.searchResults, layer: "dynamic" },
+    { title: "任务检索命中", text: pack.searchResults, required: Boolean(pack.sagEvidence?.text), sourceEvidence: Boolean(pack.sagEvidence?.text), layer: "dynamic" },
     { title: "关系图检索命中", text: pack.graphSearchResults, layer: "dynamic" },
   ]
   if (expanded) {
@@ -152,14 +154,16 @@ function fitFragment(fragment: ContextFragment, tokenBudget: number): ContextFra
   if (fragmentTokens(fragment) <= tokenBudget) return fragment
   let low = 0
   let high = fragment.text.length
+  const truncate = fragment.sourceEvidence ? fitSagEvidence : truncateWithMarker
   while (low < high) {
     const middle = Math.ceil((low + high) / 2)
-    const text = truncateWithMarker(fragment.text, middle)
+    const text = truncate(fragment.text, middle)
     if (estimateContextTokens(section(fragment.title, text)) <= tokenBudget) low = middle
     else high = middle - 1
   }
   if (low <= 0) return null
-  return { ...fragment, text: truncateWithMarker(fragment.text, low) }
+  const text = truncate(fragment.text, low)
+  return text ? { ...fragment, text } : null
 }
 
 function fitPlainText(value: string, tokenBudget: number): string {

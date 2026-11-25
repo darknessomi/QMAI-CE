@@ -75,16 +75,7 @@ async function loadQueue(projectPath: string, projectId: string): Promise<Ingest
   }
 }
 
-/**
- * Delete files written by a cancelled / failed ingest, AND drop the
- * matching pages' chunks from LanceDB. Called from the cancel paths
- * (cancelTask, cancelAllTasks).
- *
- * Per-file errors are swallowed (best-effort cleanup) — a missing
- * file or LanceDB unavailable shouldn't abort the cancel flow.
- * Structural pages (index/log/overview) aren't embedded, so the
- * cascade no-ops for them.
- */
+/** Remove partial ingest output and the media owned by source pages. */
 async function cleanupWrittenFiles(
   projectPath: string,
   filePaths: string[],
@@ -97,7 +88,7 @@ async function cleanupWrittenFiles(
     try {
       await cascadeDeleteWikiPage(projectPath, fullPath)
     } catch {
-      // file may not exist / lancedb unavailable — non-critical
+      // file may not exist — non-critical
     }
   }
 }
