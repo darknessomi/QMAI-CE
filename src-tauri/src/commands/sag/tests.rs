@@ -580,7 +580,7 @@ async fn sag_dedup_bridge() {
 }
 
 #[test]
-fn writing_pages_require_all_chapter_sources_even_with_a_warm_general_index() {
+fn writing_excludes_unattributed_page_text_even_with_a_warm_general_index() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path().canonicalize().unwrap();
     let project = root.to_str().unwrap();
@@ -650,6 +650,73 @@ fn writing_pages_require_all_chapter_sources_even_with_a_warm_general_index() {
     fs::write(first, "---\nai_exclude: true\n---\n正文记录。").unwrap();
     assert!(store.verify(&hits, &token).is_err());
     assert!(store.quotations(hits, 5, &token).is_err());
+}
+
+#[tokio::test]
+async fn mixed_page_routes_an_alias_to_readable_chapter_quotes_only() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    let project = root.to_str().unwrap();
+    let chapter = |n, status, flag, line| {
+        put(&root, &format!("QM/chapters/第{n}章.md"),
+        &format!("---\nchapter_number: {n}\nchapter_status: {status}\nai_exclude: {flag}\n---\n陈远{line}。"))
+    };
+    let first = chapter(1, "final", false, "在渡口签收凭证");
+    let mixed = put(&root, "QM/entities/陈远.md", "---\nsource_sequence: 4\nsnapshot_id: outline-4-r1\naliases: [北岸来客]\nsources: ['001.snapshot.json','002.snapshot.json','003.snapshot.json','005.snapshot.json','outline-004.snapshot.json', 'unknown']\n---\n混合摘要里的秘密。");
+    let files = vec![
+        mixed.clone(),
+        first.clone(),
+        chapter(2, "draft", false, "草稿秘密"),
+        chapter(3, "final", true, "禁读秘密"),
+        chapter(5, "final", false, "未来秘密"),
+        chapter(4, "final", false, "无关来源秘密"),
+    ];
+    let token = CancellationToken::new();
+    drop(store::Store::open(project, files.clone(), None, &token).unwrap());
+    let scope = store::fingerprint(project, files.clone(), Some(5)).unwrap();
+    let store = store::Store::open(project, files.clone(), Some(5), &token).unwrap();
+    assert_eq!(store.fingerprint(), scope.fingerprint);
+    assert!(store
+        .candidates(&text::match_query("北岸来客"), None, &[], 10)
+        .unwrap()
+        .is_empty());
+    let ranked = retrieval::retrieve(
+        &store,
+        "北岸来客",
+        5,
+        Default::default(),
+        &token,
+        |mut candidates, evidence| {
+            for hit in candidates.iter().chain(&evidence) {
+                assert!(!hit.content.contains("秘密") || hit.path.ends_with("第4章.md"));
+                assert_ne!(hit.path, mixed);
+            }
+            for hit in &mut candidates {
+                hit.score = if hit.path == first { 1. } else { 0. };
+            }
+            std::future::ready(Ok(candidates))
+        },
+        |_, _, _| {},
+    )
+    .await
+    .unwrap();
+    let linked: Vec<_> = ranked
+        .into_iter()
+        .filter(|hit| hit.via_page.as_ref() == Some(&mixed))
+        .collect();
+    assert!(!linked.is_empty());
+    assert!(linked.iter().all(|hit| hit.path == first));
+    let quotes = store.quotations(linked.clone(), 5, &token).unwrap();
+    assert_eq!(quotes[0].content, "陈远在渡口签收凭证。");
+    assert_eq!(quotes[0].start_line, 6);
+    fs::write(&mixed, "---\nai_exclude: true\n---\n停用").unwrap();
+    assert!(store.verify(&linked, &token).is_err());
+    assert_ne!(
+        store.fingerprint(),
+        store::fingerprint(project, files, Some(5))
+            .unwrap()
+            .fingerprint
+    );
 }
 
 #[test]

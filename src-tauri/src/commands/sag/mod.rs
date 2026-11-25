@@ -41,6 +41,8 @@ pub struct Candidate {
     order: usize,
     #[serde(skip)]
     previous_score: Option<f64>,
+    #[serde(skip)]
+    via_page: Option<String>,
 }
 
 #[derive(Clone, Deserialize)]

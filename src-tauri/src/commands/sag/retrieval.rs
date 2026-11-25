@@ -251,7 +251,13 @@ where
         let excluded: Vec<i64> = seen.iter().copied().collect();
         corpus.resolve_terms_in_scope(store, &mut terms, &excluded)?;
         let candidates = if hop == 0 {
-            let hits = store.candidates(&expression, None, &excluded, options.candidate_k)?;
+            let hits = store.writing_candidates(
+                query,
+                &expression,
+                None,
+                &excluded,
+                options.candidate_k,
+            )?;
             for c in hits.iter().take(5) {
                 protected.insert(c.id, c.clone());
             }
@@ -265,13 +271,17 @@ where
                     .collect::<Vec<_>>()
                     .join(" OR ")
             );
-            let required = terms
+            let lists = terms
                 .iter()
-                .map(|term| quote(&term.term))
-                .collect::<Vec<_>>();
-            let lists = required
-                .iter()
-                .map(|term| store.candidates(&ranking, Some(term), &excluded, options.candidate_k))
+                .map(|term| {
+                    store.writing_candidates(
+                        &term.term,
+                        &ranking,
+                        Some(&quote(&term.term)),
+                        &excluded,
+                        options.candidate_k,
+                    )
+                })
                 .collect::<Result<_>>()?;
             interleave(lists, options.candidate_k)
         };

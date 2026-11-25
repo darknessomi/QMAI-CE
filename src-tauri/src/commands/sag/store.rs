@@ -5,7 +5,7 @@ use serde_yaml::Value;
 use sha2::{Digest, Sha256};
 use std::{
     cell::RefCell,
-    collections::{HashMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     fs,
     io::Read,
     path::{Path, PathBuf},
@@ -326,10 +326,16 @@ fn ordered_files(
     files
 }
 
+struct ChapterLinks {
+    names: Vec<String>,
+    chapters: Vec<u64>,
+}
+
 #[derive(Default)]
 struct WritingScope {
     chapters: HashMap<u64, String>,
     page_sources: HashMap<String, Vec<u64>>,
+    linked_pages: BTreeMap<String, ChapterLinks>,
 }
 
 impl WritingScope {
@@ -357,66 +363,107 @@ impl WritingScope {
         {
             return None;
         }
-        let mut numbers = Vec::new();
         let result = body_if(source, None, title, |fields| {
-            let Some(refs) = page_chapters(fields) else {
-                return false;
-            };
-            if !refs.iter().all(|n| self.chapters.contains_key(n)) {
+            match &fields["is_historical"] {
+                Value::Null | Value::Bool(false) => {}
+                Value::String(s) if s.eq_ignore_ascii_case("false") => {}
+                _ => return false,
+            }
+            let (mut numbers, complete) = page_chapters(fields);
+            let all_readable = complete && numbers.iter().all(|n| self.chapters.contains_key(n));
+            numbers.retain(|n| self.chapters.contains_key(n));
+            if numbers.is_empty() {
                 return false;
             }
-            numbers = refs;
+            if all_readable {
+                self.page_sources.insert(input.to_owned(), numbers);
+            } else {
+                // Only the lookup keys and chapter links are used from a mixed page.
+                let mut names = vec![title.to_lowercase()];
+                if let Some(name) = fields["title"].as_str() {
+                    names.push(name.to_lowercase());
+                }
+                if let Some(aliases) = fields["aliases"].as_sequence() {
+                    names.extend(
+                        aliases
+                            .iter()
+                            .filter_map(Value::as_str)
+                            .map(str::to_lowercase),
+                    );
+                }
+                names.retain(|name| !name.trim().is_empty());
+                names.sort();
+                names.dedup();
+                self.linked_pages.insert(
+                    input.to_owned(),
+                    ChapterLinks {
+                        names,
+                        chapters: numbers,
+                    },
+                );
+            }
             true
         })?;
-        // A plain Markdown page without provenance can serve project search, but
-        // cannot establish what the writer could know at a given chapter.
-        if numbers.is_empty() {
-            return None;
-        }
-        self.page_sources.insert(input.to_owned(), numbers);
-        Some(result)
+        (self.page_sources.contains_key(input) || self.linked_pages.contains_key(input))
+            .then_some(result)
     }
 }
 
-fn page_chapters(fields: &Value) -> Option<Vec<u64>> {
-    if !matches!(&fields["source_type"], Value::Null)
-        && fields["source_type"].as_str() != Some("chapter")
-    {
-        return None;
-    }
-    match &fields["is_historical"] {
-        Value::Null | Value::Bool(false) => {}
-        Value::String(s) if s.eq_ignore_ascii_case("false") => {}
-        _ => return None,
-    }
+// Keep valid chapter links even if the latest revision came from an outline or
+// another entry in the merged source list cannot be used.
+fn page_chapters(fields: &Value) -> (Vec<u64>, bool) {
+    let snapshot_chapter = fields["snapshot_id"].as_str().and_then(|id| {
+        let id = id.strip_prefix("chapter-")?;
+        let number = match id.split_once("-r") {
+            Some((n, revision)) => {
+                revision.parse::<u64>().ok()?;
+                n
+            }
+            None => id,
+        };
+        number.parse::<u64>().ok().filter(|n| *n > 0)
+    });
+    let chapter_meta = (fields["source_type"].is_null()
+        || fields["source_type"].as_str() == Some("chapter"))
+        && (fields["snapshot_id"].is_null() || snapshot_chapter.is_some());
+    let mut complete = chapter_meta;
     let mut refs = Vec::new();
-    for key in ["source_sequence", "chapter_number"] {
-        if !fields[key].is_null() {
-            refs.push(
-                fields[key]
-                    .as_u64()
-                    .or_else(|| fields[key].as_str()?.parse().ok())?,
-            );
+    let mut record = |number: Option<u64>| {
+        if let Some(n) = number.filter(|n| *n > 0) {
+            refs.push(n);
+        } else {
+            complete = false;
+        }
+    };
+    if chapter_meta {
+        for key in ["source_sequence", "chapter_number"] {
+            if !fields[key].is_null() {
+                record(
+                    fields[key]
+                        .as_u64()
+                        .or_else(|| fields[key].as_str()?.parse().ok()),
+                );
+            }
+        }
+        if !fields["snapshot_id"].is_null() {
+            record(snapshot_chapter);
         }
     }
-    if !fields["snapshot_id"].is_null() {
-        let id = fields["snapshot_id"].as_str()?.strip_prefix("chapter-")?;
-        let number = id.split_once("-r").map_or(id, |(n, _)| n);
-        refs.push(number.parse().ok()?);
-    }
-    if !fields["sources"].is_null() {
-        for item in fields["sources"].as_sequence()? {
-            refs.push(
-                item.as_str()?
-                    .strip_suffix(".snapshot.json")?
-                    .parse()
-                    .ok()?,
-            );
+    match &fields["sources"] {
+        Value::Sequence(items) => {
+            for item in items {
+                record(
+                    item.as_str()
+                        .and_then(|s| s.strip_suffix(".snapshot.json")?.parse().ok()),
+                );
+            }
         }
+        Value::Null => {}
+        _ => record(None),
     }
     refs.sort_unstable();
     refs.dedup();
-    Some(refs)
+    (refs, complete)
 }
 
 fn signature(sources: &HashMap<String, Source>) -> String {
@@ -554,6 +601,18 @@ impl Store {
                 continue;
             };
             let hash: [u8; 32] = Sha256::digest(source.as_bytes()).into();
+            if writing.linked_pages.contains_key(&input) {
+                // Fingerprint/verify the routing data, but never expose its cached general-search rows.
+                sources.insert(
+                    input,
+                    Source {
+                        path,
+                        requested_path: lexical,
+                        hash,
+                    },
+                );
+                continue;
+            }
             let body_start = source.len() - document_body.len();
             let existing: Option<Vec<u8>> = tx
                 .query_row("SELECT hash FROM documents WHERE path=?1 AND NOT EXISTS (SELECT 1 FROM chunks c LEFT JOIN span_ranges r ON r.id=c.id WHERE c.path=?1 AND r.id IS NULL)", [key], |row| {
@@ -642,6 +701,14 @@ impl Store {
         let mut seen = HashSet::new();
         for c in candidates {
             check_cancel(cancel)?;
+            if let Some(page) = &c.via_page {
+                if seen.insert(page) {
+                    self.sources
+                        .get(page)
+                        .context("实体或概念页已超出范围")?
+                        .verify()?;
+                }
+            }
             if !seen.insert(&c.path) {
                 continue;
             }
@@ -785,9 +852,75 @@ impl Store {
         excluded: &[i64],
         limit: usize,
     ) -> Result<Vec<Candidate>> {
+        self.candidates_in_paths(expression, required, excluded, limit, None)
+    }
+
+    pub fn writing_candidates(
+        &self,
+        lookup: &str,
+        expression: &str,
+        required: Option<&String>,
+        excluded: &[i64],
+        limit: usize,
+    ) -> Result<Vec<Candidate>> {
+        let ordinary = self.candidates(expression, required, excluded, limit)?;
+        let lookup = lookup.to_lowercase();
+        let mut lists = Vec::new();
+        for (page, links) in &self.writing.linked_pages {
+            if !links.names.iter().any(|name| lookup.contains(name)) {
+                continue;
+            }
+            let names = links
+                .names
+                .iter()
+                .map(|s| text::index_text(s))
+                .filter(|s| !s.is_empty())
+                .map(|s| text::quote(&s))
+                .collect::<Vec<_>>()
+                .join(" OR ");
+            if names.is_empty() {
+                continue;
+            }
+            let paths: Vec<_> = links
+                .chapters
+                .iter()
+                .map(|n| &self.writing.chapters[n])
+                .collect();
+            let ranking = format!("({expression}) OR ({names})");
+            let body_names = format!("body : ({names})");
+            let mut hits = self.candidates_in_paths(
+                &ranking,
+                Some(&body_names),
+                excluded,
+                limit,
+                Some(&paths),
+            )?;
+            for hit in &mut hits {
+                hit.via_page = Some(page.clone());
+            }
+            if !hits.is_empty() {
+                lists.push(hits);
+            }
+        }
+        if lists.is_empty() {
+            return Ok(ordinary);
+        }
+        let linked = super::retrieval::interleave(lists, limit);
+        Ok(super::retrieval::interleave(vec![linked, ordinary], limit))
+    }
+
+    fn candidates_in_paths(
+        &self,
+        expression: &str,
+        required: Option<&String>,
+        excluded: &[i64],
+        limit: usize,
+        paths: Option<&[&String]>,
+    ) -> Result<Vec<Candidate>> {
         let sql = "SELECT v.id,v.input,v.title,v.heading,v.content,v.first,v.last
             FROM evidence JOIN temp.visible v ON v.id=evidence.rowid
             WHERE evidence MATCH ?1 AND v.id NOT IN (SELECT value FROM json_each(?2))
+            AND (?5 IS NULL OR v.input IN (SELECT value FROM json_each(?5)))
             ORDER BY sag_bm25(evidence,?3,2,2,1),v.id LIMIT ?4";
         let mut q = self.db.prepare_cached(sql)?;
         let ids = serde_json::to_string(excluded)?;
@@ -797,7 +930,8 @@ impl Store {
             |term| format!("({expression}) AND ({term})"),
         );
         let mut result = vec![];
-        let mut rows = q.query(params![query, ids, stats, limit])?;
+        let paths = paths.map(serde_json::to_string).transpose()?;
+        let mut rows = q.query(params![query, ids, stats, limit, paths])?;
         while let Some(row) = rows.next()? {
             result.push(Candidate {
                 id: row.get(0)?,
@@ -810,6 +944,7 @@ impl Store {
                 order: result.len(),
                 score: 0.,
                 previous_score: None,
+                via_page: None,
             });
         }
         Ok(result)
