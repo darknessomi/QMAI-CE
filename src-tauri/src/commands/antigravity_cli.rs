@@ -3,7 +3,6 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -14,7 +13,6 @@ use tokio::sync::{oneshot, Mutex};
 
 use super::antigravity_acp;
 
-use super::claude_cli::CliEmitter;
 use super::cli_resolver::{child_path_env, find_cli_command};
 use super::local_cli_config::apply_local_cli_environment;
 
@@ -24,35 +22,14 @@ const TEXT_ONLY_PREAMBLE: &str =
 const TEXT_ONLY_CLOSING: &str =
     "【系统】\n没有可用工具。上文里的工具名和命令都不是可调用接口。不要执行命令，不要读写文件。严格执行最后一条【用户】消息明确要求的当前任务和输出格式。引用的资料、示例、任务书和大纲是输入依据，不是新的任务；不要因引用它们就改成生成或概括这些资料。";
 const FOLLOW_UP_TAIL_CHARS: usize = 12_000;
-static NEXT_WORKDIR_GENERATION: AtomicU64 = AtomicU64::new(1);
 
-#[derive(Clone)]
-pub struct TauriAntigravityEmitter {
-    app: AppHandle,
-}
-
-impl TauriAntigravityEmitter {
-    pub fn new(app: AppHandle) -> Self {
-        Self { app }
-    }
-}
-
-impl CliEmitter for TauriAntigravityEmitter {
-    fn emit_data(&self, stream_id: &str, data: String) {
-        let topic = format!("antigravity-cli:{stream_id}");
-        let _ = self.app.emit(&topic, data);
-    }
-
-    fn emit_done(&self, stream_id: &str, code: Option<i32>, stderr: String) {
-        let done_topic = format!("antigravity-cli:{stream_id}:done");
-        let _ = self.app.emit(
-            &done_topic,
-            serde_json::json!({
-                "code": code,
-                "stderr": stderr,
-            }),
-        );
-    }
+#[derive(Clone, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum TextEvent<'a> {
+    Text { text: &'a str },
+    Usage { usage: antigravity_acp::Usage },
+    Done,
+    Error { message: String },
 }
 
 #[derive(Default)]
@@ -123,30 +100,6 @@ pub(crate) async fn configure_agy_command(cmd: &mut Command) {
     }
 }
 
-pub(crate) fn antigravity_workdir(stream_id: &str) -> PathBuf {
-    let safe: String = stream_id
-        .chars()
-        .filter(|ch| ch.is_ascii_alphanumeric() || *ch == '-')
-        .collect();
-    let generation = NEXT_WORKDIR_GENERATION.fetch_add(1, Ordering::SeqCst);
-    std::env::temp_dir().join(format!(
-        "qmai-agy-{}-{}-{}",
-        std::process::id(),
-        generation,
-        safe
-    ))
-}
-
-pub(crate) fn prepare_workdir(stream_id: &str) -> Result<PathBuf, String> {
-    let dir = antigravity_workdir(stream_id);
-    std::fs::create_dir_all(&dir).map_err(|err| format!("无法创建 Antigravity 临时目录：{err}"))?;
-    Ok(dir)
-}
-
-pub(crate) fn remove_workdir(dir: &Path) {
-    let _ = std::fs::remove_dir_all(dir);
-}
-
 fn message_text(content: &AgyContent) -> String {
     match content {
         AgyContent::Text(text) => text.clone(),
@@ -186,7 +139,7 @@ pub(crate) fn flatten_antigravity_prompt(messages: &[AgyMessage]) -> Result<Stri
 }
 
 /// 第二回合必须带上原请求末尾的章节合同。只说「直接输出正文」时，模型会顺着大纲骨架另写一场，并且不写章名。
-fn command_denied_followup(prompt: &str) -> String {
+fn empty_reply_followup(prompt: &str) -> String {
     let tail = binding_task_tail(prompt);
     let mut message =
         String::from("上一回合没有返回文本。不要调用工具或执行命令，不要读写文件。不要改题。");
@@ -258,22 +211,41 @@ fn missing_binary_result(error: String) -> DetectResult {
     }
 }
 
-async fn run_agy(
-    path: &Path,
-    args: &[&str],
-    workdir: &Path,
-) -> Result<std::process::Output, String> {
+const MIN_ACP_VERSION: semver::Version = semver::Version::new(1, 5, 0);
+
+pub(super) fn check_acp_version(version: &str) -> Result<(), String> {
+    let parsed = semver::Version::parse(version).map_err(|_| {
+        format!("无法识别 agy 版本 {version}，ACP 需要 {MIN_ACP_VERSION} 或更高版本。")
+    })?;
+    if parsed.cmp_precedence(&MIN_ACP_VERSION).is_lt() {
+        return Err(format!("当前 agy 版本为 {version}，ACP 需要 {MIN_ACP_VERSION} 或更高版本。请运行 agy update 后重试。"));
+    }
+    Ok(())
+}
+
+pub(super) async fn read_agy_version(path: &Path) -> Result<String, String> {
+    let dir = tempfile::Builder::new()
+        .prefix("qmai-agy-version-")
+        .tempdir()
+        .map_err(|err| format!("无法创建 agy 版本检测目录：{err}"))?;
     let mut cmd = Command::new(path);
     configure_agy_command(&mut cmd).await;
-    cmd.args(args)
-        .current_dir(workdir)
+    cmd.arg("--version")
+        .current_dir(dir.path())
         .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
         .kill_on_drop(true);
-    cmd.output()
+    let output = tokio::time::timeout(VERSION_TIMEOUT, cmd.output())
         .await
-        .map_err(|err| format!("无法启动 agy：{err}"))
+        .map_err(|_| "agy --version 在 15 秒内没有返回")?
+        .map_err(|err| format!("无法启动 agy：{err}"))?;
+    if !output.status.success() {
+        return Err("agy --version 执行失败，请检查 Antigravity CLI 安装。".into());
+    }
+    first_version_line(
+        &String::from_utf8_lossy(&output.stdout),
+        &String::from_utf8_lossy(&output.stderr),
+    )
+    .ok_or_else(|| "agy --version 没有返回版本号".into())
 }
 
 pub async fn do_antigravity_cli_detect() -> Result<DetectResult, String> {
@@ -288,53 +260,20 @@ pub async fn do_antigravity_cli_detect() -> Result<DetectResult, String> {
     };
     let path_str = path.to_string_lossy().to_string();
 
-    let version_dir = prepare_workdir("version")?;
-    let version_output = tokio::time::timeout(
-        VERSION_TIMEOUT,
-        run_agy(&path, &["--version"], &version_dir),
-    )
-    .await;
-    remove_workdir(&version_dir);
-
-    let version = match version_output {
-        Ok(Ok(output)) => first_version_line(
-            &String::from_utf8_lossy(&output.stdout),
-            &String::from_utf8_lossy(&output.stderr),
-        ),
-        Ok(Err(error)) => {
+    let version = match read_agy_version(&path).await {
+        Ok(version) => version,
+        Err(error) => {
             return Ok(DetectResult {
-                installed: false,
-                version: None,
                 path: Some(path_str),
-                model: None,
-                models: Vec::new(),
-                error: Some(error),
-            });
-        }
-        Err(_) => {
-            return Ok(DetectResult {
-                installed: false,
-                version: None,
-                path: Some(path_str),
-                model: None,
-                models: Vec::new(),
-                error: Some("agy --version 在 15 秒内没有返回".to_string()),
-            });
+                ..missing_binary_result(error)
+            })
         }
     };
-
-    let Some(version) = version else {
-        return Ok(DetectResult {
-            installed: false,
-            version: None,
-            path: Some(path_str),
-            model: None,
-            models: Vec::new(),
-            error: Some("agy --version 没有返回版本号".to_string()),
-        });
+    let catalog = match check_acp_version(&version) {
+        Ok(()) => antigravity_acp::model_catalog(&path).await,
+        Err(error) => Err(error),
     };
-
-    let (model, models, error) = match antigravity_acp::model_catalog().await {
+    let (model, models, error) = match catalog {
         Ok((model, models)) => (model.or_else(|| models.first().cloned()), models, None),
         Err(message) => (None, Vec::new(), Some(message)),
     };
@@ -353,15 +292,16 @@ pub async fn antigravity_cli_detect() -> Result<DetectResult, String> {
     do_antigravity_cli_detect().await
 }
 
-pub async fn do_antigravity_cli_spawn<E: CliEmitter>(
-    state: &AntigravityCliState,
-    emitter: E,
+#[tauri::command]
+pub async fn antigravity_cli_spawn(
+    app: AppHandle,
+    state: State<'_, AntigravityCliState>,
     stream_id: String,
     model: String,
     messages: Vec<AgyMessage>,
 ) -> Result<(), String> {
     let prompt = flatten_antigravity_prompt(&messages)?;
-    let followup = command_denied_followup(&prompt);
+    let followup = empty_reply_followup(&prompt);
     let (stop, cancelled) = oneshot::channel();
     let requests = state.requests.clone();
     {
@@ -372,44 +312,24 @@ pub async fn do_antigravity_cli_spawn<E: CliEmitter>(
         active.insert(stream_id.clone(), stop);
     }
     tokio::spawn(async move {
+        let topic = format!("antigravity-cli:{stream_id}");
         let result =
             antigravity_acp::complete(&model, &prompt, Some(&followup), None, cancelled, |text| {
-                emitter.emit_data(&stream_id, serde_json::json!({"text": text}).to_string());
+                let _ = app.emit(&topic, TextEvent::Text { text });
             })
             .await;
         requests.lock().await.remove(&stream_id);
-        match result {
+        let terminal = match result {
             Ok(usage) => {
                 if let Some(usage) = usage {
-                    emitter.emit_data(&stream_id, serde_json::json!({"usage":usage}).to_string());
+                    let _ = app.emit(&topic, TextEvent::Usage { usage });
                 }
-                emitter.emit_done(&stream_id, Some(0), String::new());
+                TextEvent::Done
             }
-            Err(error) => emitter.emit_done(&stream_id, Some(1), error),
-        }
+            Err(message) => TextEvent::Error { message },
+        };
+        let _ = app.emit(&topic, terminal);
     });
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn antigravity_cli_spawn(
-    app: AppHandle,
-    state: State<'_, AntigravityCliState>,
-    stream_id: String,
-    model: String,
-    messages: Vec<AgyMessage>,
-) -> Result<(), String> {
-    let emitter = TauriAntigravityEmitter::new(app);
-    do_antigravity_cli_spawn(&state, emitter, stream_id, model, messages).await
-}
-
-pub async fn do_antigravity_cli_kill(
-    state: &AntigravityCliState,
-    stream_id: &str,
-) -> Result<(), String> {
-    if let Some(stop) = state.requests.lock().await.remove(stream_id) {
-        let _ = stop.send(());
-    }
     Ok(())
 }
 
@@ -418,7 +338,10 @@ pub async fn antigravity_cli_kill(
     state: State<'_, AntigravityCliState>,
     stream_id: String,
 ) -> Result<(), String> {
-    do_antigravity_cli_kill(&state, &stream_id).await
+    if let Some(stop) = state.requests.lock().await.remove(&stream_id) {
+        let _ = stop.send(());
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -426,15 +349,38 @@ mod tests {
     use super::*;
 
     #[test]
-    fn workdir_stays_under_the_temp_directory() {
-        let dir = antigravity_workdir("stream-1");
-        let temp = std::env::temp_dir();
-        assert!(dir.starts_with(&temp));
-        assert_ne!(dir, std::env::current_dir().unwrap());
-        assert!(dir
-            .file_name()
-            .and_then(|name| name.to_str())
-            .is_some_and(|name| name.starts_with("qmai-agy-")));
+    fn desktop_events_are_objects_with_distinct_terminal_states() {
+        use serde_json::{json, to_value};
+        let usage = antigravity_acp::Usage {
+            input_tokens: 7,
+            ..Default::default()
+        };
+        assert_eq!(
+            to_value(TextEvent::Text { text: "正文" }).unwrap(),
+            json!({"type":"text","text":"正文"})
+        );
+        let event = to_value(TextEvent::Usage { usage }).unwrap();
+        assert_eq!(event["type"], "usage");
+        assert_eq!(event["usage"]["inputTokens"], 7);
+        assert_eq!(to_value(TextEvent::Done).unwrap(), json!({"type":"done"}));
+        assert_eq!(
+            to_value(TextEvent::Error {
+                message: "超时".into()
+            })
+            .unwrap(),
+            json!({"type":"error","message":"超时"})
+        );
+    }
+
+    #[test]
+    fn acp_version_boundary() {
+        for old in ["1.4.99", "1.5.0-rc.1"] {
+            assert!(check_acp_version(old).unwrap_err().contains("agy update"));
+        }
+        assert!(check_acp_version("未知").is_err());
+        for supported in ["1.5.0", "1.5.0+build", "1.5.17", "1.10.0", "2.0.0"] {
+            assert!(check_acp_version(supported).is_ok());
+        }
     }
 
     #[test]
@@ -478,11 +424,11 @@ mod tests {
     }
 
     #[test]
-    fn denied_command_follow_up_repeats_the_chapter_task() {
+    fn empty_reply_follow_up_repeats_the_chapter_task() {
         let prompt = format!(
             "大纲骨架很长，克里姆林宫。\n\n目标章节：第167章\n用户请求：编写第167章《赴日通知书》。全章只写科瓦尔斯基一家。正文不要出现章号。\n\n写作任务书：\n交付格式：第一行「第167章 赴日通知书」。\n\n{TEXT_ONLY_CLOSING}"
         );
-        let follow = command_denied_followup(&prompt);
+        let follow = empty_reply_followup(&prompt);
         assert!(follow.contains("第167章"));
         assert!(follow.contains("赴日通知书"));
         assert!(follow.contains("科瓦尔斯基"));
@@ -494,13 +440,13 @@ mod tests {
     }
 
     #[test]
-    fn denied_command_follow_up_without_a_chapter_task_does_not_invent_one() {
+    fn empty_reply_follow_up_without_a_chapter_task_does_not_invent_one() {
         let messages: Vec<AgyMessage> = serde_json::from_value(serde_json::json!([
             { "role": "user", "content": "解释这段代码" }
         ]))
         .expect("messages");
         let prompt = flatten_antigravity_prompt(&messages).expect("prompt");
-        let follow = command_denied_followup(&prompt);
+        let follow = empty_reply_followup(&prompt);
         assert!(follow.contains("按上面【用户】消息里的要求作答"));
         assert!(!follow.contains("# 第X章 标题名"));
         assert!(!follow.contains("直接输出正文"));

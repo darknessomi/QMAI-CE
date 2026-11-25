@@ -1010,7 +1010,7 @@ function AntigravityCliStatusPill() {
   return (
     <div className="space-y-1.5">
       <div className="flex items-center gap-2">
-        <Label className="m-0">{t("settings.sections.llm.cliStatus.title")}</Label>
+        <Label className="m-0">{t("settings.sections.llm.cliStatus.title")}（agy ≥ 1.5.0）</Label>
         <button
           type="button"
           onClick={() => void detect()}

@@ -238,7 +238,7 @@ export function WebSearchSection() {
                   {provider.id === "antigravity" && (
                     <div className="space-y-2">
                       <ul className="list-disc space-y-1 pl-4 text-xs leading-relaxed text-muted-foreground">
-                        <li>安装 agy 1.1.8 及以上，在终端运行 agy 并用 Google 账号登录。</li>
+                        <li>安装 agy 1.5.0 及以上，在终端运行 agy 并用 Google 账号登录。</li>
                         <li>搜索消耗该账号的模型额度；摘要由模型根据 Google 搜索结果生成。</li>
                         <li>写作模型接收实际搜索词和摘要。</li>
                       </ul>

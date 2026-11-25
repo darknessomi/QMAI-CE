@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { invoke } from "@tauri-apps/api/core"
 import type { LlmConfig } from "@/stores/wiki-store"
 import { streamAntigravityCli } from "./antigravity-cli-transport"
 
@@ -32,16 +33,12 @@ vi.mock("@tauri-apps/api/core", () => ({
     const streamId = payload?.streamId
     if (typeof streamId !== "string") throw new Error("missing stream id")
     setTimeout(() => {
-      for (const line of scripted.lines) tauriMock.emit(`antigravity-cli:${streamId}`, line)
-      tauriMock.emit(`antigravity-cli:${streamId}:done`, scripted.exit)
+      for (const event of events) tauriMock.emit(`antigravity-cli:${streamId}`, event)
     }, 0)
   }),
 }))
 
-const scripted: { lines: string[]; exit: { code: number | null; stderr: string } } = {
-  lines: [],
-  exit: { code: 0, stderr: "" },
-}
+let events: unknown[] = []
 
 const config: LlmConfig = {
   provider: "antigravity-cli",
@@ -55,14 +52,13 @@ const config: LlmConfig = {
 
 beforeEach(() => {
   tauriMock.reset()
-  scripted.lines = []
-  scripted.exit = { code: 0, stderr: "" }
+  events = [{ type: "done" }]
 })
 
 describe("streamAntigravityCli", () => {
   it("delivers ACP text chunks once and forwards the measured usage", async () => {
     const usage = { inputTokens: 3, outputTokens: 2, totalTokens: 5, cachedInputTokens: 1 }
-    scripted.lines = [JSON.stringify({ text: "苹" }), JSON.stringify({ text: "果" }), JSON.stringify({ usage })]
+    events = [{ type: "text", text: "苹" }, { type: "text", text: "果" }, { type: "usage", usage }, { type: "done" }]
     const onToken = vi.fn()
     const onUsage = vi.fn()
     const onDone = vi.fn()
@@ -75,14 +71,14 @@ describe("streamAntigravityCli", () => {
   })
 
   it("reports a failed ACP turn even after partial text has arrived", async () => {
-    scripted.lines = [JSON.stringify({ text: "半段" })]
-    scripted.exit = { code: 1, stderr: "Antigravity ACP 达到生成上限，本回合输出不完整。" }
+    const message = "Antigravity ACP 达到生成上限，本回合输出不完整。"
+    events = [{ type: "text", text: "半段" }, { type: "error", message }, { type: "done" }]
     const onDone = vi.fn()
     const onError = vi.fn()
     await streamAntigravityCli(config, [{ role: "user", content: "ping" }], {
       onToken: vi.fn(), onDone, onError,
     })
-    expect(onError).toHaveBeenCalledWith(new Error(scripted.exit.stderr))
+    expect(onError).toHaveBeenCalledWith(new Error(message))
     expect(onDone).not.toHaveBeenCalled()
   })
 
@@ -92,5 +88,25 @@ describe("streamAntigravityCli", () => {
       onToken: vi.fn(), onDone: vi.fn(), onError,
     })
     expect(onError).toHaveBeenCalledWith(new Error("Antigravity ACP 没有返回正文。"))
+  })
+
+  it("在启动确认前取消时结束一次，并在确认后停止对应的 ACP 请求", async () => {
+    let confirm!: () => void
+    const confirmation = new Promise<void>(resolve => { confirm = resolve })
+    let started!: () => void
+    const starting = new Promise<void>(resolve => { started = resolve })
+    vi.mocked(invoke).mockImplementationOnce(async () => { started(); await confirmation })
+    const controller = new AbortController()
+    const callbacks = { onToken: vi.fn(), onDone: vi.fn(), onError: vi.fn() }
+    const pending = streamAntigravityCli(config, [], callbacks, controller.signal)
+    await starting
+    const { streamId } = vi.mocked(invoke).mock.lastCall![1] as { streamId: string }
+    controller.abort()
+    confirm()
+    await pending
+    expect(invoke).toHaveBeenLastCalledWith("antigravity_cli_kill", { streamId })
+    expect(callbacks.onDone).toHaveBeenCalledTimes(1)
+    expect(callbacks.onError).not.toHaveBeenCalled()
+    expect(tauriMock.listeners.get(`antigravity-cli:${streamId}`)?.size).toBe(0)
   })
 })

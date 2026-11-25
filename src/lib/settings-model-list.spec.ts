@@ -145,7 +145,7 @@ describe("settings model list", () => {
   it("reads the Antigravity model catalog detected by ACP", async () => {
     vi.mocked(invoke).mockResolvedValueOnce({
       installed: true,
-      version: "1.3.5",
+      version: "1.5.0",
       path: "/opt/homebrew/bin/agy",
       model: "gemini-3.8-flash-high",
       models: ["gemini-3.8-flash-high", "claude-sonnet-5-5-high", "gpt-oss-120b-medium"],

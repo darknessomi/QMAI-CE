@@ -6,11 +6,11 @@ import type { LlmUsage } from "@/lib/llm-usage"
 import type { ChatMessage, RequestOverrides } from "./llm-providers"
 import type { StreamCallbacks } from "./llm-client"
 
-type SpawnPayload = Record<string, unknown> & {
-  streamId: string
-  model: string
-  messages: ChatMessage[]
-}
+type TextEvent =
+  | { type: "text"; text: string }
+  | { type: "usage"; usage: LlmUsage }
+  | { type: "done" }
+  | { type: "error"; message: string }
 
 export async function streamAntigravityCli(
   config: LlmConfig,
@@ -25,97 +25,68 @@ export async function streamAntigravityCli(
     for (const key of ["temperature", "top_p", "top_k", "max_tokens", "stop"] as const) {
       if (overrides[key] !== undefined) {
         // eslint-disable-next-line no-console
-        console.warn(`[antigravity-cli] 忽略不支持的参数 "${key}"：agy 没有对应开关`)
+        console.warn(`[antigravity-acp] 文本请求不支持参数 "${key}"`)
       }
     }
+  }
+
+  if (signal?.aborted) {
+    onDone()
+    return
   }
 
   const streamId = crypto.randomUUID()
-  let unlistenData: UnlistenFn | (() => void) | undefined
-  let unlistenDone: UnlistenFn | (() => void) | undefined
+  let unlisten: UnlistenFn | undefined
+  let spawned = false
   let finished = false
-  let aborted = signal?.aborted ?? false
-  let emittedToken = false
-  let resolveCompletion: () => void = () => {}
-  const completion = new Promise<void>((resolve) => {
-    resolveCompletion = resolve
-  })
+  let emittedText = false
+  let resolveCompletion!: () => void
+  const completion = new Promise<void>((resolve) => { resolveCompletion = resolve })
 
-  const cleanup = () => {
-    unlistenData?.()
-    unlistenDone?.()
-  }
-
-  const finishWith = (cb: () => void) => {
+  const finish = (callback: () => void) => {
     if (finished) return
     finished = true
-    cleanup()
-    cb()
     resolveCompletion()
+    callback()
   }
-
-  const abortListener = () => {
-    aborted = true
-    void invoke("antigravity_cli_kill", { streamId }).catch(() => {})
-    finishWith(onDone)
+  const cancel = () => invoke("antigravity_cli_kill", { streamId }).catch(() => {})
+  const onAbort = () => {
+    if (finished) return
+    if (spawned) void cancel()
+    finish(onDone)
   }
-  if (aborted) {
-    finishWith(onDone)
-    return
-  }
-  signal?.addEventListener("abort", abortListener)
-
+  signal?.addEventListener("abort", onAbort)
   try {
-    unlistenData = await listen<string>(`antigravity-cli:${streamId}`, (event) => {
+    unlisten = await listen<TextEvent>(`antigravity-cli:${streamId}`, ({ payload }) => {
       if (finished) return
-      const data: { text?: string; usage?: LlmUsage } = JSON.parse(event.payload)
-      if (data.usage) onUsage?.(data.usage)
-      if (data.text) {
-        emittedToken = true
-        onToken(data.text)
+      switch (payload.type) {
+        case "text":
+          if (payload.text) {
+            emittedText = true
+            onToken(payload.text)
+          }
+          break
+        case "usage":
+          onUsage?.(payload.usage)
+          break
+        case "done":
+          finish(emittedText ? onDone : () => onError(new Error("Antigravity ACP 没有返回正文。")))
+          break
+        case "error":
+          finish(() => onError(new Error(payload.message)))
+          break
       }
     })
-    if (aborted || finished) {
-      cleanup()
-      return
-    }
-
-    unlistenDone = await listen<{ code: number | null; stderr: string }>(
-      `antigravity-cli:${streamId}:done`,
-      (event) => {
-        const code = event.payload?.code
-        if (code !== 0) {
-          finishWith(() => onError(new Error(event.payload?.stderr || "Antigravity ACP 会话意外结束。")))
-          return
-        }
-        if (!emittedToken) {
-          finishWith(() => onError(new Error("Antigravity ACP 没有返回正文。")))
-          return
-        }
-        finishWith(onDone)
-      },
-    )
-    if (aborted || finished) {
-      cleanup()
-      return
-    }
-
-    const payload: SpawnPayload = {
-      streamId,
-      model: config.model,
-      messages,
-    }
-    await invoke("antigravity_cli_spawn", payload)
-
-    if (aborted || signal?.aborted) {
-      aborted = true
-      await invoke("antigravity_cli_kill", { streamId }).catch(() => {})
-      finishWith(onDone)
+    if (finished) return
+    await invoke("antigravity_cli_spawn", { streamId, model: config.model, messages })
+    spawned = true
+    if (signal?.aborted) {
+      await cancel()
       return
     }
     await completion
   } catch (err) {
-    finishWith(() => {
+    finish(() => {
       const message = err instanceof Error ? err.message : String(err)
       if (/not found|No such file|executable file not found|未找到 agy/i.test(message)) {
         onError(new Error("未找到 Antigravity CLI。请安装 agy，或在设置里改用其他模型源。"))
@@ -124,6 +95,7 @@ export async function streamAntigravityCli(
       }
     })
   } finally {
-    signal?.removeEventListener("abort", abortListener)
+    unlisten?.()
+    signal?.removeEventListener("abort", onAbort)
   }
 }

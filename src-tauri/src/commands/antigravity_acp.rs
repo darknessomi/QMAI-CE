@@ -15,7 +15,8 @@ use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio::sync::oneshot;
 use tokio::time::timeout;
 
-use super::antigravity_cli::{configure_agy_command, find_agy_command};
+use super::antigravity_cli::{check_acp_version, configure_agy_command, find_agy_command, read_agy_version};
+use super::antigravity_search::SearchEvidence;
 use super::local_cli_config::resolve_home_dir;
 
 // agy 1.5.16 的 ACP session/prompt 仍会在约 192,000 UTF-8 字节处裁掉单条模型输入。
@@ -114,7 +115,12 @@ fn prepare_home(root: &Path, real_home: &Path) -> Result<PathBuf, std::io::Error
     Ok(cwd)
 }
 
-fn permission(params: &Value, session_id: Option<&str>, tools: Option<&SessionTools>) -> Value {
+fn permission(
+    params: &Value,
+    session_id: Option<&str>,
+    tools: Option<&SessionTools>,
+    web_search: bool,
+) -> Value {
     let call = &params["toolCall"];
     let tool = match call["name"].as_str() {
         Some("call_mcp_tool") => {
@@ -130,9 +136,10 @@ fn permission(params: &Value, session_id: Option<&str>, tools: Option<&SessionTo
     };
     let allowed = session_id.is_some()
         && params["sessionId"].as_str() == session_id
-        && tools.is_some_and(|t| {
-            t.enabled.load(Ordering::Acquire) && tool.is_some_and(|name| t.names.contains(name))
-        });
+        && ((web_search && call["name"] == "search_web")
+            || tools.is_some_and(|t| {
+                t.enabled.load(Ordering::Acquire) && tool.is_some_and(|name| t.names.contains(name))
+            }));
     let kind = if allowed { "allow_once" } else { "reject_once" };
     let option = params["options"]
         .as_array()
@@ -146,7 +153,8 @@ fn permission(params: &Value, session_id: Option<&str>, tools: Option<&SessionTo
     }
 }
 
-struct Acp {
+struct Acp<'a> {
+    search: Option<&'a mut SearchEvidence>,
     child: Child,
     stdin: ChildStdin,
     lines: Lines<BufReader<ChildStdout>>,
@@ -158,11 +166,8 @@ struct Acp {
     tools: Option<SessionTools>,
 }
 
-impl Acp {
-    async fn start(tools: Option<SessionTools>) -> Result<Self, String> {
-        let agy = find_agy_command()
-            .await
-            .map_err(|_| "未找到 agy，请先安装 Antigravity CLI。".to_string())?;
+impl Acp<'_> {
+    async fn start(agy: &Path, tools: Option<SessionTools>) -> Result<Self, String> {
         let mut builder = tempfile::Builder::new();
         builder.prefix("qmai-agy-acp-");
         #[cfg(unix)]
@@ -198,6 +203,7 @@ impl Acp {
         let stdin = child.stdin.take().ok_or("ACP 缺少标准输入")?;
         let stdout = child.stdout.take().ok_or("ACP 缺少标准输出")?;
         Ok(Self {
+            search: None,
             child,
             stdin,
             lines: BufReader::new(stdout).lines(),
@@ -250,6 +256,7 @@ impl Acp {
                             &msg["params"],
                             self.session.as_deref(),
                             self.tools.as_ref(),
+                            self.search.is_some(),
                         );
                         json!({"jsonrpc":"2.0","id":server_id,"result":result})
                     } else {
@@ -262,6 +269,9 @@ impl Acp {
                         == self.session.as_deref()
                 {
                     let update = &msg["params"]["update"];
+                    if let Some(search) = &mut self.search {
+                        search.observe(update);
+                    }
                     if update["sessionUpdate"] == "agent_message_chunk"
                         && update["content"]["type"] == "text"
                     {
@@ -419,17 +429,63 @@ pub(super) async fn complete(
     followup: Option<&str>,
     tools: Option<SessionTools>,
     cancel: oneshot::Receiver<()>,
+    emit: impl FnMut(&str),
+) -> Result<Option<Usage>, String> {
+    complete_session(model, prompt, followup, tools, None, cancel, emit).await
+}
+
+pub(super) async fn web_search(
+    model: &str,
+    prompt: &str,
+    limit: Duration,
+) -> Result<SearchEvidence, String> {
+    let mut evidence = SearchEvidence::default();
+    let (stop, cancelled) = oneshot::channel();
+    {
+        let work = complete_session(
+            model,
+            prompt,
+            None,
+            None,
+            Some(&mut evidence),
+            cancelled,
+            |_| {},
+        );
+        tokio::pin!(work);
+        if let Ok(outcome) = timeout(limit, &mut work).await {
+            outcome?;
+        } else {
+            let _ = stop.send(());
+            let _ = work.await;
+            return Err("反重力 CLI 搜索超时，已结束 ACP 会话。".into());
+        }
+    }
+    Ok(evidence)
+}
+
+async fn complete_session(
+    model: &str,
+    prompt: &str,
+    followup: Option<&str>,
+    tools: Option<SessionTools>,
+    search: Option<&mut SearchEvidence>,
+    cancel: oneshot::Receiver<()>,
     mut emit: impl FnMut(&str),
 ) -> Result<Option<Usage>, String> {
     let started = Instant::now();
-    let mut acp = Acp::start(tools).await?;
+    let agy = find_agy_command()
+        .await
+        .map_err(|_| "未找到 agy，请先安装 Antigravity CLI。".to_string())?;
+    check_acp_version(&read_agy_version(&agy).await?)?;
+    let mut acp = Acp::start(&agy, tools).await?;
     let pid = acp.child.id().unwrap_or_default();
     let parts = input_parts(prompt);
     eprintln!(
-        "[antigravity-acp] 进程={pid} 建立会话 模型={model} 输入字节={} 分段={} 工具={}",
+        "[antigravity-acp] 进程={pid} 建立会话 模型={model} 输入字节={} 分段={} QMAI工具={} 联网搜索={}",
         prompt.len(),
         parts.len(),
-        acp.tools.is_some()
+        acp.tools.is_some(),
+        search.is_some()
     );
     let run = async {
         timeout(SETUP_TIMEOUT, acp.open(model))
@@ -461,6 +517,7 @@ pub(super) async fn complete(
                 sent.elapsed().as_millis()
             );
         }
+        acp.search = search;
         if let Some(t) = &acp.tools {
             t.enabled.store(true, Ordering::Release);
         }
@@ -526,8 +583,8 @@ pub(super) async fn complete(
     outcome
 }
 
-pub(super) async fn model_catalog() -> Result<(Option<String>, Vec<String>), String> {
-    let mut acp = Acp::start(None).await?;
+pub(super) async fn model_catalog(agy: &Path) -> Result<(Option<String>, Vec<String>), String> {
+    let mut acp = Acp::start(agy, None).await?;
     let result = timeout(SETUP_TIMEOUT, acp.open("")).await;
     acp.close(false).await;
     let session = result.map_err(|_| "Antigravity ACP 获取模型列表超时")??;
@@ -581,6 +638,20 @@ mod tests {
     }
 
     #[test]
+    fn search_permission_is_limited_to_the_builtin_tool_and_own_session() {
+        let mut request = json!({"sessionId":"search","toolCall":{"name":"search_web"},
+            "options":[{"kind":"allow_once","optionId":"yes"},{"kind":"reject_once","optionId":"no"}]});
+        let choice = |p: &Value, id, enabled| {
+            permission(p, Some(id), None, enabled)["outcome"]["optionId"].clone()
+        };
+        assert_eq!(choice(&request, "search", true), "yes");
+        assert_eq!(choice(&request, "other", true), "no");
+        assert_eq!(choice(&request, "search", false), "no");
+        request["toolCall"]["name"] = json!("run_command");
+        assert_eq!(choice(&request, "search", true), "no");
+    }
+
+    #[test]
     fn only_the_active_sessions_registered_mcp_tools_can_get_one_shot_permission() {
         let tools = SessionTools {
             url: String::new(),
@@ -591,17 +662,17 @@ mod tests {
         let mut params = json!({"sessionId":"our-session","toolCall":{"name":"mcp_qmai_save_draft"},
             "options":[{"kind":"allow_always","optionId":"always"},{"kind":"allow_once","optionId":"once"},{"kind":"reject_once","optionId":"deny"}]});
         let check = |p: &Value| {
-            permission(p, Some("our-session"), Some(&tools))["outcome"]["optionId"].clone()
+            permission(p, Some("our-session"), Some(&tools), false)["outcome"]["optionId"].clone()
         };
         assert_eq!(check(&params), "deny");
         tools.enabled.store(true, Ordering::Release);
         assert_eq!(check(&params), "once");
         assert_eq!(
-            permission(&params, Some("other-session"), Some(&tools))["outcome"]["optionId"],
+            permission(&params, Some("other-session"), Some(&tools), false)["outcome"]["optionId"],
             "deny"
         );
         assert_eq!(
-            permission(&params, Some("our-session"), None)["outcome"]["optionId"],
+            permission(&params, Some("our-session"), None, false)["outcome"]["optionId"],
             "deny"
         );
         params["toolCall"] = json!({"name":"call_mcp_tool","rawInput":{"ServerName":"qmai","ToolName":"save_draft"}});
@@ -616,7 +687,7 @@ mod tests {
         }
         params["options"] = json!([{"kind":"allow_always","optionId":"always"}]);
         assert_eq!(
-            permission(&params, None, None)["outcome"]["outcome"],
+            permission(&params, None, None, false)["outcome"]["outcome"],
             "cancelled"
         );
     }
