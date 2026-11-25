@@ -50,7 +50,8 @@
     ],
     "resources": {
       "../skills/**/*": "skills/",
-      "migration/runtime/": "migration/runtime/"
+      "migration/runtime/": "migration/runtime/",
+      "src/commands/sag/LICENSE": "licenses/SAG-Wiki-LICENSE"
     },
     "icon": [
       "icons/32x32.png",

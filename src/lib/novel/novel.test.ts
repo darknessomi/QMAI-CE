@@ -21,10 +21,6 @@ vi.mock("@/lib/search", () => ({
   tokenizeQuery: (query: string) => query.split(/\s+/).filter(Boolean),
 }))
 
-vi.mock("@/lib/embedding", () => ({
-  searchByEmbedding: vi.fn(),
-  embedPage: vi.fn(),
-}))
 
 vi.mock("@/lib/graph-relevance", () => ({
   buildRetrievalGraph: vi.fn(async () => ({ nodes: new Map(), dataVersion: 0 })),
@@ -73,12 +69,6 @@ describe("snapshot-history", () => {
         previousChapterCarryEnabled: false,
         lookbackChapterCount: 1,
         lookbackIncludeMustFixOnly: false,
-      },
-      embeddingConfig: {
-        enabled: false,
-        endpoint: "",
-        apiKey: "",
-        model: "",
       },
     })
   })
@@ -242,12 +232,6 @@ describe("context-pack freshness", () => {
         previousChapterCarryEnabled: false,
         lookbackChapterCount: 1,
         lookbackIncludeMustFixOnly: false,
-      },
-      embeddingConfig: {
-        enabled: false,
-        endpoint: "",
-        apiKey: "",
-        model: "",
       },
     })
   })

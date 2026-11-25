@@ -500,7 +500,7 @@ fn add_project_meta_dir_to_zip(
         }
         match name.as_ref() {
             "novel" => include_memory || format_path.is_file(),
-            "lancedb" | "retrieval" | "embedding-index.json" | "dedup-summary-vectors.json" => include_indexes,
+            "sag" | "lancedb" | "retrieval" | "embedding-index.json" | "dedup-summary-vectors.json" => include_indexes,
             _ => is_project_owned_entry(&name) || include_analysis,
         }
     });
@@ -569,6 +569,20 @@ fn add_project_meta_dir_to_zip(
             continue;
         }
 
+        // Copy the committed SQLite snapshot. Including its live WAL/SHM files
+        // or reading the database directly can archive mismatched transactions.
+        if relative_slash.starts_with("sag/") {
+            if relative_slash != "sag/index-v10.sqlite" { continue; }
+            let database = rusqlite::Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+                .map_err(|e| format!("打开 SAG 索引备份失败：{e}"))?;
+            let snapshot = tempfile::NamedTempFile::new().map_err(|e| format!("创建 SAG 索引快照失败：{e}"))?;
+            database.backup(rusqlite::MAIN_DB, snapshot.path(), None).map_err(|e| format!("备份 SAG 索引失败：{e}"))?;
+            let mut reader = snapshot.reopen().map_err(|e| format!("读取 SAG 索引快照失败：{e}"))?;
+            zip.start_file(&zip_name, options).map_err(|e| format!("创建索引备份条目失败：{e}"))?;
+            std::io::copy(&mut reader, zip).map_err(|e| format!("写入索引备份条目失败：{e}"))?;
+            *file_count += 1;
+            continue;
+        }
         let file = fs::File::open(path)
             .map_err(|error| format!("打开文件失败 {}: {error}", path.display()))?;
         zip.start_file(&zip_name, options)
@@ -1486,7 +1500,7 @@ pub fn do_import_backup<F: Fn(&BackupProgressPayload)>(
 
         if missing_rebuildable_indexes {
             warnings.push(
-                "备份未包含向量与检索索引；模型配置就绪后可在项目中重建索引".to_string(),
+                "备份未包含检索索引，下一次检索时将按原文重建".to_string(),
             );
         }
     }
@@ -1705,6 +1719,31 @@ mod tests {
     }
 
     #[test]
+    fn sag_index_backup_preserves_committed_wal_without_live_sidecars() {
+        let temp = tempfile::tempdir().unwrap();
+        let meta = temp.path().join(".qmai");
+        let sag = meta.join("sag");
+        fs::create_dir_all(&sag).unwrap();
+        let db = rusqlite::Connection::open(sag.join("index-v10.sqlite")).unwrap();
+        db.execute_batch("PRAGMA journal_mode=WAL; CREATE TABLE revisions(n); INSERT INTO revisions VALUES(1);
+            BEGIN IMMEDIATE; INSERT INTO revisions VALUES(2);").unwrap();
+        let bundle = temp.path().join("backup.zip");
+        let mut zip = ZipWriter::new(fs::File::create(&bundle).unwrap());
+        let mut count = 0;
+        add_project_meta_dir_to_zip(&mut zip, &meta, ".qmai", false, false, true, false,
+            &mut count, &mut Vec::new()).unwrap();
+        zip.finish().unwrap();
+        let mut reader = zip::ZipArchive::new(fs::File::open(&bundle).unwrap()).unwrap();
+        assert!(reader.file_names().all(|name| !name.ends_with("-wal") && !name.ends_with("-shm")));
+        let mut entry = reader.by_name(".qmai/sag/index-v10.sqlite").unwrap();
+        let snapshot = temp.path().join("restored.sqlite");
+        std::io::copy(&mut entry, &mut fs::File::create(&snapshot).unwrap()).unwrap();
+        let restored = rusqlite::Connection::open(&snapshot).unwrap();
+        assert_eq!(restored.query_row("SELECT SUM(n) FROM revisions", [], |row|row.get::<_,i64>(0)).unwrap(), 1);
+        assert_eq!(count,1);
+    }
+
+    #[test]
     fn rejects_backup_inside_selected_content_before_touching_partial_file() {
         let tmp = tempfile::tempdir().unwrap();
         let project = tmp.path().join("book");
@@ -1863,7 +1902,7 @@ mod tests {
         assert!(import_result
             .warnings
             .iter()
-            .any(|warning| warning.contains("未包含向量与检索索引")));
+            .any(|warning| warning.contains("未包含检索索引")));
         assert!(import_result
             .warnings
             .iter()

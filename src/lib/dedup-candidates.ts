@@ -1,13 +1,13 @@
-import { fileExists, readFile, writeFileAtomic } from "@/commands/fs"
-import { fetchEmbeddings } from "./embedding"
-import { hashEmbeddingText } from "./embedding-batch"
+import { invoke } from "@tauri-apps/api/core"
+import { readFile } from "@/commands/fs"
 import { normalizePath } from "./path-utils"
-import type { EmbeddingConfig } from "@/stores/wiki-store"
-import type { EntitySummary } from "./dedup"
+import { parseFrontmatter } from "./frontmatter"
+import { isAiExcluded } from "./novel/ai-exclude"
+import { sagSearchFiles, type SagSourceVersion } from "./sag-search"
+import { sha256Text } from "./context-hub/fingerprint"
+import { extractEntitySummary, normalizeGroupKey, type EntitySummary, type DuplicateGroup } from "./dedup"
+import { jevServiceError, type JevConfig } from "./jev-config"
 
-const MAX_VECTOR_PAGES = 5_000
-const NEIGHBORS = 8
-const SIMILARITY_THRESHOLD = 0.68
 export const DETECTOR_BATCH_SIZE = 80
 
 export function checkDedupSignal(signal?: AbortSignal) {
@@ -31,136 +31,22 @@ export async function waitForDedupResult<T>(start: () => Promise<T>, signal?: Ab
 }
 
 type Pair = readonly [number, number]
-type CacheRow = { hash: string; data: string }
 
-function packVector(vector: Float32Array): string {
-  const bytes = new Uint8Array(vector.buffer, vector.byteOffset, vector.byteLength)
-  let binary = ""
-  for (let start = 0; start < bytes.length; start += 8192) {
-    binary += String.fromCharCode(...bytes.subarray(start, start + 8192))
-  }
-  return btoa(binary)
-}
-
-function unpackVector(data: string): Float32Array | null {
-  try {
-    const binary = atob(data)
-    const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0))
-    const vector = new Float32Array(bytes.buffer)
-    return vector.length && vector.every(Number.isFinite) ? vector : null
-  } catch {
-    return null
-  }
-}
-
-function normalizedVector(raw: number[] | null): Float32Array | null {
-  if (!raw?.length) return null
-  let norm = 0
-  for (const value of raw) norm += value * value
-  if (!Number.isFinite(norm) || norm <= 0) return null
-  const length = Math.sqrt(norm)
-  return Float32Array.from(raw, (value) => value / length)
-}
-
-// fetchEmbeddings 由多个功能共享。取消等待时，已发出的 HTTP 请求由共享客户端收尾。
-function fetchScanEmbeddings(texts: string[], config: EmbeddingConfig, signal?: AbortSignal) {
-  return waitForDedupResult(() => fetchEmbeddings(texts, config), signal)
-}
-
-async function summaryVectors(
-  projectPath: string, pages: EntitySummary[], config: EmbeddingConfig,
-  log: (text: string) => void, signal?: AbortSignal,
-) {
-  const path = `${normalizePath(projectPath)}/.qmai/dedup-summary-vectors.json`
-  const configHash = hashEmbeddingText(JSON.stringify([config.endpoint.trim(), config.model.trim(), config.outputDimensionality]))
-  let previous: Record<string, CacheRow> = {}
-  try {
-    if (await fileExists(path)) {
-      const cache = JSON.parse(await readFile(path))
-      if (cache?.version === 1 && cache.configHash === configHash && cache.rows && typeof cache.rows === "object") previous = cache.rows
-    }
-  } catch { /* 缓存损坏或不存在时按原始摘要重新计算。 */ }
-  checkDedupSignal(signal)
-  const rows: Record<string, CacheRow> = Object.create(null)
-  const vectors: (Float32Array | null)[] = Array(pages.length).fill(null)
-  const missing: { index: number; hash: string; text: string }[] = []
-  pages.forEach((page, index) => {
-    const text = [page.slug, page.title, ...(page.aliases ?? []), ...page.tags, page.description].filter(Boolean).join("\n")
-    const hash = hashEmbeddingText(text)
-    const entry = previous[page.path]
-    if (entry?.hash === hash && typeof entry.data === "string") vectors[index] = unpackVector(entry.data)
-    if (vectors[index]) rows[page.path] = entry
-    else missing.push({ index, hash, text })
-  })
-  const reused = pages.length - missing.length
-  log(`摘要向量缓存命中 ${reused}/${pages.length} 页，需要计算 ${missing.length} 页`)
-  // 以小批为取消边界，复用向量客户端的多文本请求、统一并发上限和退避。
-  for (let start = 0; start < missing.length; start += 256) {
-    checkDedupSignal(signal)
-    const batch = missing.slice(start, start + 256)
-    const raw = await fetchScanEmbeddings(batch.map((entry) => entry.text), config, signal)
-    checkDedupSignal(signal)
-    batch.forEach(({ index, hash }, offset) => {
-      const vector = normalizedVector(raw[offset])
-      if (!vector) return
-      vectors[index] = vector
-      rows[pages[index].path] = { hash, data: packVector(vector) }
-    })
-    log(`已处理向量 ${reused + start + batch.length}/${pages.length} 页`)
-  }
-  if (missing.length || Object.keys(previous).length !== pages.length) {
-    try {
-      await writeFileAtomic(path, JSON.stringify({ version: 1, configHash, rows }))
-    } catch {
-      log("摘要向量缓存写入失败，本次检测继续")
-    }
-  }
-  return vectors
-}
-
-function insertNeighbor(top: { index: number; score: number }[], index: number, score: number) {
-  if (top.length === NEIGHBORS && top[top.length - 1].score >= score) return
-  let pos = top.length
-  while (pos && top[pos - 1].score < score) pos--
-  top.splice(pos, 0, { index, score })
-  if (top.length > NEIGHBORS) top.pop()
-}
-
-// 先单位化，每对向量只算一次点积，两端分别维护最多八个近邻。
-async function nearestPairs(vectors: (Float32Array | null)[], signal?: AbortSignal): Promise<Pair[]> {
-  const top = vectors.map((): { index: number; score: number }[] => [])
-  let lastYield = performance.now()
-  for (let i = 0; i < vectors.length; i++) {
-    if (performance.now() - lastYield >= 12) {
-      await new Promise<void>((resolve) => setTimeout(resolve, 0))
-      lastYield = performance.now()
-    }
-    checkDedupSignal(signal)
-    const left = vectors[i]
-    if (!left) continue
-    for (let j = i + 1; j < vectors.length; j++) {
-      const right = vectors[j]
-      if (!right || left.length !== right.length) continue
-      let score = 0
-      for (let dim = 0; dim < left.length; dim++) score += left[dim] * right[dim]
-      if (score < SIMILARITY_THRESHOLD) continue
-      insertNeighbor(top[i], j, score)
-      insertNeighbor(top[j], i, score)
-    }
-  }
-  return top.flatMap((neighbors, i) => neighbors.map(({ index }): Pair => [i, index]))
-}
-
-export function namePairs(pages: EntitySummary[]): Pair[] {
-  const firstByName = new Map<string, number>()
+export function namePairs(pages: EntitySummary[], allMatches = false): Pair[] {
+  const byName = new Map<string, number[]>()
   const pairs: Pair[] = []
   pages.forEach((page, index) => {
-    for (const name of [page.title, page.slug, ...(page.aliases ?? [])]) {
-      const key = name.normalize("NFKC").toLowerCase().replace(/[\s_-]+/g, "")
+    const names = [page.title, page.slug, ...(page.aliases ?? [])]
+    const keys = new Set(names.map(name => name.normalize("NFKC").toLowerCase().replace(/[\s_-]+/g, "")))
+    for (const key of keys) {
       if (!key) continue
-      const first = firstByName.get(key)
-      if (first === undefined) firstByName.set(key, index)
-      else if (first !== index) pairs.push([first, index])
+      const matches = byName.get(key)
+      if (matches) {
+        for (const other of matches) pairs.push([other, index])
+        if (allMatches) matches.push(index)
+      } else {
+        byName.set(key, [index])
+      }
     }
   })
   return pairs
@@ -208,38 +94,148 @@ export function pairBatches(
   return batches
 }
 
-export async function buildDetectionBatches(
-  projectPath: string, pages: EntitySummary[], config: EmbeddingConfig | null | undefined,
-  excluded: string[][], log: (text: string) => void, signal?: AbortSignal,
-): Promise<{ batches: EntitySummary[][]; coverage: string }> {
-  const named = namePairs(pages)
-  if (config?.enabled && config.endpoint?.trim() && config.model?.trim()) {
-    const subset = pages.slice(0, MAX_VECTOR_PAGES)
-    let vectors: (Float32Array | null)[] = []
-    try { vectors = await summaryVectors(projectPath, subset, config, log, signal) }
-    catch { checkDedupSignal(signal); log("向量服务不可用，切换到分批检测") }
-    // 不混用不同维度的向量，异常的页也需要进入回退检测。
-    const dimensionCounts = new Map<number, number>()
-    for (const v of vectors) if (v) dimensionCounts.set(v.length, (dimensionCounts.get(v.length) ?? 0) + 1)
-    const [dimension, valid] = [...dimensionCounts].sort((a, b) => b[1] - a[1])[0] ?? [0, 0]
-    const coverage = `摘要向量覆盖 ${valid}/${pages.length} 页`
-    log(coverage)
-    if (valid >= 2 && valid >= subset.length * 0.8) {
-      const normalized = vectors.map(v => v?.length === dimension ? v : null)
-      const pairs = await nearestPairs(normalized, signal)
-      const fallbackAll = !pairs.length && pages.length <= 250
-      const uncovered = new Set(pages.filter((_, i) => !normalized[i]).map((p) => p.path))
-      const windows = fallbackAll || uncovered.size ? windowBatches(pages).filter(
-        (batch) => fallbackAll || batch.some((page) => uncovered.has(page.path)),
-      ) : []
-      return {
-        batches: [...windows, ...pairBatches(pages, [...named, ...pairs], excluded, windows)],
-        coverage: `${coverage}，候选由相似度和名称筛选${windows.length ? "，已补充分批检测" : ""}`,
-      }
-    }
-    const windows = windowBatches(pages)
-    return { batches: [...windows, ...pairBatches(pages, named, excluded, windows)], coverage: `${coverage}，已对全部摘要分批检测` }
-  }
+export function buildBasicDetectionBatches(pages: EntitySummary[], excluded: string[][]) {
   const windows = windowBatches(pages)
-  return { batches: [...windows, ...pairBatches(pages, named, excluded, windows)], coverage: `按名称和别名对 ${pages.length} 页分批检测` }
+  return [...windows, ...pairBatches(pages, namePairs(pages), excluded, windows)]
+}
+
+function entitySourceKey(path: string, root: string): string {
+  const canonical = normalizePath(path)
+  const relative = canonical.startsWith(root + "/") ? canonical.slice(root.length + 1) : canonical
+  return relative.replace(/^QM\//, "wiki/")
+}
+
+interface Passage {
+  text: string
+  startLine: number
+  endLine: number
+}
+
+interface CurrentPassage extends Passage {
+  source: SagSourceVersion
+  title: string
+}
+
+async function readPassage(path: string, other: EntitySummary, hit?: Passage): Promise<CurrentPassage | null> {
+  const content = await readFile(path).catch(() => "")
+  const { frontmatter, body } = parseFrontmatter(content)
+  if (!frontmatter || isAiExcluded(frontmatter)) return null
+  const title = extractEntitySummary(path, content)?.title
+  if (!title) return null
+  const source = { path, contentHash: await sha256Text(content) }
+  const lines = content.split(/\r?\n/)
+  const offset = (content.slice(0, content.length - body.length).match(/\n/g) ?? []).length
+  const useful = (line: string) => Boolean(line.trim()) && !/^\s*#/.test(line)
+  if (hit && hit.startLine > offset && hit.endLine >= hit.startLine && hit.endLine <= lines.length) {
+    const original = lines.slice(hit.startLine - 1, hit.endLine).join("\n")
+    const text = hit.text.trim().slice(0, 1200)
+    const begin = original.indexOf(text)
+    if (begin >= 0 && text.split("\n").some(useful)) {
+      const startLine = hit.startLine + original.slice(0, begin).split("\n").length - 1
+      return { text, startLine, endLine: startLine + text.split("\n").length - 1, source, title }
+    }
+  }
+  const bodyLines = body.split(/\r?\n/)
+  const terms = [other.title, ...(other.aliases ?? [])].filter(Boolean)
+  let start = bodyLines.findIndex(line => useful(line) && terms.some(term => line.includes(term)))
+  if (start < 0) start = bodyLines.findIndex(useful)
+  if (start < 0) return null
+  const text = bodyLines.slice(start, start + 6).join("\n").trimEnd().slice(0, 1200)
+  return { text, startLine: offset + start + 1, endLine: offset + start + text.split("\n").length, source, title }
+}
+
+async function judgePair(projectPath: string, config: JevConfig, a: CurrentPassage, b: CurrentPassage, signal?: AbortSignal): Promise<number> {
+  const requestId = crypto.randomUUID()
+  const cancel = () => { void invoke("sag_cancel", { requestId }).catch(() => {}) }
+  signal?.addEventListener("abort", cancel, { once: true })
+  try {
+    return await waitForDedupResult(() => invoke<number>("sag_judge_pair", {
+      projectPath, config, left: a.title + "\n" + a.text, right: b.title + "\n" + b.text,
+      sources: [a.source, b.source], requestId, purpose: "identity",
+    }), signal)
+  } finally {
+    signal?.removeEventListener("abort", cancel)
+  }
+}
+
+export async function detectSagDuplicates(
+  projectPath: string, pages: EntitySummary[], config: JevConfig,
+  excluded: string[][], log: (message: string) => void, signal?: AbortSignal,
+): Promise<{ groups: DuplicateGroup[]; coverage: string; manualReview: string[] }> {
+  const root = normalizePath(projectPath).replace(/\/+$/, "")
+  const paths = pages.map(page => root + "/" + page.path)
+  const indices = new Map(paths.map((path, i) => [entitySourceKey(path, root), i]))
+  const blocked = new Set(excluded.map(normalizeGroupKey))
+  const pairs = new Map<string, { left: number; right: number; passages: Map<number, Passage> }>()
+  function add(i: number, j: number, passage?: Passage) {
+    if (i === j || pages[i].slug === pages[j].slug || blocked.has(normalizeGroupKey([pages[i].slug, pages[j].slug]))) return
+    const left = Math.min(i, j)
+    const right = Math.max(i, j)
+    const key = left + "/" + right
+    const pair = pairs.get(key) ?? { left, right, passages: new Map<number, Passage>() }
+    if (passage && !pair.passages.has(j)) pair.passages.set(j, passage)
+    pairs.set(key, pair)
+  }
+  // 基础模式一次核对整批；JEV 每次核对两页，同名组中的每一对都可能是不同结论。
+  for (const [i, j] of namePairs(pages, true)) add(i, j)
+  let searched = 0
+  for (const [i, page] of pages.entries()) {
+    checkDedupSignal(signal)
+    // 长扫描期间条目可能改为禁读；作为查询发送给决策服务前也要复核来源。
+    const content = await readFile(paths[i]).catch(() => "")
+    const { frontmatter } = parseFrontmatter(content)
+    if (!frontmatter || isAiExcluded(frontmatter)) continue
+    const current = extractEntitySummary(page.path, content)
+    if (!current) continue
+    const query = [current.title, ...(current.aliases ?? []), current.description].filter(Boolean).join(" ")
+    try {
+      const otherPaths = paths.filter(path => path !== paths[i])
+      const querySource = { path: paths[i], contentHash: await sha256Text(content) }
+      const hits = await waitForDedupResult(() => sagSearchFiles(root, query, otherPaths, 8, signal, { querySource }), signal)
+      searched++
+      for (const hit of hits) {
+        const j = indices.get(entitySourceKey(hit.path, root))
+        if (j !== undefined) add(i, j, { text: hit.content, startLine: hit.startLine, endLine: hit.endLine })
+      }
+    } catch (error) {
+      checkDedupSignal(signal)
+      throw jevServiceError(error)
+    }
+    if ((i + 1) % 25 === 0 || i + 1 === pages.length) log(`已检索 ${searched}/${pages.length} 页，得到 ${pairs.size} 对候选`)
+  }
+  const groups: DuplicateGroup[] = []
+  const manualReview: string[] = []
+  let judged = 0
+  for (const { left, right, passages } of pairs.values()) {
+    checkDedupSignal(signal)
+    const a = pages[left]
+    const b = pages[right]
+    const [e1, e2] = await Promise.all([
+      readPassage(paths[left], b, passages.get(left)), readPassage(paths[right], a, passages.get(right)),
+    ])
+    if (!e1 || !e2) {
+      manualReview.push(`${a.path}、${b.path}：缺少可核对的现行原文。`)
+      continue
+    }
+    let score: number
+    try {
+      score = await judgePair(root, config, e1, e2, signal)
+    } catch (error) {
+      checkDedupSignal(signal)
+      throw jevServiceError(error)
+    }
+    if (!Number.isFinite(score) || score < 0 || score > 1) throw new Error("决策服务返回了无效概率，请检查模型配置。")
+    judged++
+    const evidence = `${a.path} 第 ${e1.startLine}–${e1.endLine} 行：${e1.text}\n${b.path} 第 ${e2.startLine}–${e2.endLine} 行：${e2.text}`
+    if (score >= 0.7) {
+      groups.push({
+        slugs: [a.slug, b.slug], confidence: score >= 0.9 ? "high" : "medium",
+        reason: `JEV 身份复核 ${Math.round(score * 100)}%。\n${evidence}`,
+      })
+    } else if (score > 0.3) {
+      manualReview.push(`身份判断不确定（${Math.round(score * 100)}%）。\n${evidence}`)
+    }
+  }
+  checkDedupSignal(signal)
+  return { groups, manualReview, coverage: `SAG 已检索 ${searched}/${pages.length} 页，JEV 已复核 ${judged}/${pairs.size} 对候选。` }
 }

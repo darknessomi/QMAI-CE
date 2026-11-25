@@ -3,15 +3,10 @@ import { buildWikiGraph, type GraphNode, type CommunityInfo } from "@/lib/wiki-g
 import { streamChat, DEFAULT_LLM_REQUEST_TIMEOUT_MS, type StreamCallbacks } from "@/lib/llm-client"
 import type { ChatMessage } from "@/lib/llm-providers"
 import { resolveNovelModel } from "@/lib/novel/model-resolver"
-import { embedPage, searchByEmbedding } from "@/lib/embedding"
-import { useWikiStore, type NovelConfig, type LlmConfig } from "@/stores/wiki-store"
+import type { NovelConfig, LlmConfig } from "@/stores/wiki-store"
 import { normalizePath } from "@/lib/path-utils"
 import { fingerprintText } from "@/lib/novel/book-analysis/content-fingerprint"
 import { loadMemoryCleanupPolicy, memoryRemovalKey } from "./memory-cleanup-policy"
-import {
-  buildNovelVectorSnippet,
-  selectRelevantNovelVectorResults,
-} from "./vector-relevance"
 
 /** 小于该规模的社区不调 LLM（孤立节点 / 噪声簇）。 */
 export const MIN_COMMUNITY_SUMMARY_NODE_COUNT = 5
@@ -142,7 +137,6 @@ async function generateCommunitySummariesUnlocked(
   const cleanup = await cleanupFingerprint(pp)
 
   const summaryLlmConfig = resolveNovelModel(llmConfig, novelConfig, "summary")
-  const embCfg = useWikiStore.getState().embeddingConfig
 
   for (const community of communities) {
     throwIfAborted(signal)
@@ -177,22 +171,9 @@ async function generateCommunitySummariesUnlocked(
       await writeFile(`${summaryDir}/${fingerprint}.json`, JSON.stringify(record, null, 2))
       existing.set(fingerprint, record)
 
-      if (embCfg.enabled && embCfg.model) {
-        try {
-          const title = `社区摘要（${community.topNodes[0] ?? fingerprint.slice(0, 8)}）`
-          await embedPage(pp, `community:${fingerprint}`, title, summary, embCfg)
-        } catch (err) {
-          console.warn(
-            `[CommunitySummary] 向量化社区 ${fingerprint} 失败:`,
-            err instanceof Error ? err.message : err,
-          )
-        }
-      }
       if ((await cleanupFingerprint(pp)).value !== cleanup.value) {
         const path = `${summaryDir}/${fingerprint}.json`
         if (await fileExists(path)) await deleteFile(path)
-        const { removePageEmbeddingStrict } = await import("@/lib/embedding")
-        await removePageEmbeddingStrict(pp, `community:${fingerprint}`)
         return
       }
     } catch (err) {
@@ -205,7 +186,7 @@ async function generateCommunitySummariesUnlocked(
   }
 }
 
-/** 生成规模达标且成员集变化过的社区叙事摘要并持久化 + 向量化 */
+/** 生成规模达标且成员集变化过的社区叙事摘要并持久化 */
 export async function generateCommunitySummaries(
   projectPath: string,
   llmConfig: LlmConfig,
@@ -288,42 +269,4 @@ ${memberContents.join("\n\n")}
   if (streamError) throw streamError
 
   return result.trim() || `社区：包含 ${community.nodeCount} 个节点（${community.topNodes.join("、")}）。`
-}
-
-/** 检索与查询相关的社区摘要（用于注入上下文） */
-export async function searchCommunitySummaries(
-  projectPath: string,
-  query: string,
-  topK: number = 3,
-): Promise<string> {
-  const pp = normalizePath(projectPath)
-  const embCfg = useWikiStore.getState().embeddingConfig
-  if (!embCfg.enabled || !embCfg.model) return ""
-
-  try {
-    const results = await searchByEmbedding(pp, query, embCfg, topK * 3)
-    const communityResults = selectRelevantNovelVectorResults(
-      results.filter(r => r.id.startsWith("community:")),
-      topK,
-    )
-    if (communityResults.length === 0) return ""
-
-    const cleanup = await cleanupFingerprint(pp)
-    const validResults = cleanup.hasRemovals ? (await Promise.all(communityResults.map(async (result) => {
-      const id = result.id.slice("community:".length)
-      if (!/^[a-zA-Z0-9_-]+$/.test(id)) return null
-      try {
-        const record = parseStoredRecord(JSON.parse(await readFile(`${pp}/.qmai/novel/community-summaries/${id}.json`)))
-        return record?.memoryCleanupFingerprint === cleanup.value ? result : null
-      } catch { return null }
-    }))).filter((r): r is typeof communityResults[number] => r !== null) : communityResults
-
-    return validResults.map(r => {
-      const heading = r.matchedChunks?.[0]?.headingPath
-      const snippet = buildNovelVectorSnippet(r, 400)
-      return `- 【社区摘要${heading ? `·${heading}` : ""}】: ${snippet}`
-    }).join("\n")
-  } catch {
-    return ""
-  }
 }

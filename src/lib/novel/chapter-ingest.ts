@@ -1,7 +1,6 @@
 import { extractMemoryInParts, finishMemoryExtraction, type MemoryExtraction } from "./memory-extraction-parts"
 import { CHAPTER_BODY_EXCERPT_MAX_CHARS } from "./chapter-excerpts"
 import { resolveOutlineIngestIdentity } from "./outline-ingest-utils"
-import { wikiEmbeddingId } from "../embedding-page-id"
 import { normalizeChapterSnapshot, buildSourceHash } from "./snapshot-format"
 import { finishMemoryRefresh, markMemoryRefreshPending } from "./memory-refresh-status"
 export { buildSourceHash } from "./snapshot-format"
@@ -329,20 +328,6 @@ export async function ingestChapter(
       snapshot.validationWarnings = []
     }
 
-    const embedPromise = (async () => {
-      const embCfg = useWikiStore.getState().embeddingConfig
-      if (!embCfg.enabled || !embCfg.model) return
-      try {
-        const { embedPage } = await import("@/lib/embedding")
-        const pageId = wikiEmbeddingId(pp, chapterPath)
-        if (!pageId) return
-        const title = typeof fm?.title === "string" ? fm.title : chapterPath.split(/[/\\]/).pop()!.slice(0, -3)
-        await embedPage(pp, pageId, title, content, embCfg)
-      } catch {
-        console.warn("[Chapter Ingest] Embedding update failed, skipping")
-      }
-    })()
-
     const syncResult = await syncSnapshotToMemoryUnlocked(pp, snapshot, {
       source: { filePath: normalizePath(chapterPath).slice(pp.length + 1), sourceHash: buildSourceHash(content) },
       title: typeof fm.title === "string" ? fm.title : undefined,
@@ -388,8 +373,6 @@ export async function ingestChapter(
       llmConfig: runtimeLlmConfig,
       signal,
     })
-
-    await embedPromise
 
     // 重新提取只替换本章快照，不必顺带打一次社区摘要（那是另一次 LLM）。
     if (!isReingest && shouldRebuildCommunitySummaries(snapshot.chapterNumber, novelConfig)) {

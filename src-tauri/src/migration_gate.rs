@@ -154,6 +154,7 @@ pub fn allow_command(name: &str) -> bool {
                 | "leave_novel_migration"
                 | "fail_novel_migration_preparation"
                 | "mcp_respond"
+                | "sag_cancel"
                 | "log_error"
                 | "log_diagnostic"
         )

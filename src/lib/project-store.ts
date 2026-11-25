@@ -2,8 +2,8 @@ import { getStore } from "@/lib/web-store"
 import { loadModelConfigsEncrypted, saveModelConfigsEncrypted } from "@/lib/local-secret"
 import { normalizeUiTestSkin, readUiTestSkin, writeUiTestSkin, type UiTestSkin } from "@/lib/ui-test"
 import type { WikiProject } from "@/types/wiki"
-import type { LlmConfig, SearchApiConfig, EmbeddingConfig, MultimodalConfig, OutputLanguage, ProviderConfigs, ProxyConfig, SourceWatchConfig, NovelConfig, RerankConfig } from "@/stores/wiki-store"
-import { DEFAULT_NOVEL_CONFIG, DEFAULT_RERANK_CONFIG } from "@/stores/wiki-store"
+import type { LlmConfig, SearchApiConfig, MultimodalConfig, OutputLanguage, ProviderConfigs, ProxyConfig, SourceWatchConfig, NovelConfig } from "@/stores/wiki-store"
+import { DEFAULT_NOVEL_CONFIG } from "@/stores/wiki-store"
 import { normalizeSourceWatchConfig } from "@/lib/source-watch-config"
 import {
   clampBodyFontPx,
@@ -434,18 +434,6 @@ export async function loadSearchApiConfig(): Promise<SearchApiConfig | null> {
   return (await store.get<SearchApiConfig>(SEARCH_API_KEY)) ?? null
 }
 
-const EMBEDDING_KEY = "embeddingConfig"
-
-export async function saveEmbeddingConfig(config: EmbeddingConfig): Promise<void> {
-  const store = await getStore()
-  await store.set(EMBEDDING_KEY, config)
-}
-
-export async function loadEmbeddingConfig(): Promise<EmbeddingConfig | null> {
-  const store = await getStore()
-  return (await store.get<EmbeddingConfig>(EMBEDDING_KEY)) ?? null
-}
-
 const MULTIMODAL_KEY = "multimodalConfig"
 
 export async function saveMultimodalConfig(config: MultimodalConfig): Promise<void> {
@@ -840,66 +828,6 @@ export async function loadNovelConfig(projectId?: string, projectPath?: string):
   )
 }
 
-const RERANK_CONFIG_KEY = "rerankConfig"
-const PROJECT_RERANK_CONFIG_KEY = "projectRerankConfigs"
-
-const RERANK_CONFIG_FILE = ".qmai/rerank-config.json"
-
-function rerankConfigFilePath(projectPath: string): string {
-  return `${normalizePath(projectPath)}/${RERANK_CONFIG_FILE}`
-}
-
-export async function saveRerankConfig(config: RerankConfig, projectId?: string, projectPath?: string): Promise<void> {
-  const store = await getStore()
-  if (projectId) {
-    const existing = (await store.get<Record<string, RerankConfig>>(PROJECT_RERANK_CONFIG_KEY)) ?? {}
-    await store.set(PROJECT_RERANK_CONFIG_KEY, { ...existing, [projectId]: config })
-  }
-  await store.set(RERANK_CONFIG_KEY, config)
-  if (projectPath) {
-    try {
-      await writeProjectConfig(rerankConfigFilePath(projectPath), config)
-    } catch {
-      // non-critical
-    }
-  }
-}
-
-export async function loadRerankConfig(projectId?: string, projectPath?: string): Promise<RerankConfig | null> {
-  if (projectPath) {
-    try {
-      const filePath = rerankConfigFilePath(projectPath)
-      if (await fileExists(filePath)) {
-        const raw = await readFile(filePath)
-        const config = JSON.parse(raw)
-        return normalizeRerankConfig(config)
-      }
-    } catch {
-      // fall through to global store
-    }
-  }
-
-  const store = await getStore()
-  let config: RerankConfig | null = null
-  if (projectId) {
-    const projectConfigs = await store.get<Record<string, RerankConfig>>(PROJECT_RERANK_CONFIG_KEY)
-    if (projectConfigs && projectConfigs[projectId]) {
-      config = normalizeRerankConfig(projectConfigs[projectId])
-    }
-  }
-  if (!config) {
-    config = normalizeRerankConfig(await store.get<RerankConfig>(RERANK_CONFIG_KEY))
-  }
-  if (config && projectPath) {
-    try {
-      await writeProjectConfig(rerankConfigFilePath(projectPath), config)
-    } catch {
-      // non-critical migration
-    }
-  }
-  return config
-}
-
 export const THEME_KEY = "theme__uiTest"
 const VISUAL_STYLE_KEY = "visualStyle"
 const VISUAL_STYLE_VERSION_KEY = "visualStyleVersion"
@@ -1094,33 +1022,6 @@ function normalizeNovelConfig(
     draftMemoryHintSeen: config.draftMemoryHintSeen ?? DEFAULT_NOVEL_CONFIG.draftMemoryHintSeen,
     inspirationHintEnabled: config.inspirationHintEnabled ?? DEFAULT_NOVEL_CONFIG.inspirationHintEnabled,
     inspirationHintSeen: config.inspirationHintSeen ?? DEFAULT_NOVEL_CONFIG.inspirationHintSeen,
-  }
-}
-
-function normalizeRerankConfig(
-  config?: Partial<RerankConfig> | null,
-): RerankConfig | null {
-  if (!config) return null
-  /*
-   * 4.3.6 起没有「复用主模型」了：老配置里的 `useMainLlm` 直接丢弃。
-   * 那些靠主模型重排的用户，磁盘上没有自己的重排模型 —— 如果仍把 enabled 读成 true，
-   * 设置页会显示「已启用」但 resolveRerankModel 恒返回 null，检索静默不重排（假绿）。
-   * 所以老配置一律关掉总开关，让用户自己决定要不要配一个真重排模型再打开；
-   * 已经填了独立模型的（换过配置又切回主模型那种）保持原样，它现在会直接用那个模型。
-   */
-  const legacyReuseMainModel = (config as { useMainLlm?: unknown }).useMainLlm === true
-  const enabled = legacyReuseMainModel && !(config.model ?? "").trim()
-    ? false
-    : config.enabled ?? DEFAULT_RERANK_CONFIG.enabled
-  return {
-    enabled,
-    provider: config.provider ?? DEFAULT_RERANK_CONFIG.provider,
-    apiKey: config.apiKey ?? DEFAULT_RERANK_CONFIG.apiKey,
-    model: config.model ?? DEFAULT_RERANK_CONFIG.model,
-    ollamaUrl: config.ollamaUrl ?? DEFAULT_RERANK_CONFIG.ollamaUrl,
-    customEndpoint: config.customEndpoint ?? DEFAULT_RERANK_CONFIG.customEndpoint,
-    apiMode: config.apiMode ?? DEFAULT_RERANK_CONFIG.apiMode,
-    maxCandidates: Math.max(3, Math.min(30, config.maxCandidates ?? DEFAULT_RERANK_CONFIG.maxCandidates)),
   }
 }
 

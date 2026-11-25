@@ -7,10 +7,12 @@ import { buildMemoryProjection } from "./memory-rebuild"
 
 import { readFile } from "@/commands/fs"
 import { searchWiki } from "@/lib/search"
+import { eligibleChapterNumber } from "@/lib/sag-search"
 import { parseFrontmatter } from "@/lib/frontmatter"
 import { parseChapterMeta } from "./chapter-meta"
 import { isAiExcludedContent } from "./ai-exclude"
-import { listAiExcludedChapterNumbers } from "./ai-exclude-chapters"
+import { eligibleLocalSource } from "./search-adapter"
+import { hasReadableHistory, listAiExcludedChapterNumbers, readVisibleChapter } from "./ai-exclude-chapters"
 import { listSnapshots, loadSnapshot, type ChapterSnapshot } from "./chapter-ingest"
 import { loadRevisionFeedbackForContext, createEmptyRevisionFeedback } from "./revision-feedback"
 import { loadCognitionState } from "./character-cognition"
@@ -166,7 +168,7 @@ const snapshotDataSource: DataSource<{
     const excludedNumbers = await listAiExcludedChapterNumbers(projectPath, [
       ...lookbackNumbers,
       ...summaryNumbers,
-    ])
+    ], context.chapterScope?.chapters)
 
     const validLookback = lookbackSnapshots
       .filter((snapshot): snapshot is ChapterSnapshot => Boolean(snapshot))
@@ -216,11 +218,8 @@ const recentChapterContentsDataSource: DataSource<string[]> = {
     const contents: string[] = []
     for (const chapterNumber of chapterNumbers) {
       try {
-        const results = await searchWiki(context.projectPath, `chapter_number:${chapterNumber}`)
-        if (results.length === 0) continue
-        const content = await readFile(results[0].path)
-        // 「选中（AI 不读取）」：被排除的章节正文不进上下文。
-        if (isAiExcludedContent(content)) continue
+        const content = await readVisibleChapter(context.projectPath, chapterNumber, context.chapterScope?.chapters)
+        if (!content) continue
         const body = stripFrontmatterBody(content)
         if (!body) continue
         contents.push(`## 第${chapterNumber}章正文片段\n${excerptChapterContent(body)}`)
@@ -236,12 +235,17 @@ const fallbackRecentSummariesDataSource: DataSource<string[]> = {
   async load(context: ContextLoadContext): Promise<string[]> {
     const summaries: string[] = []
     try {
-      const results = await searchWiki(context.projectPath, "type:chapter")
+      const cutoff = context.chapterNumber ?? Number.MAX_SAFE_INTEGER
+      const results = context.chapterScope
+        ? [...context.chapterScope.chapters].sort(([a], [b]) => b - a).map(([, path]) => ({ path }))
+        : await searchWiki(context.projectPath, "type:chapter", {
+          localOnly: true, acceptFile: (path, text) => eligibleChapterNumber(path, text, cutoff) !== null,
+        })
       for (const r of results.slice(0, context.config.recentSummaryWindow)) {
         try {
           const content = await readFile(r.path)
           // 「选中（AI 不读取）」：被排除的章节不进降级摘要。
-          if (isAiExcludedContent(content)) continue
+          if (eligibleChapterNumber(r.path, content, cutoff) === null) continue
           const parsed = parseFrontmatter(content)
           const fm = parsed.frontmatter as Record<string, unknown> | null
           const meta = fm ? parseChapterMeta(fm) : null
@@ -266,11 +270,8 @@ const fallbackPreviousEndingDataSource: DataSource<string> = {
   async load(context: ContextLoadContext): Promise<string> {
     if (!context.chapterNumber || context.chapterNumber <= 1) return ""
     try {
-      const results = await searchWiki(context.projectPath, `chapter_number:${context.chapterNumber - 1}`)
-      if (results.length > 0) {
-        const content = await readFile(results[0].path)
-        // 「选中（AI 不读取）」：被排除的上一章不给结尾钩子。
-        if (isAiExcludedContent(content)) return ""
+      const content = await readVisibleChapter(context.projectPath, context.chapterNumber - 1, context.chapterScope?.chapters)
+      if (content) {
         const bodyStart = content.indexOf("---", 4)
         const body = bodyStart >= 0 ? content.slice(bodyStart + 3).trim() : content
         const lines = body.split("\n")
@@ -288,8 +289,8 @@ async function visibleMemoryRows<T>(
   context: ContextLoadContext, rows: T[], sourceChapters: (row: T) => number[],
 ): Promise<T[]> {
   const cutoff = context.chapterNumber ?? Infinity
-  const eligible = rows.filter((row) => sourceChapters(row).every((n) => n >= 0 && n < cutoff)).slice(-12)
-  const excluded = await listAiExcludedChapterNumbers(context.projectPath, eligible.flatMap(sourceChapters))
+  const eligible = rows.filter((row) => sourceChapters(row).every((n) => n > 0 && n < cutoff)).slice(-12)
+  const excluded = await listAiExcludedChapterNumbers(context.projectPath, eligible.flatMap(sourceChapters), context.chapterScope?.chapters)
   return eligible.filter((row) => !sourceChapters(row).some((n) => excluded.has(n)))
 }
 
@@ -309,7 +310,7 @@ const fallbackForeshadowingStatesDataSource: DataSource<string> = {
   async load(context) {
     const store = await loadForeshadowingTracker(context.projectPath)
     const active = store.items.filter((f) => isActiveForeshadowingStatus(f.status))
-    const rows = await visibleMemoryRows(context, active, (f) => [f.plantedChapter, ...f.advancedChapters])
+    const rows = await visibleMemoryRows(context, active, (f) => [f.plantedChapter, ...f.advancedChapters, ...(f.resolvedChapter ? [f.resolvedChapter] : [])])
     return rows.map((f) => `${f.id} ${f.name}：${f.description}`).join("\n")
   },
 }
@@ -327,15 +328,24 @@ const fallbackTimelineDataSource: DataSource<string> = {
 /**
  * 相关设定数据源
  */
+function referenceSearchOptions(context: ContextLoadContext) {
+  return {
+    localOnly: true,
+    acceptPath: (path: string) => !/\/(?:chapters|outlines|memory)\//i.test(path),
+    acceptFile: (path: string, content: string) => !/^[ \t]*snapshot_id:/m.test(content)
+      || eligibleLocalSource(path, content, context.chapterNumber, context.chapterScope?.chapters),
+  }
+}
+
 const relatedSettingsDataSource: DataSource<string> = {
   name: "relatedSettings",
   priority: 10,
   async load(context: ContextLoadContext): Promise<string> {
     try {
-      const results = await searchWiki(context.projectPath, "setting 设定 location 地点")
+      const results = await searchWiki(context.projectPath, "setting 设定 location 地点", referenceSearchOptions(context))
       if (results.length > 0) {
         const contents = await Promise.all(results.slice(0, 3).map(r => readFile(r.path).catch(() => "")))
-        return contents.filter(Boolean).join("\n---\n").slice(0, 2000)
+        return contents.filter(text => text && !isAiExcludedContent(text)).join("\n---\n").slice(0, 2000)
       }
     } catch {}
     return ""
@@ -350,10 +360,12 @@ const canonRulesDataSource: DataSource<string> = {
   priority: 11,
   async load(context: ContextLoadContext): Promise<string> {
     try {
-      const results = await searchWiki(context.projectPath, "canon 正史 rule 规则")
+      const canon = await readFile(`${context.projectPath}/wiki/canon.md`).catch(() => "")
+      if (canon) return isAiExcludedContent(canon) ? "" : canon.slice(0, 2000)
+      const results = await searchWiki(context.projectPath, "canon 正史 rule 规则", referenceSearchOptions(context))
       if (results.length > 0) {
         const content = await readFile(results[0].path)
-        return content.slice(0, 2000)
+        return isAiExcludedContent(content) ? "" : content.slice(0, 2000)
       }
     } catch {}
     return ""
@@ -399,17 +411,17 @@ const writingStyleDataSource: DataSource<string> = {
       const pp = context.projectPath
       const stylePaths = [`${pp}/wiki/写作风格.md`, `${pp}/wiki/writing-style.md`]
       for (const stylePath of stylePaths) {
-        const content = await readFile(stylePath)
-        if (content.trim()) return content.slice(0, 1000)
+        const content = await readFile(stylePath).catch(() => "")
+        if (content.trim() && !isAiExcludedContent(content)) return content.slice(0, 1000)
       }
     } catch {}
 
     // 优先级3: 从 wiki 搜索风格相关页面
     try {
-      const results = await searchWiki(context.projectPath, "style 风格 writing 写作")
+      const results = await searchWiki(context.projectPath, "style 风格 writing 写作", referenceSearchOptions(context))
       if (results.length > 0) {
         const content = await readFile(results[0].path)
-        return content.slice(0, 1000)
+        return isAiExcludedContent(content) ? "" : content.slice(0, 1000)
       }
     } catch {}
     return ""
@@ -427,7 +439,8 @@ const searchResultsDataSource: DataSource<string> = {
       context.projectPath,
       context.task,
       context.chapterNumber,
-      context.config.searchTopK
+      context.config.searchTopK,
+      context.chapterScope?.chapters,
     )
   },
 }
@@ -444,6 +457,7 @@ const graphSearchResultsDataSource: DataSource<string> = {
       context.task,
       context.chapterNumber,
       context.config.searchTopK,
+      context.chapterScope?.chapters,
     )
   },
 }
@@ -474,6 +488,8 @@ const cognitionTextDataSource: DataSource<string> = {
     try {
       const state = await loadCognitionState(context.projectPath)
       if (!state) return ""
+      if (context.chapterNumber && state.lastUpdatedChapter >= context.chapterNumber) return ""
+      if (context.chapterScope && !hasReadableHistory(state.lastUpdatedChapter, context.chapterScope.chapters)) return ""
       const outline = context.chapterNumber ? await readChapterOutlineContent(context.projectPath, context.chapterNumber) : ""
       return relevantCognitionContext(state, [context.task, outline].filter(Boolean).join("\n"))
     } catch {}
@@ -495,6 +511,7 @@ const sectionBriefingDataSource: DataSource<Awaited<ReturnType<typeof buildSecti
       context.chapterNumber,
       chapterOutlineContent,
       context.task,
+      context.chapterScope?.chapters,
     )
     return briefing.text || briefing.characterBriefs.length ? briefing : ""
   },

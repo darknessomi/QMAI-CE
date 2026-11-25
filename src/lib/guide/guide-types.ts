@@ -50,7 +50,7 @@ export interface GuidePreparation {
   /** 设置页左侧分类（CategoryId）。 */
   settingsCategory?: "model" | "novel" | "interface"
   /** 模型设置内部页签；`settings-view.tsx` 会读取 store 里的 `activeModelSettingsTab`。 */
-  modelTab?: "default" | "llm" | "rerank" | "embedding"
+  modelTab?: "default" | "llm" | "jev"
   /** 主视图。 */
   view?: "sources" | "wiki"
 }

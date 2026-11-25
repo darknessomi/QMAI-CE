@@ -6,7 +6,7 @@ import zh from "@/i18n/zh.json"
 const settingsViewSource = readFileSync(resolve(__dirname, "settings-view.tsx"), "utf8")
 
 describe("settings model categories", () => {
-  it("merges LLM, reranker, embedding, and default model into a single model settings category", () => {
+  it("groups the writing and SAG2 models under a single model settings category", () => {
     expect(settingsViewSource).toContain('| "model"')
     expect(settingsViewSource).toContain('{ id: "model", labelKey: "settings.categories.model", icon: Brain }')
     // 原独立分类已归并
@@ -23,7 +23,6 @@ describe("settings model categories", () => {
   it("uses the requested Chinese model category names", () => {
     expect(zh.settings.categories.model).toBe("模型设置")
     expect(zh.settings.sections.llm.title).toBe("大语言/LLM模型")
-    expect(zh.settings.sections.rerank.title).toBe("重排/Reranker模型")
-    expect(zh.settings.sections.embedding.title).toBe("向量检索/Embedding模型")
+    expect(settingsViewSource).toContain("SAG2 决策模型")
   })
 })

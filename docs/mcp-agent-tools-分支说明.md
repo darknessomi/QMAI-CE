@@ -8,6 +8,8 @@
 
 连接信息写在应用数据目录的 `mcp-endpoint.json`，只允许当前用户读取，只监听 `127.0.0.1`。应用没开或开关关闭时，stdio 返回「青幕写作未启动，或尚未打开 MCP 开关。」
 
+MCP 写作沿用桌面端保存的 JEV 配置。配置 JEV 后，普通写作也会检索可读的前章定稿，并把带路径和行号的原文放入写作上下文。JEV 留空时使用基础检索。
+
 ## 工具
 
 - `list_bookshelf`：列出书架上的书，含书名、id 和路径。
@@ -32,13 +34,13 @@
 - `get_maintenance_progress`：按启动返回的 `projectPath`、`runId` 查询，配合 `afterRevision`、`waitMs: 30000` 等待变化。终态为 completed、failed、cancelled、interrupted；重启不会自动重跑。`persistenceError` 表示磁盘进度可能滞后。不要将启动成功当成维护完成。
 - `get_memory_cleanup_result`：扫描完成后分页查看 `issues`，包括删除条目、保留依据、理由和置信度。可指定 `scanId`；`offset` 默认 0，`limit` 默认 20、最大 100。
 - `keep_memory_cleanup_issues`：传 `scanId` 和明确 `issueIds`，把误判候选加入项目保留白名单，之后不再建议同组候选。
-- `apply_memory_cleanup`：传原 `scanId` 和审查后的明确 `issueIds`，后台先备份，再从快照来源删除并同步四类 JSON、正式记忆/追踪 Markdown、检索资料、人物 Skill、图谱和受影响向量。不会修改正文或大纲。来源修订变化、候选保留依据冲突或相关编辑器有未保存修改时拒绝执行。完成结果带 `cleanupId`。
+- `apply_memory_cleanup`：传原 `scanId` 和审查后的明确 `issueIds`，后台先备份，再从快照来源删除并同步四类 JSON、正式记忆/追踪 Markdown、检索资料、人物 Skill 和图谱。不会修改正文或大纲。来源修订变化、候选保留依据冲突或相关编辑器有未保存修改时拒绝执行。完成结果带 `cleanupId`。
 - `undo_memory_cleanup`：撤销最近一次清理，可传原 `cleanupId` 防止撤销错任务。后台恢复实际改动的文件并同步索引；相关文件清理后已有新修改时拒绝覆盖，保留备份。
 - `stop_maintenance_task`：只取消扫描，传 `projectPath`、`runId`。清理和撤销同步期间不能中断，清理完成后可以撤销。
 
 模型建议只是候选。检查原文及保留依据，不能因历史久远、人物退场、当前未用、政治战争题材或架空设定而删掉有效事实。除非用户已授权相应清理或测试，不要仅凭高置信度就全选删除。进度文件为 `.qmai/maintenance-runs/<runId>.json`，备份为 `.qmai/memory-cleanup-history/`；不要把备份当作新记忆提取。
 
-清理或撤销完成后，如果结果中的 `warnings` 提示向量重新索引失败，请按提示重建索引。
+清理或撤销后，下次 SAG2 检索会按现行原文更新索引。
 
 ## Skill 版本
 

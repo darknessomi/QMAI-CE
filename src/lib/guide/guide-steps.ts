@@ -27,7 +27,7 @@ const modelsChapter: GuideChapter = {
 const extrasChapter: GuideChapter = {
   id: "extras",
   title: "其他模型与默认模型",
-  summary: "重排、向量、默认模型分别管什么，哪个模型用在哪里。",
+  summary: "配置 SAG2 检索，选择各项写作任务的默认模型。",
 }
 
 const createChapter: GuideChapter = {
@@ -90,7 +90,7 @@ export const GUIDE_STEPS: GuideStep[] = [
     chapter: "models",
     title: "先配模型，再谈写作",
     body: [
-      "设置左侧选**模型设置**，右侧有四个页签：默认模型、大语言模型、重排模型、向量模型。",
+      "设置左侧选**模型设置**，右侧可配置默认模型、大语言模型和 SAG2 决策模型。",
       "先点**大语言模型** —— 负责写正文、出大纲、改稿子的都是这一类模型。",
     ],
     anchor: "settings.model-tab.llm",
@@ -238,37 +238,29 @@ export const GUIDE_STEPS: GuideStep[] = [
     padding: 10,
   },
   {
-    id: "extras-rerank",
+    id: "extras-jev",
     chapter: "extras",
-    title: "重排模型做什么",
+    title: "SAG2 如何查找原文",
     body: [
-      "写作时，软件会先从记忆库、大纲、旧章节里**粗筛**出一批可能相关的段落；**重排模型**再把这批段落按「和当前这一章的相关度」重新排序。",
-      "它不写一个字，只决定「哪些资料该排在最前面被模型先看到」。长篇写到几十万字、记忆条目上千条时，差别很明显。",
+      "写作、搜索和问答可以让 JEV 判断哪些原文有用，并沿文中出现的线索继续查找。页面查重也会用它核对候选页面。",
+      "索引在本地建立。配置远程 JEV 后，检索会向该服务发送问题以及需要判断的原文段落。",
     ],
-    bullets: [
-      { title: "可以留空", text: "不配也能写，只是资料筛选更依赖关键词与向量。" },
-      { title: "配什么", text: "选服务商提供的 rerank 接口（如 bge-reranker、gte-rerank 一类）。" },
-    ],
-    anchor: "settings.model-tab.rerank",
-    prepare: { settingsCategory: "model", modelTab: "rerank" },
+    anchor: "settings.model-tab.jev",
+    prepare: { settingsCategory: "model", modelTab: "jev" },
     directive: "open-settings",
     chapterBreak: true,
     padding: 6,
   },
   {
-    id: "extras-embedding",
+    id: "extras-jev-config",
     chapter: "extras",
-    title: "向量模型做什么",
+    title: "配置 SAG2 决策模型",
     body: [
-      "**向量模型**把文字变成一串数字（向量），让软件能按「意思相近」而不是「字面相同」来检索。",
-      "你说「主角那把断剑」，它能找到记忆里写成「残刃」的那一条。这是长期记忆与剧情搜索的底座。",
+      "在这个页签填写服务地址和模型 ID；服务需要鉴权时再填访问密钥。先点“测试连接”，成功后点“保存配置”。",
+      "全部留空并保存即可使用基础检索。写作模型仍在大语言模型页签配置。",
     ],
-    bullets: [
-      { title: "配一次就够", text: "建议开启并选一个便宜的小模型；同一本书不要中途换，换了要重建索引。" },
-      { title: "和重排的分工", text: "向量负责「找得全」，重排负责「排得准」。" },
-    ],
-    anchor: "settings.model-tab.embedding",
-    prepare: { settingsCategory: "model", modelTab: "embedding" },
+    anchor: "settings.model-tab.jev",
+    prepare: { settingsCategory: "model", modelTab: "jev" },
     padding: 6,
   },
   {
@@ -295,8 +287,7 @@ export const GUIDE_STEPS: GuideStep[] = [
     bullets: [
       { title: "大语言模型 · 正文与大纲", text: "生成大纲、写章节正文、去 AI 味、改稿、审查。最吃能力，也最吃额度。" },
       { title: "大语言模型 · 记忆提取", text: "每章写完把人物状态、伏笔、设定变更抽成条目。调用频繁、单次短，适合便宜模型。" },
-      { title: "向量模型 · 检索", text: "把章节与记忆切成片转成向量，供语义检索。" },
-      { title: "重排模型 · 精排", text: "对检索结果按当前章节的相关度重排。" },
+      { title: "SAG2 决策模型 · 原文检索", text: "判断原文证据，沿相关线索查找更多段落。" },
       { title: "默认模型", text: "审稿、摘要、提取和去 AI 味可以共用默认模型，也可以各自指定。" },
     ],
     placement: "center",
@@ -693,8 +684,7 @@ export const GUIDE_ANCHORS = [
   "shell.tool.skillLibrary",
   "settings.model-tab.llm",
   "settings.model-tab.default",
-  "settings.model-tab.rerank",
-  "settings.model-tab.embedding",
+  "settings.model-tab.jev",
   "shelf.create",
   "model.add-provider",
   "model.add-custom",

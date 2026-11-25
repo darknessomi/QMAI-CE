@@ -1,5 +1,5 @@
 import { deleteFile, fileExists, readFile, writeFileAtomic } from "@/commands/fs"
-import { hashEmbeddingText } from "@/lib/embedding-batch"
+import { hashTextHex } from "@/lib/text-hash"
 import { splitSourceIntoSemanticChunks } from "@/lib/semantic-source-chunks"
 import type { ChapterSnapshot } from "./chapter-ingest"
 import { normalizeChapterSnapshot } from "./snapshot-format"
@@ -67,7 +67,7 @@ export async function extractMemoryInParts(options: {
     }
   }
   if (!parts.length) throw new Error("正文为空，无法提取记忆")
-  const signature = hashEmbeddingText(JSON.stringify([1, options.sourceKey, options.requestKey, budget, source]))
+  const signature = hashTextHex(JSON.stringify([1, options.sourceKey, options.requestKey, budget, source]))
   const path = `${options.projectPath}/.qmai/novel/extraction-progress/${signature}.json`
   let completed = 0
   let merged: ChapterSnapshot | null = null

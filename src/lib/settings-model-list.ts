@@ -7,9 +7,8 @@ import {
   type CursorAcpCatalogModel,
 } from "@/lib/cursor-acp-models"
 import { ensureCursorProxyRunning, restartCursorProxyWithAuth, withCursorProxyEndpoint } from "@/lib/cursor-cli-proxy"
-import { isDirectRerankEndpoint } from "@/lib/rerank-api"
 import { getHttpFetch } from "@/lib/tauri-fetch"
-import type { EmbeddingConfig, LlmConfig, RerankConfig } from "@/stores/wiki-store"
+import type { LlmConfig } from "@/stores/wiki-store"
 
 interface LlmModelListResult {
   models: string[]
@@ -59,42 +58,6 @@ function stripGoogleApiKeyQuery(endpoint: string): string {
   }
 }
 
-function buildEndpointModelsUrl(endpoint: string): string {
-  const trimmed = endpoint.trim()
-  if (!trimmed) {
-    throw new Error("请先填写接口地址后再拉取模型列表。")
-  }
-
-  if (trimmed.includes("generativelanguage.googleapis.com") || /:embedcontent(\?|$)/i.test(trimmed)) {
-    const base = stripGoogleApiKeyQuery(trimmed)
-      .replace(/\/+$/, "")
-      .replace(/\/models\/[^/?]+:(?:embedContent|batchEmbedContents)(?:\?.*)?$/i, "")
-      .replace(/\/models\/[^/?]+(?:\?.*)?$/i, "")
-      .replace(/\/models(?:\?.*)?$/i, "")
-    return `${base}/models`
-  }
-
-  if (/\/embeddings(?:\?.*)?$/i.test(trimmed)) {
-    return trimmed.replace(/\/embeddings(?:\?.*)?$/i, "/models")
-  }
-  if (/\/chat\/completions(?:\?.*)?$/i.test(trimmed)) {
-    return trimmed.replace(/\/chat\/completions(?:\?.*)?$/i, "/models")
-  }
-  if (/\/responses(?:\?.*)?$/i.test(trimmed)) {
-    return trimmed.replace(/\/responses(?:\?.*)?$/i, "/models")
-  }
-  if (/\/messages(?:\?.*)?$/i.test(trimmed)) {
-    return trimmed.replace(/\/messages(?:\?.*)?$/i, "/models")
-  }
-  if (/\/reranks?(?:\?.*)?$/i.test(trimmed)) {
-    return trimmed.replace(/\/reranks?(?:\?.*)?$/i, "/models")
-  }
-  if (/\/models(?:\?.*)?$/i.test(trimmed)) {
-    return trimmed
-  }
-  return `${trimmed.replace(/\/+$/, "")}/models`
-}
-
 function toModelListResult(models: string[]): LlmModelListResult {
   return { models: uniqueSortedModels(models) }
 }
@@ -103,7 +66,7 @@ function buildModelsUrl(config: LlmConfig): { url: string; headers: Record<strin
   if (config.provider === "google") {
     const base = stripGoogleApiKeyQuery(config.customEndpoint.trim() || "https://generativelanguage.googleapis.com/v1beta")
       .replace(/\/+$/, "")
-      .replace(/\/models(?:\/[^/?]+(?::(?:embedContent|batchEmbedContents))?)?$/i, "")
+      .replace(/\/models(?:\/[^/?]+)?$/i, "")
     return {
       url: `${base}/models`,
       headers: config.apiKey ? { "x-goog-api-key": config.apiKey } : {},
@@ -127,8 +90,6 @@ function buildModelsUrl(config: LlmConfig): { url: string; headers: Record<strin
     modelsUrl = url.replace(/\/responses(?:\?.*)?$/i, "/models")
   } else if (/\/messages(?:\?.*)?$/i.test(url)) {
     modelsUrl = url.replace(/\/messages(?:\?.*)?$/i, "/models")
-  } else if (/\/reranks?(?:\?.*)?$/i.test(url)) {
-    modelsUrl = url.replace(/\/reranks?(?:\?.*)?$/i, "/models")
   } else {
     modelsUrl = `${url.replace(/\/+$/, "")}/models`
   }
@@ -279,50 +240,4 @@ export async function fetchLlmModelList(config: LlmConfig): Promise<LlmModelList
     const retry = buildModelsUrl(runtimeConfig)
     return fetchCursorCliFilteredModels(retry.url, retry.headers, runtimeConfig.model)
   }
-}
-
-export async function fetchEmbeddingModelList(config: EmbeddingConfig): Promise<LlmModelListResult> {
-  const url = buildEndpointModelsUrl(config.endpoint)
-  const isGoogle = url.includes("generativelanguage.googleapis.com")
-  const headers: Record<string, string> = {}
-
-  if (config.apiKey.trim()) {
-    if (isGoogle) {
-      headers["x-goog-api-key"] = config.apiKey.trim()
-    } else {
-      headers.Authorization = `Bearer ${config.apiKey.trim()}`
-    }
-  }
-
-  const result = await fetchModelList(url, headers, config.model)
-  if (isGoogle) {
-    return toModelListResult(result.models.map((model) => model.replace(/^models\//, "")))
-  }
-  return result
-}
-
-export async function fetchRerankModelList(
-  llmConfig: LlmConfig,
-  rerankConfig: RerankConfig,
-): Promise<LlmModelListResult> {
-  // 4.3.6 起不再有「复用主模型」，所以这里不会再去拉主模型的模型列表：
-  // 重排页拿到的候选必须是**重排端点自己的**模型（bge-reranker / qwen-rerank 之类）。
-  if (isDirectRerankEndpoint({ provider: rerankConfig.provider, customEndpoint: rerankConfig.customEndpoint })) {
-    return fetchModelList(
-      buildEndpointModelsUrl(rerankConfig.customEndpoint),
-      rerankConfig.apiKey.trim() ? { Authorization: `Bearer ${rerankConfig.apiKey.trim()}` } : {},
-      rerankConfig.model,
-    )
-  }
-
-  return fetchLlmModelList({
-    provider: rerankConfig.provider,
-    apiKey: rerankConfig.apiKey,
-    model: rerankConfig.model,
-    ollamaUrl: rerankConfig.ollamaUrl,
-    customEndpoint: rerankConfig.customEndpoint,
-    apiMode: rerankConfig.provider === "custom" ? rerankConfig.apiMode : undefined,
-    maxContextSize: Math.min(llmConfig.maxContextSize ?? 65_536, 65_536),
-    reasoning: { mode: "off" },
-  })
 }

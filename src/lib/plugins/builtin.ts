@@ -51,7 +51,7 @@ export interface BuiltinPlugin {
  *
  * 剧情搜索 / 审查中心 之所以只能做成内置插件（而不是外部插件），
  * 是因为它们都依赖宿主独有能力：
- *   · 剧情搜索 用**向量检索**（需要 embedding 模型）+ 点结果要跳转章节；
+ *   · 剧情搜索使用项目检索，点结果可跳转章节；
  *   · 审查中心 读写 `reviewRun` / `selectedFile` 这些 store 状态；
  * 插件进程拿不到这些东西，硬拆会让功能断掉。
  */
@@ -94,7 +94,7 @@ export const BUILTIN_PLUGINS: readonly BuiltinPlugin[] = [
   {
     id: "plot-search",
     name: "剧情搜索",
-    description: "在当前作品里做关键词 / 向量 / 关系图混合检索，点结果直接跳章节。",
+    description: "检索当前作品的剧情与原文，点结果跳转章节。",
     kind: "view",
     view: "search",
     offEffect: "关闭后「剧情搜索」入口从创作工具中消失；AI 对话里的本地检索不受影响。",

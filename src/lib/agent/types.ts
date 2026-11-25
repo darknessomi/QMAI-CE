@@ -15,6 +15,7 @@ export type ToolPermission = "auto" | "confirm"
 export type ToolCallStatus = "running" | "done" | "error" | "approval_required" | "cancelled"
 
 export interface ToolExecutionContext {
+  chapterEvidence?: import("@/lib/novel/context-engine").ChapterSearchEvidence
   callId: string
   toolName: string
   onToolEvent?: (event: AgentToolEvent) => void

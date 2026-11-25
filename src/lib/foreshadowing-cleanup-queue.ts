@@ -292,17 +292,16 @@ async function loadProjectQueue(projectId: string, pp: string, version: number):
   if (version !== bindingVersion || saved.length === 0) return
 
   const mine = saved.filter((t) => t.projectId === projectId)
-  // 旧删除会重算受影响的摘要向量。纯本地清理及新版任务沿用原来的恢复规则。
-  const mayReembed = (task: ForeshadowingCleanupTask) => !task.autoResume &&
+  // 延续旧项目的手动恢复标记，避免升级意外执行尚未确认的删除任务。
+  const isLegacyDelete = (task: ForeshadowingCleanupTask) => !task.autoResume &&
     (task.status === "pending" || task.status === "processing") &&
     (task.action ?? defaultCleanupAction(task.issue.kind)) === "delete"
-  const config = useWikiStore.getState().embeddingConfig
-  const hasVectors = config.enabled && Boolean(config.model) && mine.some(mayReembed) &&
+  const hasLegacyIndex = mine.some(isLegacyDelete) &&
     await fileExists(`${pp}/.qmai/lancedb`).catch(() => true)
   if (version !== bindingVersion) return
   let restored = 0
   for (const task of mine) {
-    if (hasVectors && mayReembed(task)) {
+    if (hasLegacyIndex && isLegacyDelete(task)) {
       task.legacyRecovery = true
       task.status = "awaiting_resume"
     } else if (task.status === "processing") {

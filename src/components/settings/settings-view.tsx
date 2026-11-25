@@ -19,12 +19,12 @@ import { useWikiStore, type ModelSettingsTabId } from "@/stores/wiki-store"
 import "@/components/uitest/ui-test-tools.css"
 import { isTauri } from "@/lib/platform"
 import { useChatStore } from "@/stores/chat-store"
-import { saveLanguage, loadNovelConfig, loadRerankConfig } from "@/lib/project-store"
+import { saveLanguage, loadNovelConfig } from "@/lib/project-store"
 import type { SettingsDraft, DraftSetter } from "./settings-types"
 import type { SidebarNavConfig } from "@/lib/sidebar-nav-preferences"
 import { LlmProviderSection } from "./sections/llm-provider-section"
 import { DefaultModelSettingsPanel } from "./sections/default-model-settings-panel"
-import { UiTestEmbeddingModels, UiTestRerankModels } from "@/components/uitest/models/retrieval-models"
+import { JevModelSettings } from "@/components/uitest/models/jev-model"
 import { confirmModelDraftLeave } from "@/components/uitest/models/model-draft-guard"
 import { InterfaceSection } from "./sections/interface-section"
 import { NovelSection } from "./sections/novel-section"
@@ -95,8 +95,7 @@ const CATEGORIES_WITH_SAVE_FOOTER: CategoryId[] = [
 const UI_TEST_MODEL_TABS: Array<{ id: ModelSettingsTabId; label: string }> = [
   { id: "default", label: "默认模型" },
   { id: "llm", label: "大语言模型" },
-  { id: "rerank", label: "重排模型" },
-  { id: "embedding", label: "向量模型" },
+  { id: "jev", label: "SAG2 决策模型" },
 ]
 
 /** 测试版子页按需挂载并保留草稿；业务调用仍复用原配置接口。 */
@@ -105,7 +104,6 @@ export function UiTestModelSettingsSection({ draft, setDraft }: { draft: Setting
   const setRequestedTab = useWikiStore((s) => s.setActiveModelSettingsTab)
   const [active, setActive] = useState<ModelSettingsTabId>(() => requestedTab ?? "llm")
   const id = useId()
-  const project = useWikiStore((s) => s.project)
   const [visited, setVisited] = useState<Set<ModelSettingsTabId>>(() => new Set([requestedTab ?? "llm"]))
   const activate = (tab: ModelSettingsTabId) => {
     setVisited((previous) => previous.has(tab) ? previous : new Set([...previous, tab]))
@@ -158,8 +156,7 @@ export function UiTestModelSettingsSection({ draft, setDraft }: { draft: Setting
         <div key={tab.id} id={`${id}-${tab.id}-panel`} role="tabpanel" aria-labelledby={`${id}-${tab.id}`} hidden={active !== tab.id} data-ui="settings-model-panel" data-ui-model={tab.id}>
           {visited.has(tab.id) && tab.id === "llm" && <LlmProviderSection />}
           {visited.has(tab.id) && tab.id === "default" && <DefaultModelSettingsPanel draft={draft} setDraft={setDraft} />}
-          {visited.has(tab.id) && tab.id === "rerank" && <UiTestRerankModels key={project?.id ?? "global"} />}
-          {visited.has(tab.id) && tab.id === "embedding" && <UiTestEmbeddingModels key={project?.id ?? "global"} />}
+          {visited.has(tab.id) && tab.id === "jev" && <JevModelSettings />}
         </div>
       ))}
     </div>
@@ -168,8 +165,6 @@ export function UiTestModelSettingsSection({ draft, setDraft }: { draft: Setting
 
 function initialDraft(
   llm: ReturnType<typeof useWikiStore.getState>["llmConfig"],
-  embed: ReturnType<typeof useWikiStore.getState>["embeddingConfig"],
-  rerank: ReturnType<typeof useWikiStore.getState>["rerankConfig"],
   multimodal: ReturnType<typeof useWikiStore.getState>["multimodalConfig"],
   outputLanguage: ReturnType<typeof useWikiStore.getState>["outputLanguage"],
   proxy: ReturnType<typeof useWikiStore.getState>["proxyConfig"],
@@ -198,14 +193,6 @@ function initialDraft(
     apiMode: llm.apiMode,
     reasoning: llm.reasoning,
     localCliIsolation: llm.localCliIsolation === true,
-    embeddingEnabled: embed.enabled,
-    embeddingEndpoint: embed.endpoint,
-    embeddingApiKey: embed.apiKey,
-    embeddingModel: embed.model,
-    embeddingOutputDimensionality: embed.outputDimensionality,
-    embeddingMaxChunkChars: embed.maxChunkChars,
-    embeddingOverlapChunkChars: embed.overlapChunkChars,
-    rerankConfig: rerank,
     multimodalEnabled: multimodal.enabled,
     multimodalUseMainLlm: multimodal.useMainLlm,
     multimodalProvider: multimodal.provider,
@@ -244,10 +231,6 @@ export function SettingsView() {
   const setActiveSettingsCategory = useWikiStore((s) => s.setActiveSettingsCategory)
   const llmConfig = useWikiStore((s) => s.llmConfig)
   const setLlmConfig = useWikiStore((s) => s.setLlmConfig)
-  const embeddingConfig = useWikiStore((s) => s.embeddingConfig)
-  const setEmbeddingConfig = useWikiStore((s) => s.setEmbeddingConfig)
-  const rerankConfig = useWikiStore((s) => s.rerankConfig)
-  const setRerankConfig = useWikiStore((s) => s.setRerankConfig)
   const multimodalConfig = useWikiStore((s) => s.multimodalConfig)
   const setMultimodalConfig = useWikiStore((s) => s.setMultimodalConfig)
   const outputLanguage = useWikiStore((s) => s.outputLanguage)
@@ -283,8 +266,6 @@ export function SettingsView() {
   const [draft, setDraftState] = useState<SettingsDraft>(() =>
     initialDraft(
       llmConfig,
-      embeddingConfig,
-      rerankConfig,
       multimodalConfig,
       outputLanguage,
       proxyConfig,
@@ -329,18 +310,6 @@ export function SettingsView() {
     }
   }, [project?.id, project?.path, setNovelConfig])
 
-  useEffect(() => {
-    let cancelled = false
-    loadRerankConfig(project?.id, project?.path).then((config) => {
-      if (cancelled || !config) return
-      setRerankConfig(config)
-      setDraftState((prev) => ({ ...prev, rerankConfig: config }))
-    }).catch(() => {})
-    return () => {
-      cancelled = true
-    }
-  }, [project?.id, project?.path, setRerankConfig])
-
   // Resync draft from store if it changes out-of-band (e.g. project switch).
   // IMPORTANT: keep the current draft.uiLanguage instead of re-reading
   // `i18n.language`. handleSave calls multiple zustand setters before it
@@ -353,8 +322,6 @@ export function SettingsView() {
     setDraftState((prev) =>
       initialDraft(
         llmConfig,
-        embeddingConfig,
-        rerankConfig,
         multimodalConfig,
         outputLanguage,
         proxyConfig,
@@ -374,8 +341,6 @@ export function SettingsView() {
     )
   }, [
     llmConfig,
-    embeddingConfig,
-    rerankConfig,
     multimodalConfig,
     outputLanguage,
     proxyConfig,
@@ -399,8 +364,6 @@ export function SettingsView() {
   const handleSave = useCallback(async () => {
     const {
       saveLlmConfig,
-      saveEmbeddingConfig,
-      saveRerankConfig,
       saveMultimodalConfig,
       saveProxyConfig,
       saveRevisionFeedbackWindowConfig,
@@ -430,20 +393,6 @@ export function SettingsView() {
       reasoning: draft.reasoning,
       localCliIsolation: draft.localCliIsolation,
     }
-    const newEmbed = {
-      enabled: draft.embeddingEnabled,
-      endpoint: draft.embeddingEndpoint,
-      apiKey: draft.embeddingApiKey,
-      model: draft.embeddingModel,
-      outputDimensionality: draft.embeddingOutputDimensionality,
-      maxChunkChars: draft.embeddingMaxChunkChars,
-      overlapChunkChars: draft.embeddingOverlapChunkChars,
-    }
-    const newRerank = {
-      ...draft.rerankConfig,
-      apiMode: draft.rerankConfig.provider === "custom" ? draft.rerankConfig.apiMode : undefined,
-      maxCandidates: Math.max(3, Math.min(30, draft.rerankConfig.maxCandidates || 12)),
-    }
     const newMultimodal = {
       enabled: draft.multimodalEnabled,
       useMainLlm: draft.multimodalUseMainLlm,
@@ -472,10 +421,6 @@ export function SettingsView() {
 
     setLlmConfig(newLlm)
     await saveLlmConfig(newLlm)
-    setEmbeddingConfig(newEmbed)
-    await saveEmbeddingConfig(newEmbed)
-    setRerankConfig(newRerank)
-    await saveRerankConfig(newRerank, project?.id, project?.path)
     setMultimodalConfig(newMultimodal)
     await saveMultimodalConfig(newMultimodal)
     setProxyConfig(newProxy)
@@ -538,8 +483,6 @@ export function SettingsView() {
     draft,
     project,
     setLlmConfig,
-    setEmbeddingConfig,
-    setRerankConfig,
     setOutputLanguage,
     setProxyConfig,
     setRevisionFeedbackWindowConfig,

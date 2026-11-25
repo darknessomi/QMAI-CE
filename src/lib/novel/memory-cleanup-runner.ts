@@ -1,10 +1,8 @@
-import { wikiEmbeddingId } from "../embedding-page-id"
 import { createDirectory, deleteFile, fileExists, listDirectory, readFile, writeFileAtomic } from "@/commands/fs"
 import { isPathInside, normalizePath } from "@/lib/path-utils"
 import { streamChat } from "@/lib/llm-client"
 import { useWikiStore, type LlmConfig } from "@/stores/wiki-store"
 import { clearGraphCache } from "@/lib/graph-relevance"
-import { parseFrontmatter } from "@/lib/frontmatter"
 import type { FileNode } from "@/types/wiki"
 import { parseLlmJsonObject } from "./book-analysis/llm-json"
 import { fingerprintText } from "./book-analysis/content-fingerprint"
@@ -294,46 +292,6 @@ function report(onLog: Log | undefined, message: string): void {
   onLog?.(message)
 }
 
-async function invalidateVectors(projectPath: string, paths: string[], communities: string[], onLog?: Log): Promise<void> {
-  if (!await fileExists(`${normalizePath(projectPath)}/.qmai/lancedb`)) return
-  const { removePageEmbeddingStrict, embedPage } = await import("@/lib/embedding")
-  const ids = new Set(paths.map((path) => wikiEmbeddingId(projectPath, path)).filter((id): id is string => id !== null))
-  for (const path of communities) ids.add(`community:${path.split("/").pop()!.replace(/\.json$/, "")}`)
-  const pending = [...ids]
-  report(onLog, `正在清除旧向量 0/${pending.length}。每 32 页会压缩一次索引，这一步数字会短暂停住，并不是卡住。`)
-  for (let index = 0; index < pending.length; index++) {
-    report(onLog, `正在清除旧向量 ${index + 1}/${pending.length}`)
-    await removePageEmbeddingStrict(projectPath, pending[index])
-  }
-  const config = useWikiStore.getState().embeddingConfig
-  if (config.enabled && config.model) {
-    const pages = [...new Set(paths)].filter((path) => wikiEmbeddingId(projectPath, path) !== null)
-    for (let index = 0; index < pages.length; index++) {
-      const path = pages[index]
-      if (!await fileExists(path)) continue
-      const id = wikiEmbeddingId(projectPath, path)!
-      const content = await readFile(path)
-      const title = parseFrontmatter(content).frontmatter?.title
-      report(onLog, `正在重建向量 ${index + 1}/${pages.length}：${id}`)
-      try {
-        if (!await embedPage(projectPath, id, typeof title === "string" ? title : path.split("/").pop()!.slice(0, -3), content, config)) throw new Error("嵌入未完成")
-      } catch {
-        onLog?.(`警告：旧向量已清除，但页面「${id}」重新索引失败，尚未完成的页面请在向量设置中重建索引。来源及文档已同步。`)
-        return
-      }
-    }
-    for (const path of communities) {
-      if (!await fileExists(path)) continue
-      const record = JSON.parse(await readFile(path)) as { summary?: string }
-      const id = `community:${path.split("/").pop()!.replace(/\.json$/, "")}`
-      if (record.summary) {
-        try { if (!await embedPage(projectPath, id, "社区摘要", record.summary, config)) throw new Error("嵌入未完成") }
-        catch { onLog?.("警告：旧向量已清除，但社区摘要重新索引失败，请在向量设置中重建索引。来源及文档已同步。"); return }
-      }
-    }
-  } else onLog?.("受影响的旧向量已清除；重新启用向量检索后可重建索引。")
-}
-
 export async function applyMemoryCleanup(projectPath: string, scan: MemoryCleanupScan, selected: readonly MemoryCleanupIssue[], onLog?: Log): Promise<number> {
   return withMemoryWriteLock(projectPath, () => withPersonaSkillLock(personaSkillLockKey(projectPath), async () => {
     const snapshots = await readSnapshots(projectPath), current = new Map(collectMemoryRecords(snapshots).map((r) => [r.id, r]))
@@ -394,7 +352,6 @@ export async function applyMemoryCleanup(projectPath: string, scan: MemoryCleanu
       await rebuildMemoryEntityProjections(projectPath, patches, entityPaths, changed, committed)
       await rebuildPersonaFacts(projectPath, committed, changedNumbers, changedFields)
       for (const path of communities) await deleteFile(path)
-      // Invalidate stale chunks before reporting success. Reindexing can restore recall later.
       const mutatedPaths: string[] = []
       for (let index = 0; index < backup.files.length; index++) {
         if (index % 200 === 0) report(onLog, `正在核对改动 ${index + 1}/${backup.files.length}`)
@@ -411,7 +368,6 @@ export async function applyMemoryCleanup(projectPath: string, scan: MemoryCleanu
         const relative = normalizePath(path).slice(normalizePath(projectPath).length + 1)
         if (!known.has(relative)) { backup.files.push({ path: relative, before: null, after: fingerprintText(JSON.stringify(await readFile(path))) }); mutatedPaths.push(path) }
       }
-      await invalidateVectors(projectPath, mutatedPaths, communities, onLog)
       // Only changed files belong to this undo operation. Unrelated persona/retrieval
       // updates after cleanup must neither block undo nor get overwritten by it.
       const mutated = new Set(mutatedPaths)
@@ -490,14 +446,10 @@ export async function undoLastMemoryCleanup(projectPath: string, onLog?: Log): P
       const current = await fileExists(path) ? await readFile(path) : null
       if (fingerprintText(JSON.stringify(current)) !== file.after) throw new Error("清理后文件已有新变化，不能覆盖恢复。备份已保留。")
     }
+    onLog?.("正在从备份恢复记忆文件")
     await restoreFiles(projectPath, backup)
     await refreshChangedPersonaOutlines(projectPath, backup.files)
-    const paths = backup.files.map((f) => `${normalizePath(projectPath)}/${f.path}`)
-    let indexError: unknown = null
-    try { await invalidateVectors(projectPath, paths, paths.filter((path) => path.includes("/.qmai/novel/community-summaries/")), onLog) }
-    catch (error) { indexError = error }
     await deleteFile(lastPath(projectPath))
     clearGraphCache(); useWikiStore.getState().bumpDataVersion()
-    if (indexError) throw new Error(`记忆文件已撤销恢复，但向量索引同步失败，请重建索引：${String(indexError)}`)
   }))
 }

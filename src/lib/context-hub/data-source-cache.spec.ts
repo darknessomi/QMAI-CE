@@ -364,7 +364,7 @@ describe("DataSourceCacheAdapter", () => {
     expect(loadSettings).toHaveBeenCalledOnce()
   })
 
-  it("reuses project-scoped static sources across different chapters", async () => {
+  it("按写作章界分别缓存近期摘要，避免复用未来章节", async () => {
     const harness = createHarness()
     const source: DataSource<string> = { name: "fallbackRecentSummaries", priority: 1, load: async () => "" }
     const directLoad = vi.fn(async () => "项目级摘要")
@@ -372,8 +372,8 @@ describe("DataSourceCacheAdapter", () => {
     await harness.adapter.load(source, { ...context, chapterNumber: 2 }, directLoad)
     await harness.adapter.load(source, { ...context, chapterNumber: 9 }, directLoad)
 
-    expect(directLoad).toHaveBeenCalledOnce()
-    expect(harness.adapter.getStats()).toMatchObject({ cacheHits: 1 })
+    expect(directLoad).toHaveBeenCalledTimes(2)
+    expect(harness.adapter.getStats()).toMatchObject({ cacheHits: 0 })
   })
 
   it("returns a deeply equal value on a cache hit and a forced rebuild", async () => {

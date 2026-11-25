@@ -81,14 +81,22 @@ describe("app-state 敏感字段加密", () => {
     await expect(decryptStateValue({ __qmaiEnc: "CIPHER" })).resolves.toBeUndefined()
   })
 
+  it("保存其他设置时原样保留退役检索配置", async () => {
+    const entries = {
+      embeddingConfig: { __qmaiEnc: "OLD" },
+      rerankConfig: { enabled: true, apiKey: "legacy-fixture" },
+      projectRerankConfigs: { __qmaiEnc: "OTHER" },
+      uiFontSizeScale: 1,
+    }
+    expect(await encryptStateEntries(entries)).toEqual(entries)
+    expect(invoke).not.toHaveBeenCalled()
+  })
+
   it("键清单覆盖模型 / 搜索 / 网盘三类凭据", () => {
     expect([...ENCRYPTED_STATE_KEYS].sort()).toEqual(
       [
-        "embeddingConfig",
         "llmConfig",
         "multimodalConfig",
-        "projectRerankConfigs",
-        "rerankConfig",
         "searchApiConfig",
         "sync.webdav",
       ].sort(),

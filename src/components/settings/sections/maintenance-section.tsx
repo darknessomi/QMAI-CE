@@ -78,6 +78,7 @@ interface MaintenanceScanState {
   scanCompleted: boolean
   scannedPageCount: number | null
   coverage?: string
+  manualReview?: string[]
   progress?: string
 }
 
@@ -132,6 +133,7 @@ function toScanCache(
     scannedAt: Date.now(),
     scannedPageCount: state.scannedPageCount,
     coverage: state.coverage,
+    manualReview: state.manualReview,
     modelId: detectModelId.trim() || undefined,
     mergeModelId: mergeModelId.trim() || undefined,
     groups: state.groups,
@@ -236,6 +238,7 @@ export function MaintenanceSection() {
         scanCompleted: true,
         scannedPageCount: cached.scannedPageCount,
         coverage: cached.coverage,
+        manualReview: cached.manualReview,
       }
       replaceSharedScanState(hydrated)
       setLocalScanState(hydrated)
@@ -359,9 +362,11 @@ export function MaintenanceSection() {
       : resolveDefaultModel(llmConfig),
     [selectedMergeModelId, llmConfig, providerConfigs],
   )
+  const jevConfig = useWikiStore(state => state.jevConfig)
+  const jevLoadError = useWikiStore(state => state.jevConfigLoadError)
   const detectLlmReady = hasUsableLlm(effectiveDetectConfig, providerConfigs)
   const mergeLlmReady = modelsHydrated && hasUsableLlm(effectiveMergeConfig, providerConfigs)
-  const llmReady = detectLlmReady
+  const llmReady = !jevLoadError && (!!jevConfig || detectLlmReady)
   const projectReady = !!project
   const activeScanState = useMemo(() => {
     if (!project) return emptyScanState
@@ -373,6 +378,8 @@ export function MaintenanceSection() {
     }
     return emptyScanState
   }, [project, localScanState, scanState])
+  const manualReview = activeScanState.manualReview ?? []
+  const reviewPage = useReviewPage(manualReview.length)
   const scanning = isScanning || activeScanState.scanning
   const { scanError, groups, scanCompleted, scannedPageCount } = activeScanState
 
@@ -432,12 +439,12 @@ export function MaintenanceSection() {
     const projectPath = normalizeProjectPath(project.path)
     const projectId = project.id
 
-    if (!hasUsableLlm(effectiveDetectConfig, providerConfigs)) {
+    if (jevLoadError || (!jevConfig && !hasUsableLlm(effectiveDetectConfig, providerConfigs))) {
       applyScanState({
         projectId,
         projectPath,
         scanning: false,
-        scanError: t("settings.sections.maintenance.dedup.selectDetectModel", {
+        scanError: jevLoadError || t("settings.sections.maintenance.dedup.selectDetectModel", {
           defaultValue: "请先选择检测模型。",
         }),
         groups: [],
@@ -464,7 +471,7 @@ export function MaintenanceSection() {
     setScanStage("loading")
     setScanLogs([])
     appendScanLog(
-      detectModelId.trim()
+      jevConfig ? `SAG2 决策模型：${jevConfig.model}` : detectModelId.trim()
         ? `检测模型 id：${detectModelId.trim()}`
         : "未选择检测模型 id，使用默认模型",
     )
@@ -478,6 +485,7 @@ export function MaintenanceSection() {
       projectPath,
       scanning: true,
       coverage: undefined,
+      manualReview: undefined,
       progress: undefined,
       scanError: null,
       groups: [],
@@ -485,7 +493,7 @@ export function MaintenanceSection() {
       scannedPageCount: null,
     })
     try {
-      const { groups: detected, scannedPageCount, coverage } = await runDuplicateDetection(
+      const { groups: detected, scannedPageCount, coverage, manualReview } = await runDuplicateDetection(
         projectPath,
         effectiveDetectConfig,
         {
@@ -500,6 +508,7 @@ export function MaintenanceSection() {
         projectPath,
         scanning: false,
         coverage,
+        manualReview,
         groups: detected.map((g) => ({
           group: g,
           canonicalSlug: g.slugs[0],
@@ -529,6 +538,8 @@ export function MaintenanceSection() {
     }
   }, [
     project,
+    jevConfig,
+    jevLoadError,
     effectiveDetectConfig,
     providerConfigs,
     t,
@@ -695,7 +706,7 @@ export function MaintenanceSection() {
       {legacyCleanupTasks.length > 0 && (
         <section className="space-y-2 rounded-lg border border-border/60 p-3">
           <h3 className="text-sm font-semibold">旧版伏笔清理任务</h3>
-          <p className="text-xs text-muted-foreground">继续清理会更新来源记录，并可能调用嵌入模型重建索引。</p>
+          <p className="text-xs text-muted-foreground">继续清理会更新伏笔的来源记录。</p>
           {legacyCleanupTasks.map((task) => (
             <div key={task.id} className="flex flex-wrap items-center gap-2 text-xs">
               <span>{task.issue.ids.join("、")} · {task.issue.reason}</span>
@@ -725,7 +736,7 @@ export function MaintenanceSection() {
         <p className="text-xs leading-relaxed text-muted-foreground">
           {t("settings.sections.maintenance.dedup.description", {
             defaultValue:
-              "分批复核名称不同、可能属于同一人物或概念的条目。启用向量模型后会优先筛选语义相近的候选。每组由你确认后才进入合并队列。",
+              "分批复核名称不同、可能属于同一人物或概念的条目。配置 JEV 后，SAG 检索相关条目并根据双方原文复核身份。每组由你确认后才进入合并队列。",
           })}
         </p>
 
@@ -739,14 +750,17 @@ export function MaintenanceSection() {
             })}
           </p>
         )}
-        {projectReady && !hasAvailableModels && (
+        {projectReady && jevLoadError && (
+          <p role="alert" className="text-xs text-destructive">{jevLoadError}</p>
+        )}
+        {projectReady && !jevLoadError && !jevConfig && !hasAvailableModels && (
           <p className="text-xs text-amber-700 dark:text-amber-400">
             {t("settings.sections.maintenance.dedup.noModel", {
               defaultValue: "请先在「设置 → 大语言模型」中添加并启用一个模型。",
             })}
           </p>
         )}
-        {projectReady && hasAvailableModels && !detectLlmReady && (
+        {projectReady && !jevLoadError && !jevConfig && hasAvailableModels && !detectLlmReady && (
           <p className="text-xs text-amber-700 dark:text-amber-400">
             {detectModelId.trim()
               ? t("settings.sections.maintenance.noLlm", {
@@ -776,10 +790,10 @@ export function MaintenanceSection() {
               <ChatModelSelector
                 value={detectModelId}
                 onChange={setDetectModelId}
-                disabled={scanning}
+                disabled={scanning || !!jevConfig}
               />
               <p className="text-[0.6875rem] leading-relaxed text-muted-foreground">
-                {t("settings.sections.maintenance.dedup.detectModelHint", {
+                {jevConfig ? `当前使用 SAG2 决策模型 ${jevConfig.model} 复核候选。` : t("settings.sections.maintenance.dedup.detectModelHint", {
                   defaultValue: "扫描分组用。实体多时上下文更大，建议用更强、上下文更长的模型。",
                 })}
               </p>
@@ -807,7 +821,7 @@ export function MaintenanceSection() {
         <div className="flex flex-wrap items-center gap-2">
           <Button
             onClick={() => void handleScan()}
-            disabled={scanning || controlsBusy || !projectReady || !hasAvailableModels || !llmReady}
+            disabled={scanning || controlsBusy || !projectReady || !llmReady}
           >
             {scanning ? (
               <>
@@ -866,6 +880,15 @@ export function MaintenanceSection() {
         {scanCompleted && activeScanState.coverage && (
           <p className="text-xs text-muted-foreground">{activeScanState.coverage}</p>
         )}
+        {scanCompleted && manualReview.length > 0 && (
+          <details className="space-y-2 text-xs">
+            <summary>证据不足，需人工核对（{manualReview.length} 对）</summary>
+            <ul className="space-y-2 whitespace-pre-line">{manualReview.slice(reviewPage.start, reviewPage.end).map((note, i) => (
+              <li key={reviewPage.start + i}>{note}</li>
+            ))}</ul>
+            <ReviewPageNav {...reviewPage} />
+          </details>
+        )}
         {scanCompleted && visibleGroups.length > 0 && !scanError && (
           <div className="flex items-start gap-1.5 rounded border border-sky-500/40 bg-sky-500/5 px-2 py-1.5 text-xs text-sky-800 dark:text-sky-300">
             <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" />
@@ -890,7 +913,7 @@ export function MaintenanceSection() {
           </div>
         )}
 
-        {scanCompleted && visibleGroups.length === 0 && groups.length === 0 && !scanError && scannedPageCount !== null && scannedPageCount >= 2 && (
+        {scanCompleted && manualReview.length === 0 && visibleGroups.length === 0 && groups.length === 0 && !scanError && scannedPageCount !== null && scannedPageCount >= 2 && (
           <div className="flex items-start gap-1.5 rounded border border-emerald-500/40 bg-emerald-500/5 px-2 py-1.5 text-xs text-emerald-700 dark:text-emerald-400">
             <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" />
             <div>
@@ -1302,7 +1325,7 @@ function DuplicateGroupCard({
       </div>
 
       {group.reason && (
-        <div className="text-xs italic leading-relaxed text-muted-foreground">{group.reason}</div>
+        <div className="whitespace-pre-line text-xs italic leading-relaxed text-muted-foreground">{group.reason}</div>
       )}
 
       {!finished && (

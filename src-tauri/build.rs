@@ -1,4 +1,10 @@
 fn main() {
+    let rank = "src/commands/sag/sag_rank.c";
+    println!("cargo:rerun-if-changed={rank}");
+    cc::Build::new().file(rank)
+        .include(std::env::var_os("DEP_SQLITE3_INCLUDE").expect("bundled SQLite headers"))
+        .define("SQLITE_CORE", None).define("SAG_STATIC", None)
+        .compile("qmai_sag_rank");
     println!("cargo:rerun-if-changed=icons/icon.ico");
     println!("cargo:rerun-if-changed=icons/32x32.png");
     println!("cargo:rerun-if-changed=icons/128x128.png");

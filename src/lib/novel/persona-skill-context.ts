@@ -1,5 +1,6 @@
 import { fileExists } from "@/commands/fs"
 import { isAiExcludedContent } from "./ai-exclude"
+import { hasReadableHistory } from "./ai-exclude-chapters"
 import type { OutlineCharacterBrief } from "./outline-context-index"
 import { normalizePath } from "@/lib/path-utils"
 import { formatPersonaPersonalityForWriting, splitPersonaSkillDocument, type ParsedPersonaSkillDocument } from "./persona-skill-profile"
@@ -121,6 +122,7 @@ export async function buildPersonaSkillContext(
   matchingText: string,
   backgroundText = "",
   briefs: readonly OutlineCharacterBrief[] = [],
+  readable?: ReadonlyMap<number, string>,
 ): Promise<{ skills: string; profileFacts: Map<string, string> }> {
   const profileFacts = new Map<string, string>()
   if (!matchingText.trim() && !backgroundText.trim()) return { skills: "", profileFacts }
@@ -144,7 +146,8 @@ export async function buildPersonaSkillContext(
   const blocks: string[] = []
   let used = 0
   for (const meta of [...candidates, ...factsOnly]) {
-    if (excluded.has(meta.id)) {
+    const through = Math.max(meta.lastLearnedChapter, meta.asOfChapter ?? 0)
+    if (excluded.has(meta.id) || (readable && through > 0 && !hasReadableHistory(through, readable))) {
       profileFacts.set(meta.id, "")
       continue
     }

@@ -1,10 +1,11 @@
 import { runAiChatSession } from "@/lib/agent/ai-chat-session"
 import { createStageStartedEvent } from "@/lib/agent/activity-trace"
-import { buildAgentConfig } from "@/lib/agent/config"
+import { buildAgentConfig, effectiveToolsEnabled } from "@/lib/agent/config"
 import { runNovelPrePluginChain } from "@/lib/agent/novel-pre-plugin-chain"
 import { resolveRequiredToolsOnce } from "@/lib/agent/required-tools-gate"
 import { ToolRegistry } from "@/lib/agent/registry"
 import { runDeepChapterGeneration } from "@/lib/novel/deep-chapter-generation"
+import { buildContextPack, type ChapterSearchEvidence } from "@/lib/novel/context-engine"
 import { routeTask } from "@/lib/novel/task-router"
 import { loadDeAiSkillConfig } from "@/lib/novel/de-ai-skill-library"
 import { loadAllLinkedSkillsContent, loadUserSkillConfig, resolveEnabledWritingSkills } from "@/lib/novel/user-skill-store"
@@ -30,6 +31,7 @@ export interface WritingSessionContext extends ResolvedWritingParameters {
   onToolEvent?: (event: AgentToolEvent) => void
   onText?: (text: string) => void
   onNeedsInput?: (message: string) => void
+  onRetrievalWarning?: () => void
 }
 
 interface ChatSnapshot {
@@ -83,6 +85,8 @@ async function runDefaultSession(ctx: WritingSessionContext): Promise<string> {
   ])
   const registry = new ToolRegistry()
   const novelMode = useWikiStore.getState().novelMode
+  const toolsEnabled = effectiveToolsEnabled(ctx.agentLlm.model, ctx.agentLlm)
+  let chapterEvidence: ChapterSearchEvidence | undefined
   ctx.onActivityEvent?.(createStageStartedEvent({ stageId: "task_understanding", title: "识别写作任务", summary: "" }))
   const taskRoute = await routeTask(ctx.message, {
     llmConfig: ctx.agentLlm,
@@ -110,10 +114,16 @@ async function runDefaultSession(ctx: WritingSessionContext): Promise<string> {
      */
     pluginTools: getPluginToolDescriptors(),
     invokePluginTool: invokePluginToolViaTauri(),
-    runDeepChapterGeneration,
+    runDeepChapterGeneration: (input, ...args) => runDeepChapterGeneration({
+      ...input,
+      chapterNumber: input.chapterNumber ?? chapterEvidence?.chapterNumber,
+      chapterEvidence,
+    }, ...args),
   })
   ctx.onActivityEvent?.(createStageStartedEvent({ stageId: "prepare_agent_context", title: "准备主 Agent 上下文", summary: "" }))
   const prePlugin = await runNovelPrePluginChain({
+    config: toolsEnabled ? undefined : { disabledPlugins: ["select_capabilities", "build_system_prompt"] },
+    deps: { buildContextPack: (project, task, chapter, options) => buildContextPack(project, task, chapter, { ...options, signal: ctx.signal }) },
     input: {
       userMessage: ctx.message,
       projectPath,
@@ -126,6 +136,8 @@ async function runDefaultSession(ctx: WritingSessionContext): Promise<string> {
     },
   }).catch(() => null)
   if (ctx.signal?.aborted) throw new Error("操作已取消")
+  chapterEvidence = prePlugin?.contextPack?.sagEvidence
+  if (chapterEvidence?.warning) ctx.onRetrievalWarning?.()
   if (prePlugin?.shouldStop) {
     if (prePlugin.stopReason === "source_canon_overflow") throw new Error("模型上下文不足，无法保留完整原作设定。")
     const clarification = prePlugin.stopReason === "clarification_needed"
@@ -138,9 +150,11 @@ async function runDefaultSession(ctx: WritingSessionContext): Promise<string> {
     novelMode,
     intent: taskRoute.intent,
     mode: ctx.workflowMode,
-    enabledToolNames: prePlugin?.enabledToolNames,
+    enabledToolNames: toolsEnabled ? prePlugin?.enabledToolNames : [],
   })
-  const systemPrompt = prePlugin?.finalSystemPrompt?.trim() || agentConfig.systemPrompt
+  const systemPrompt = toolsEnabled
+    ? prePlugin?.finalSystemPrompt?.trim() || agentConfig.systemPrompt
+    : [agentConfig.systemPrompt, "本轮未启用工具，请直接根据已有资料完成用户要求。", prePlugin?.novelSystemPrompt].filter(Boolean).join("\n\n")
   let reply = ""
   ctx.onActivityEvent?.(createStageStartedEvent({ stageId: "agent_dispatch", title: "等待主 Agent 响应", summary: "" }))
   let awaitingAgent = true
@@ -279,6 +293,7 @@ export async function runWritingConversation(input: {
             onToolEvent: progress.tool,
             onText: (text) => { partial += text },
             onNeedsInput: (text) => { status = "needs_input"; problem = text },
+            onRetrievalWarning: progress.retrievalWarning,
           })
           if (progress.snapshot().tools.some((tool) => tool.status === "approval_required")) {
             status = "needs_input"
@@ -356,7 +371,8 @@ export async function runWritingConversation(input: {
         await progress.finish(status, problem ? { kind: status === "needs_input" ? "input_required" : "error", message: problem } : undefined)
         if (failure) throw failure
         if (status === "cancelled") return STOPPED_GENERATION_TEXT
-        return `写作对话${status === "needs_input" ? "需要补充信息" : "已完成"}。\n会话：${target.id}\n模式：${parameters.workflowMode}\n正文模型：${parameters.chapterWritingLlm.model}\n工作流模型：${parameters.agentLlm.model}\n\n${reply}`
+        const retrievalWarning = view.issues.find(issue => issue.kind === "retrieval_warning")?.message
+        return `写作对话${status === "needs_input" ? "需要补充信息" : "已完成"}。\n会话：${target.id}\n模式：${parameters.workflowMode}\n正文模型：${parameters.chapterWritingLlm.model}\n工作流模型：${parameters.agentLlm.model}${retrievalWarning ? "\n" + retrievalWarning : ""}\n\n${reply}`
       } catch (error) {
         if (progress.snapshot().status === "running") {
           await progress.finish("failed", { kind: "error", message: summarizeWritingError(error) }).catch(() => {})

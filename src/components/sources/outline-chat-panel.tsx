@@ -3525,6 +3525,7 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
           projectPath: normalizePath(project.path),
           surface: "ai-outline",
           sessionId: capturedConvId,
+          signal: controller.signal,
           task: prompt,
           intent: options.intentPhase === "generation" ? "generate" : "question",
           references: tokens.map(describeReferenceForOutlineAgent),
@@ -3534,6 +3535,7 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
           maxContextSize: effectiveLlmConfig.maxContextSize,
           forceRefresh,
         });
+        if (contextHubResult?.contextPack.sagEvidence?.warning) toast.info(contextHubResult.contextPack.sagEvidence.warning);
         if (contextHubResult) {
           try {
             const contextHubSnapshot = await contextHub.saveSnapshot(assistantId, contextHubResult);
@@ -5295,6 +5297,7 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
             projectPath: normalizePath(project.path),
             surface: "ai-outline",
             sessionId: capturedConvId,
+            signal: controller.signal,
             task: `继续未完成的 AI 大纲多 Agent 任务：${failedAgentIds.join("、")}`,
             intent: "generate",
             messages: conv.messages.map((message) => ({
@@ -5305,6 +5308,7 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
             tokenBudget: resumeRequestBudget.contextTokenBudget,
             maxContextSize: effectiveLlmConfig.maxContextSize,
           });
+          if (contextHubResult?.contextPack.sagEvidence?.warning) toast.info(contextHubResult.contextPack.sagEvidence.warning);
           if (contextHubResult) {
             try {
               const contextHubSnapshot = await contextHub.saveSnapshot(`${messageId}:${runId}`, contextHubResult);
@@ -5999,6 +6003,7 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
             projectPath: normalizePath(project.path),
             surface: "ai-outline",
             sessionId: capturedConvId,
+            signal: controller.signal,
             task: lastUserRequest,
             intent: "generate",
             messages: historyMessages,
@@ -6006,6 +6011,7 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
             tokenBudget: regenerationRequestBudget.contextTokenBudget,
             maxContextSize: effectiveLlmConfig.maxContextSize,
           });
+          if (contextHubResult?.contextPack.sagEvidence?.warning) toast.info(contextHubResult.contextPack.sagEvidence.warning);
           if (contextHubResult && isCurrentRun()) {
             try {
               contextHubSnapshot = await contextHub.saveSnapshot(assistantId, contextHubResult);

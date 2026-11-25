@@ -136,6 +136,7 @@ vi.mock("@/commands/fs", () => ({
   getFileSize: vi.fn(async () => 0),
   writeFileAtomic: vi.fn(async () => {}),
   listDirectory: vi.fn(async () => []),
+  readMarkdownBatch: vi.fn(async (paths: string[]) => paths.map(() => null)),
   /*
    * 上下文中枢（ContextSourceRegistry）在建实例时就会取这个函数当默认 hasher。
    * 少了它，任何**真的发出一条消息**的用例都会在后台抛

@@ -33,14 +33,7 @@ beforeAll(async () => {
 })
 
 beforeEach(() => {
-  // Disable embedding/vector search — we only want to exercise the
-  // BM25-style text search path.
-  useWikiStore.getState().setEmbeddingConfig({
-    enabled: false,
-    endpoint: "",
-    apiKey: "",
-    model: "",
-  })
+  useWikiStore.setState({ jevConfig: null })
 })
 
 interface Ctx {

@@ -30,16 +30,6 @@ vi.mock("./tauri-fetch", () => ({
   isFetchNetworkError: () => false,
 }))
 
-// settings-model-test 会连带引入向量/重排/模型列表模块，这里挡掉与本报文无关的重依赖。
-vi.mock("@/lib/embedding", () => ({
-  fetchEmbedding: vi.fn(),
-  getLastEmbeddingError: vi.fn(() => null),
-  resetLastEmbeddingError: vi.fn(),
-}))
-vi.mock("@/lib/rerank-api", () => ({
-  isDirectRerankEndpoint: vi.fn(() => false),
-  requestDirectRerank: vi.fn(),
-}))
 vi.mock("@/lib/settings-model-list", () => ({ fetchLlmModelList: vi.fn() }))
 
 import { testLlmConnection, testLlmFunction } from "./connection-tests"

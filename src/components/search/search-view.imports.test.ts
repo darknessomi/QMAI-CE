@@ -8,7 +8,7 @@ describe("search-view search module loading", () => {
   it("does not load heavy search modules when the panel mounts", () => {
     expect(source).not.toMatch(/import\s*\{\s*searchWiki\b/)
     expect(source).not.toMatch(/import\s*\{\s*searchPlot\b/)
-    expect(source).toContain("includeVector: false")
+    expect(source).not.toContain("includeVector")
     expect(source).toContain("includeGraph: false")
     expect(source).toContain("includeRecentChapters: false")
   })

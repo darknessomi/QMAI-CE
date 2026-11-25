@@ -1771,6 +1771,7 @@ export function ChatPanel() {
             projectPath: pp,
             surface: "ai-chat",
             sessionId: capturedConvId,
+            signal: controller.signal,
             task: plainText,
             intent: resolveChatContextIntent(
               effectiveTaskRoute,
@@ -1896,14 +1897,14 @@ export function ChatPanel() {
 
       if (novelMode && effectiveTaskRoute && !isQuickGeneralChat) {
         try {
-          taskDirective = buildTaskDirective(effectiveTaskRoute)
+          taskDirective = agentSupportsTools ? buildTaskDirective(effectiveTaskRoute) : ""
           const goldenThreeChapter = detectGoldenThreeChapterRequest(plainText, effectiveTaskRoute.chapterNumber)
           goldenDirective = buildGoldenThreeChapterDirective(goldenThreeChapter)
           if (contextHubResult) {
             contextPack = contextHubResult.contextPack
           } else {
             const { buildContextPack, contextPackToPrompt } = await import("@/lib/novel/context-engine")
-            contextPack = await buildContextPack(pp, plainText, effectiveTaskRoute.chapterNumber).catch(() => ({
+            contextPack = contextPack ?? await buildContextPack(pp, plainText, effectiveTaskRoute.chapterNumber, { signal: controller.signal }).catch(() => ({
             task: plainText,
             chapterGoal: "",
             outline: "",
@@ -1948,6 +1949,8 @@ export function ChatPanel() {
           }
         }
       }
+
+      if (contextPack?.sagEvidence?.warning) toast.info(contextPack.sagEvidence.warning)
 
       const {
         skill: effectiveDeAiSkill,
@@ -2010,7 +2013,19 @@ export function ChatPanel() {
         : effectiveSystemPrompt
 
       const deAiMode = activeConv?.deAiMode ?? false
-      const rawUserContent = buildAgentUserContent(plainText, tokens)
+      let rawUserContent = buildAgentUserContent(plainText, tokens)
+      if (!novelMode) {
+        const { projectAnswerEvidence } = await import("@/lib/project-answer-evidence")
+        try {
+          const evidence = await projectAnswerEvidence(pp, plainText, controller.signal, agentConfig.llmConfig.maxContextSize ?? 8192)
+          if (evidence) rawUserContent = [evidence, rawUserContent].join("\n\n")
+        } catch (error) {
+          if (controller.signal.aborted) throw error
+          const detail = error instanceof Error ? error.message : String(error)
+          toast.error(`项目资料检索失败：${detail}`)
+          rawUserContent = ["本次项目资料检索失败，无法根据项目原文核实。", rawUserContent].join("\n\n")
+        }
+      }
       const baseUserContent = !effectiveDeAiSkill && deAiMode
         ? injectDeAiDirective(rawUserContent, deAiMode)
         : rawUserContent
@@ -2076,7 +2091,7 @@ export function ChatPanel() {
                     : planBlueprint,
                 }
               : {}),
-          }, signal, context),
+          }, signal, context && { ...context, chapterEvidence: contextPack?.sagEvidence }),
         })
       }
 

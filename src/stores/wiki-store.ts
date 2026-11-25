@@ -84,7 +84,13 @@ export type SettingsCategoryId =
   | "feedback"
   | "changelog"
 
-export type ModelSettingsTabId = "default" | "llm" | "rerank" | "embedding"
+export type ModelSettingsTabId = "default" | "llm" | "jev"
+
+export interface JevConfig {
+  endpoint: string
+  model: string
+  apiKey?: string
+}
 
 const readStoredUiFontSizeScale = (): number => {
   if (typeof localStorage === "undefined") return 1
@@ -250,62 +256,6 @@ interface SearchApiConfig {
   searXngUrl?: string
   searXngCategories?: SearXngCategory[]
   providerConfigs?: SearchProviderConfigs
-}
-
-interface EmbeddingConfig {
-  enabled: boolean
-  endpoint: string // e.g. "http://127.0.0.1:1234/v1/embeddings"
-  apiKey: string
-  model: string // e.g. "text-embedding-qwen3-embedding-0.6b"
-  /** Optional Gemini native `output_dimensionality` value. Ignored by OpenAI-compatible endpoints. */
-  outputDimensionality?: number
-  /**
-   * Chunking knobs (Phase 1 RAG). Undefined values fall back to the
-   * chunker's built-in defaults in `src/lib/text-chunker.ts`:
-   *   targetChars   1000
-   *   maxChars      1500
-   *   minChars      200
-   *   overlapChars  200
-   *
-   * Users on small-context endpoints (e.g. llama.cpp with n_ctx=512,
-   * Ollama `mxbai-embed-large`) should lower `maxChunkChars` to avoid
-   * per-request rejections; fetchEmbedding also auto-halves on
-   * "too long" server errors as a second line of defence.
-   */
-  maxChunkChars?: number
-  overlapChunkChars?: number
-}
-
-/**
- * 检索重排（rerank）配置。
- *
- * ⚠️ 这里**没有** `useMainLlm`：4.3.6 起取消了「复用主模型」。
- * 用聊天主模型当重排器要额外发一次完整对话请求（每次检索 12 个候选 ≈ 数千 token），
- * 换来的排序变化基本看不出来，用户侧的表现就是「开了没反应、还烧钱」。
- * 现在重排只走专用重排模型（直连 …/rerank 或能返回 JSON 的模型）；
- * 没配模型时 resolveRerankModel 返回 null，检索直接降级为原顺序。
- * 老配置里残留的 `useMainLlm` 由 project-store 的 normalizeRerankConfig 吞掉。
- */
-export interface RerankConfig {
-  enabled: boolean
-  provider: LlmConfig["provider"]
-  apiKey: string
-  model: string
-  ollamaUrl: string
-  customEndpoint: string
-  apiMode?: CustomApiMode
-  maxCandidates: number
-}
-
-export const DEFAULT_RERANK_CONFIG: RerankConfig = {
-  enabled: false,
-  provider: "custom",
-  apiKey: "",
-  model: "",
-  ollamaUrl: "http://127.0.0.1:11434",
-  customEndpoint: "",
-  apiMode: "chat_completions",
-  maxCandidates: 12,
 }
 
 /**
@@ -703,8 +653,8 @@ interface WikiState {
   /** Which preset is currently active. `null` = no LLM configured. */
   activePresetId: string | null
   searchApiConfig: SearchApiConfig
-  embeddingConfig: EmbeddingConfig
-  rerankConfig: RerankConfig
+  jevConfig: JevConfig | null
+  jevConfigLoadError: string | null
   multimodalConfig: MultimodalConfig
   outputLanguage: OutputLanguage
   proxyConfig: ProxyConfig
@@ -781,8 +731,6 @@ interface WikiState {
   setProviderConfigs: (configs: ProviderConfigs) => void
   setActivePresetId: (id: string | null) => void
   setSearchApiConfig: (config: SearchApiConfig) => void
-  setEmbeddingConfig: (config: EmbeddingConfig) => void
-  setRerankConfig: (config: Partial<RerankConfig>) => void
   setMultimodalConfig: (config: MultimodalConfig) => void
   setOutputLanguage: (lang: OutputLanguage) => void
   setProxyConfig: (config: ProxyConfig) => void
@@ -976,15 +924,8 @@ export const useWikiStore = create<WikiState>((set, get) => ({
     providerConfigs: {},
   },
 
-  embeddingConfig: {
-    enabled: false,
-    endpoint: "",
-    apiKey: "",
-    model: "",
-  },
-
-  rerankConfig: { ...DEFAULT_RERANK_CONFIG },
-
+  jevConfig: null,
+  jevConfigLoadError: null,
   multimodalConfig: {
     // Off by default — captioning is a non-trivial token spend
     // (one VLM call per extracted image), and silently turning it
@@ -1068,8 +1009,6 @@ export const useWikiStore = create<WikiState>((set, get) => ({
   }),
   setActivePresetId: (activePresetId) => set({ activePresetId }),
   setSearchApiConfig: (searchApiConfig) => set({ searchApiConfig }),
-  setEmbeddingConfig: (embeddingConfig) => set({ embeddingConfig }),
-  setRerankConfig: (rerankConfig) => set((state) => ({ rerankConfig: { ...state.rerankConfig, ...rerankConfig } })),
   setMultimodalConfig: (multimodalConfig) => set({ multimodalConfig }),
   setOutputLanguage: (outputLanguage) => set({ outputLanguage }),
   setProxyConfig: (proxyConfig) => set({ proxyConfig }),
@@ -1176,4 +1115,4 @@ export const useWikiStore = create<WikiState>((set, get) => ({
   bumpDataVersion: () => set((state) => ({ dataVersion: state.dataVersion + 1 })),
 }))
 
-export type { WikiState, LlmConfig, SearchApiConfig, EmbeddingConfig, MultimodalConfig, OutputLanguage, ProxyConfig, SourceWatchConfig }
+export type { WikiState, LlmConfig, SearchApiConfig, MultimodalConfig, OutputLanguage, ProxyConfig, SourceWatchConfig }

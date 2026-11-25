@@ -13,10 +13,7 @@ export const APP_STATE_PERSIST_DEBOUNCE_MS = 100
  */
 export const ENCRYPTED_STATE_KEYS = new Set([
   "llmConfig",
-  "rerankConfig",
-  "projectRerankConfigs",
   "searchApiConfig",
-  "embeddingConfig",
   "multimodalConfig",
   "sync.webdav",
 ])

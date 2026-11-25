@@ -238,20 +238,20 @@ export function DashboardView({ headerActions }: DashboardViewProps = {}) {
         }
       }
     } else if (item.targetChapterNumber) {
-      const results = await searchWiki(pp, `chapter_number:${item.targetChapterNumber}`).catch(() => [])
+      const results = await searchWiki(pp, `chapter_number:${item.targetChapterNumber}`, { localOnly: true }).catch(() => [])
       candidates.push(...results.map((result) => normalizePath(result.path)))
     }
 
     if (item.targetPath) {
       const chapterNumber = extractChapterNumberFromTargetPath(item.targetPath)
       if (chapterNumber !== null) {
-        const results = await searchWiki(pp, `chapter_number:${chapterNumber}`).catch(() => [])
+        const results = await searchWiki(pp, `chapter_number:${chapterNumber}`, { localOnly: true }).catch(() => [])
         candidates.push(...results.map((result) => normalizePath(result.path)))
       }
 
       const stem = getFileStem(item.targetPath).trim()
       if (stem) {
-        const results = await searchWiki(pp, stem).catch(() => [])
+        const results = await searchWiki(pp, stem, { localOnly: true }).catch(() => [])
         candidates.push(...results.map((result) => normalizePath(result.path)))
       }
     }

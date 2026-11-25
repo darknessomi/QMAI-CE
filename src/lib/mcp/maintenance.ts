@@ -163,7 +163,7 @@ export async function dispatchMaintenanceTool(name: string, args: Record<string,
       requireCleanEditor(projectPath)
       task.report("备份并清理来源记忆")
       const warnings: string[] = []
-      const deletedCount = await applyMemoryCleanup(projectPath, scan, selected, (message) => { if (message.startsWith("警告：")) warnings.push(message); task.log(message); task.report(message.startsWith("同步向量") ? "同步向量索引" : "同步来源和派生文档") })
+      const deletedCount = await applyMemoryCleanup(projectPath, scan, selected, (message) => { if (message.startsWith("警告：")) warnings.push(message); task.log(message); task.report("同步来源和派生文档") })
       await refreshLive(projectPath, true)
       return { scanId: scan.scanId, issueCount: selected.length, deletedCount, cleanupId: await lastMemoryCleanupId(projectPath), warnings }
     }, safeError))

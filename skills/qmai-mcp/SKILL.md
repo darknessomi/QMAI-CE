@@ -2,18 +2,20 @@
 name: qmai-mcp
 description: 调用本机青幕写作 MCP，后台发起写作并查询实际阶段、工具状态和问题，也支持书架、文档保存、标题、记忆提取、章节排版及来源记忆清理与撤销。写作进度最多跟踪 30 分钟。
 metadata:
-  version: 1.6.0
+  version: 1.6.1
 ---
 
 # qmai-mcp
 
-版本：1.6.0
+版本：1.6.1
 
 青幕写作需要保持打开，并且设置里的 MCP 开关已打开。工具通过本机 MCP 服务 `qmai` 调用。
 
 未传 `workflowMode`、`model`、`reasoningDepth` 时，使用青幕当前界面的写作模式、写作模型和思考深度，不改写界面上的选择。
 
 `extract_memory` 只提取记忆，不排版正文。需要排版时单独调用 `format_chapter`。草稿不会进入记忆库，除非对章节显式传入 `allowDraft: true`。
+
+MCP 写作沿用桌面端保存的 JEV 配置。配置 JEV 后，普通写作也会检索可读的前章定稿，并把带路径和行号的原文放入写作上下文。JEV 留空时使用基础检索。
 
 ## 工具
 
@@ -56,7 +58,7 @@ metadata:
 - `get_maintenance_progress`：按启动返回的 `projectPath`、`runId` 查询，配合 `afterRevision`、`waitMs: 30000` 等待变化。终态为 completed、failed、cancelled、interrupted；重启不会自动重跑。`persistenceError` 表示磁盘进度可能滞后。不要将启动成功当成维护完成。
 - `get_memory_cleanup_result`：扫描完成后分页查看 `issues`，包括删除条目、保留依据、理由和置信度。可指定 `scanId`；`offset` 默认 0，`limit` 默认 20、最大 100。
 - `keep_memory_cleanup_issues`：传 `scanId` 和明确 `issueIds`，把误判候选加入项目保留白名单，之后不再建议同组候选。
-- `apply_memory_cleanup`：传原 `scanId` 和审查后的明确 `issueIds`，后台先备份，再从快照来源删除并同步四类 JSON、正式记忆/追踪 Markdown、检索资料、人物 Skill、图谱和受影响向量。不会修改正文或大纲。来源修订变化、候选保留依据冲突或相关编辑器有未保存修改时拒绝执行。完成结果带 `cleanupId`。
+- `apply_memory_cleanup`：传原 `scanId` 和审查后的明确 `issueIds`，后台先备份，再从快照来源删除并同步四类 JSON、正式记忆/追踪 Markdown、检索资料、人物 Skill 和图谱。不会修改正文或大纲。来源修订变化、候选保留依据冲突或相关编辑器有未保存修改时拒绝执行。完成结果带 `cleanupId`。
 - `undo_memory_cleanup`：撤销最近一次清理，可传原 `cleanupId` 防止撤销错任务。后台恢复实际改动的文件并同步索引；相关文件清理后已有新修改时拒绝覆盖，保留备份。
 - `stop_maintenance_task`：只取消扫描，传 `projectPath`、`runId`。清理和撤销同步期间不能中断，清理完成后可以撤销。
 

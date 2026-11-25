@@ -7,7 +7,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 
 const mockDeleteFile = vi.fn<(path: string) => Promise<void>>()
-const mockRemovePageEmbedding = vi.fn<(projectPath: string, slug: string) => Promise<void>>()
 const mockReadFile = vi.fn<(path: string) => Promise<string>>()
 const mockWriteFile = vi.fn<(path: string, content: string) => Promise<void>>()
 const mockListDirectory = vi.fn<(path: string) => Promise<unknown>>()
@@ -19,113 +18,29 @@ vi.mock("@/commands/fs", () => ({
   listDirectory: (path: string) => mockListDirectory(path),
 }))
 
-vi.mock("@/lib/embedding", () => ({
-  removePageEmbedding: (projectPath: string, slug: string) =>
-    mockRemovePageEmbedding(projectPath, slug),
-}))
 
 import { cascadeDeleteWikiPage, cascadeDeleteWikiPagesWithRefs } from "./wiki-page-delete"
 import type { FileNode } from "@/types/wiki"
 
 beforeEach(() => {
   mockDeleteFile.mockReset()
-  mockRemovePageEmbedding.mockReset()
   mockReadFile.mockReset()
   mockWriteFile.mockReset()
   mockListDirectory.mockReset()
-  // Default: both succeed silently.
   mockDeleteFile.mockResolvedValue(undefined)
-  mockRemovePageEmbedding.mockResolvedValue(undefined)
   mockWriteFile.mockResolvedValue(undefined)
 })
 
 describe("cascadeDeleteWikiPage", () => {
-  it("deletes the file, then drops the matching page's embedding chunks", async () => {
+  it("deletes the requested page", async () => {
     await cascadeDeleteWikiPage("/proj", "/proj/wiki/concepts/rope.md")
-
-    expect(mockDeleteFile).toHaveBeenCalledTimes(1)
-    expect(mockDeleteFile).toHaveBeenCalledWith("/proj/wiki/concepts/rope.md")
-
-    expect(mockRemovePageEmbedding).toHaveBeenCalledTimes(1)
-    expect(mockRemovePageEmbedding).toHaveBeenCalledWith("/proj", "wiki/concepts/rope")
+    expect(mockDeleteFile).toHaveBeenCalledExactlyOnceWith("/proj/wiki/concepts/rope.md")
   })
 
-  it("calls deleteFile BEFORE removePageEmbedding (file is the source of truth)", async () => {
-    // Order matters: if removePageEmbedding ran first and the disk
-    // delete then failed, we'd be left with a page on disk with no
-    // chunks — every search hit would skip it because vector search
-    // returned no chunks for it. Disk delete first means a partial
-    // failure leaves stale chunks (acceptable, fixed on next
-    // re-index) rather than a stale page (bad UX).
-    const order: string[] = []
-    mockDeleteFile.mockImplementation(async () => {
-      order.push("deleteFile")
-    })
-    mockRemovePageEmbedding.mockImplementation(async () => {
-      order.push("removePageEmbedding")
-    })
-
-    await cascadeDeleteWikiPage("/proj", "/proj/wiki/concepts/foo.md")
-    expect(order).toEqual(["deleteFile", "removePageEmbedding"])
-  })
-
-  it("does NOT call removePageEmbedding when deleteFile throws", async () => {
-    // If the file isn't actually gone, dropping its chunks is wrong:
-    // the page still exists (e.g. permission-denied) and would lose
-    // its searchability while staying on disk.
+  it("preserves associated media if removing the source page fails", async () => {
     mockDeleteFile.mockRejectedValueOnce(new Error("EACCES"))
-
-    await expect(cascadeDeleteWikiPage("/proj", "/proj/wiki/foo.md")).rejects.toThrow("EACCES")
-
-    expect(mockRemovePageEmbedding).not.toHaveBeenCalled()
-  })
-
-  it("propagates removePageEmbedding errors to the caller (not silently swallowed)", async () => {
-    // Caller decides fault-tolerance policy. Some callers
-    // (ingest-queue cleanup, source-delete batches) want to
-    // continue past LanceDB hiccups; others (single-page delete
-    // from lint view) might want to surface the error.
-    mockRemovePageEmbedding.mockRejectedValueOnce(new Error("lancedb table missing"))
-
-    await expect(cascadeDeleteWikiPage("/proj", "/proj/wiki/foo.md")).rejects.toThrow(
-      "lancedb table missing",
-    )
-    // File delete still happened — leaving the cascade half-done
-    // is the lesser evil compared to never deleting the file.
-    expect(mockDeleteFile).toHaveBeenCalled()
-  })
-
-  it("preserves nested directory segments in the vector page ID", async () => {
-    await cascadeDeleteWikiPage("/proj", "/proj/wiki/concepts/some-deep/nested/page.md")
-    expect(mockRemovePageEmbedding).toHaveBeenCalledWith("/proj", "wiki/concepts/some-deep/nested/page")
-  })
-
-  it("handles Windows backslash paths (project path normalization happens elsewhere)", async () => {
-    // The desktop ingest pipeline can produce backslash-laden paths
-    // before path-utils normalizes them. cascadeDeleteWikiPage's
-    // slug derivation MUST cope with both separators in one string.
-    await cascadeDeleteWikiPage("C:/proj", "C:\\proj\\wiki\\entities\\transformer.md")
-
-    expect(mockDeleteFile).toHaveBeenCalledWith("C:\\proj\\wiki\\entities\\transformer.md")
-    expect(mockRemovePageEmbedding).toHaveBeenCalledWith("C:/proj", "wiki/entities/transformer")
-  })
-
-  it("preserves dotted page names (e.g. foo.bar.md) in the slug", async () => {
-    // getFileStem strips only the LAST extension, so "foo.bar.md" → "foo.bar".
-    // Pin it: a regression that strips ALL dots would turn this slug
-    // into "foo" and orphan the LanceDB chunks for "foo.bar".
-    await cascadeDeleteWikiPage("/proj", "/proj/wiki/concepts/foo.bar.md")
-    expect(mockRemovePageEmbedding).toHaveBeenCalledWith("/proj", "wiki/concepts/foo.bar")
-  })
-
-  it("skips removePageEmbedding when slug derivation yields empty (defensive)", async () => {
-    // Edge case: a path that's just "/" or empty would yield ""
-    // slug. Calling removePageEmbedding("") could match every page
-    // in some LanceDB filter implementations, which would be
-    // catastrophic. The helper guards against this.
-    await cascadeDeleteWikiPage("/proj", "/")
-    expect(mockDeleteFile).toHaveBeenCalled()
-    expect(mockRemovePageEmbedding).not.toHaveBeenCalled()
+    await expect(cascadeDeleteWikiPage("/proj", "/proj/wiki/sources/rope.md")).rejects.toThrow("EACCES")
+    expect(mockDeleteFile).toHaveBeenCalledTimes(1)
   })
 
   // ── Media cascade: source-summary deletion drops images too ──────
@@ -144,7 +59,6 @@ describe("cascadeDeleteWikiPage", () => {
     expect(mockDeleteFile).toHaveBeenCalledTimes(2)
     expect(mockDeleteFile).toHaveBeenNthCalledWith(1, "/proj/wiki/sources/rope-paper.md")
     expect(mockDeleteFile).toHaveBeenNthCalledWith(2, "/proj/wiki/media/rope-paper")
-    expect(mockRemovePageEmbedding).toHaveBeenCalledWith("/proj", "wiki/sources/rope-paper")
   })
 
   it("does NOT cascade media when deleting a non-source page (concept / entity / queries)", async () => {
@@ -178,8 +92,6 @@ describe("cascadeDeleteWikiPage", () => {
     ).resolves.toBeUndefined()
     // Both attempts happened.
     expect(mockDeleteFile).toHaveBeenCalledTimes(2)
-    // Embedding cascade still ran in between.
-    expect(mockRemovePageEmbedding).toHaveBeenCalledWith("/proj", "wiki/sources/text-only-source")
   })
 
   it("handles Windows backslash paths in the source-page detection", async () => {
@@ -245,7 +157,7 @@ function dirNode(rel: string, children: FileNode[]): FileNode {
 }
 
 describe("cascadeDeleteWikiPagesWithRefs", () => {
-  it("deletes the file, drops embeddings, and reports the path", async () => {
+  it("deletes the file, and reports the path", async () => {
     const target = `${PROJECT}/wiki/entities/alice-chen.md`
     mockReadFile.mockImplementationOnce(async () =>
       `---\ntype: entity\ntitle: "Alice Chen"\n---\n\n# Alice`,
@@ -259,7 +171,6 @@ describe("cascadeDeleteWikiPagesWithRefs", () => {
     const result = await cascadeDeleteWikiPagesWithRefs(PROJECT, [target])
     expect(result.deletedPaths).toEqual([target])
     expect(mockDeleteFile).toHaveBeenCalledWith(target)
-    expect(mockRemovePageEmbedding).toHaveBeenCalledWith(PROJECT, "wiki/entities/alice-chen")
   })
 
   it("strips [[deleted]] body wikilinks from sibling pages", async () => {

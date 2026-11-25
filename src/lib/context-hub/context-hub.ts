@@ -55,7 +55,7 @@ type BuildContextPack = (
   projectPath: string,
   task: string,
   chapterNumber?: number,
-  options?: { categories?: DataSourceCategory[]; loadAdapter?: DataSourceLoadAdapter },
+  options?: { categories?: DataSourceCategory[]; loadAdapter?: DataSourceLoadAdapter; signal?: AbortSignal },
 ) => Promise<ContextPack>
 
 const STABLE_SOURCE_KINDS: ContextSourceKind[] = ["setting", "entity", "outline"]
@@ -146,6 +146,8 @@ export class ContextHubController implements ContextHub {
   prepare(request: ContextHubRequest): Promise<ContextHubResult | null> {
     if (this.disposed) return Promise.resolve(null)
     if (request.intent === "review" || request.intent === "lint") return Promise.resolve(null)
+    // 带取消信号的独立请求不可共享另一次调用的取消令牌。
+    if (request.signal) return this.prepareWithFallback(request)
     const key = prepareKey(request)
     const pending = this.pending.get(key)
     if (pending) return pending
@@ -226,9 +228,11 @@ export class ContextHubController implements ContextHub {
   }
 
   private async prepareWithFallback(request: ContextHubRequest): Promise<ContextHubResult | null> {
+    request.signal?.throwIfAborted()
     try {
       return await this.prepareCached(request)
     } catch {
+      request.signal?.throwIfAborted()
       return null
     }
   }
@@ -252,8 +256,10 @@ export class ContextHubController implements ContextHub {
       {
         ...(request.categories?.length ? { categories: request.categories } : {}),
         loadAdapter: cacheAdapter,
+        ...(request.signal ? { signal: request.signal } : {}),
       },
     )
+    if (contextPack.sagEvidence?.warning) warnings.push(contextPack.sagEvidence.warning)
     const summaryFresh = !request.forceRefresh
       && isSessionSummaryFresh(request.existingSummary, dependencyStamp.fingerprint)
     if (request.existingSummary && !summaryFresh) {

@@ -10,6 +10,7 @@ export interface ContextLoadContext {
   projectPath: string
   task: string
   chapterNumber?: number
+  chapterScope?: { fingerprint: string; chapters: ReadonlyMap<number, string> }
   config: {
     recentSummaryWindow: number
     searchTopK: number

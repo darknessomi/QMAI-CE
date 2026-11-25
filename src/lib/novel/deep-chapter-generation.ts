@@ -78,6 +78,7 @@ import { runEventHooks, takeHooksFor } from "@/lib/plugins/hooks/runtime";
 import type { HookEvent, PluginHookView } from "@/lib/plugins/hooks/types";
 
 export interface DeepChapterGenerationInput {
+  chapterEvidence?: ContextPack["sagEvidence"];
   projectPath: string;
   userRequest: string;
   chapterNumber?: number;
@@ -741,8 +742,10 @@ export async function runDeepChapterGeneration(
     contextRequest,
     input.chapterNumber,
     signal,
+    input.chapterEvidence,
   );
   assertNotAborted(signal);
+  if (contextPack.sagEvidence?.warning) callbacks.onThinking?.(contextPack.sagEvidence.warning);
 
   if (!resumeCheckpoint) {
     emitDeepChapterActivity(callbacks, {
@@ -751,6 +754,7 @@ export async function runDeepChapterGeneration(
       kind: "read_source",
       title: "读取内容",
       content: [
+        ...(contextPack.sagEvidence?.warning ? [contextPack.sagEvidence.warning] : []),
         contextPack.outline?.trim()
           ? "已读取：作品完整大纲"
           : "未读取到：作品完整大纲",
@@ -2851,11 +2855,14 @@ async function safeBuildChapterContextPack(
   userRequest: string,
   chapterNumber?: number,
   signal?: AbortSignal,
+  evidence?: ContextPack["sagEvidence"],
 ): Promise<ContextPack> {
   try {
     throwIfAborted(signal);
     return await waitForAbortable(
-      deps.buildContextPack(projectPath, userRequest, chapterNumber),
+      signal || evidence
+        ? deps.buildContextPack(projectPath, userRequest, chapterNumber, { signal, evidence })
+        : deps.buildContextPack(projectPath, userRequest, chapterNumber),
       signal,
     );
   } catch (error) {

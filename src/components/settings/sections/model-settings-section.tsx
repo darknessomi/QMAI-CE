@@ -3,8 +3,7 @@ import { useTranslation } from "react-i18next"
 import type { SettingsDraft, DraftSetter } from "../settings-types"
 import { useWikiStore, type ModelSettingsTabId } from "@/stores/wiki-store"
 import { LlmProviderSection } from "./llm-provider-section"
-import { EmbeddingSection } from "./embedding-section"
-import { RerankSection } from "./rerank-section"
+import { JevModelSettings } from "@/components/uitest/models/jev-model"
 import { DefaultModelSettingsPanel } from "./default-model-settings-panel"
 
 type ModelTabId = ModelSettingsTabId
@@ -22,7 +21,7 @@ interface Props {
 
 /**
  * 模型设置聚合页：左侧设置分类中的「模型设置」入口进入本页。
- * 页面上方 4 个按钮（默认模型 / 大语言模型 / 重排模型 / 向量模型）切换，
+ * 页面上方按用途切换模型配置，
  * 默认选中「大语言模型」。
  */
 export function ModelSettingsSection({ draft, setDraft }: Props) {
@@ -31,8 +30,7 @@ export function ModelSettingsSection({ draft, setDraft }: Props) {
   const TABS: Array<{ id: ModelTabId; label: string }> = [
     { id: "default", label: t("settings.categories.defaultModel", { defaultValue: "默认模型" }) },
     { id: "llm", label: t("settings.categories.llm", { defaultValue: "大语言模型" }) },
-    { id: "rerank", label: t("settings.categories.rerank", { defaultValue: "重排模型" }) },
-    { id: "embedding", label: t("settings.categories.embedding", { defaultValue: "向量模型" }) },
+    { id: "jev", label: "SAG2 决策模型" },
   ]
 
   const requestedTab = useWikiStore((s) => s.activeModelSettingsTab)
@@ -53,9 +51,7 @@ export function ModelSettingsSection({ draft, setDraft }: Props) {
           {t("settings.categories.model", { defaultValue: "模型设置" })}
         </h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          {t("settings.modelSettingsDescription", {
-            defaultValue: "配置写小说各环节使用的模型：默认模型、大语言模型、重排模型、向量检索模型。",
-          })}
+          配置写作模型和检索使用的 SAG2 决策模型。
         </p>
       </div>
 
@@ -86,8 +82,7 @@ export function ModelSettingsSection({ draft, setDraft }: Props) {
       <div className="min-h-0 pt-2">
         {active === "llm" && <LlmProviderSection />}
         {active === "default" && <DefaultModelSettingsPanel draft={draft} setDraft={setDraft} />}
-        {active === "rerank" && <RerankSection draft={draft} setDraft={setDraft} />}
-        {active === "embedding" && <EmbeddingSection draft={draft} setDraft={setDraft} />}
+        {active === "jev" && <JevModelSettings />}
       </div>
     </div>
   )

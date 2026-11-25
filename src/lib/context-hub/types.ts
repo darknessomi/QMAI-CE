@@ -198,6 +198,7 @@ export interface ContextHubSnapshot extends ContextHubSnapshotRef {
 }
 
 export interface ContextHubRequest {
+  signal?: AbortSignal
   projectPath: string
   surface: ContextSurface
   sessionId: string
