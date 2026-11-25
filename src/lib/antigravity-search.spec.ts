@@ -36,14 +36,14 @@ describe("反重力 ACP 联网搜索", () => {
 })
 
 describe("antigravity search default model", () => {
-  it("falls back to the cheap flash model when empty, and supports explicit agy default", async () => {
+  it("搜索模型留空时使用 Gemini 4 Hydrogen (Low)，显式选择优先", async () => {
     const { resolveAntigravitySearchModel, DEFAULT_ANTIGRAVITY_SEARCH_MODEL, ANTIGRAVITY_AGY_DEFAULT_MODEL, antigravityModelLabel } = await import("./antigravity-search")
-    expect(DEFAULT_ANTIGRAVITY_SEARCH_MODEL).toBe("gemini-3.8-flash-low")
-    expect(resolveAntigravitySearchModel(undefined)).toBe("gemini-3.8-flash-low")
-    expect(resolveAntigravitySearchModel("  ")).toBe("gemini-3.8-flash-low")
+    expect(DEFAULT_ANTIGRAVITY_SEARCH_MODEL).toBe("gemini-4-hydrogen-low")
+    expect(resolveAntigravitySearchModel(undefined)).toBe(DEFAULT_ANTIGRAVITY_SEARCH_MODEL)
+    expect(resolveAntigravitySearchModel("  ")).toBe(DEFAULT_ANTIGRAVITY_SEARCH_MODEL)
     expect(resolveAntigravitySearchModel(ANTIGRAVITY_AGY_DEFAULT_MODEL)).toBeNull()
-    expect(resolveAntigravitySearchModel(" gemini-x ")).toBe("gemini-x")
-    expect(antigravityModelLabel("gemini-3.8-flash-low")).toBe("Gemini 3.8 Flash (Low)")
+    expect(resolveAntigravitySearchModel(" gemini-3.8-flash-low ")).toBe("gemini-3.8-flash-low")
+    expect(antigravityModelLabel(DEFAULT_ANTIGRAVITY_SEARCH_MODEL)).toBe("Gemini 4 Hydrogen (Low)")
     expect(antigravityModelLabel("gpt-oss-120b-medium")).toBe("GPT OSS 120b (Medium)")
   })
 })
@@ -61,7 +61,7 @@ describe("resolveAntigravitySearchTimeoutSecs", () => {
   it("自定义超时传给 Rust 命令", async () => {
     const invoke = vi.fn().mockResolvedValue(reply)
     await antigravitySearchDetailed("问题", { invoke, timeoutSecs: 600 })
-    expect(invoke).toHaveBeenCalledWith("antigravity_cli_search", expect.objectContaining({ timeoutSecs: 600 }))
+    expect(invoke).toHaveBeenCalledWith("antigravity_cli_search", expect.objectContaining({ model: "gemini-4-hydrogen-low", timeoutSecs: 600 }))
     await antigravitySearchDetailed("问题", { invoke, timeoutSecs: 9999 })
     expect(invoke).toHaveBeenLastCalledWith("antigravity_cli_search", expect.objectContaining({ timeoutSecs: 900 }))
   })

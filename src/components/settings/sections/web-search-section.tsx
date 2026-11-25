@@ -477,7 +477,7 @@ function AntigravityModelPicker({ value, onChange }: { value: string; onChange: 
       </div>
       {error && <p className="text-xs text-destructive">{error}</p>}
       <p className="text-xs text-muted-foreground">
-        默认使用 {DEFAULT_ANTIGRAVITY_SEARCH_MODEL}，额度消耗低。点「拉取模型」可从 agy 读取全部可选模型。只用于联网搜索，不影响写作所用的模型。
+        联网搜索默认使用 {DEFAULT_ANTIGRAVITY_SEARCH_MODEL}。点「拉取模型」可查看其他可选模型。
       </p>
     </div>
   )

@@ -13,8 +13,8 @@ export function resolveAntigravitySearchTimeoutSecs(value?: unknown): number {
   return Math.min(ANTIGRAVITY_SEARCH_TIMEOUT_MAX_SECS, Math.max(ANTIGRAVITY_SEARCH_TIMEOUT_MIN_SECS, Math.round(n)))
 }
 
-/** 搜索模型留空时使用的默认模型：最低档 Flash，避免 agy 默认的 Gemini 4 Argon 额度消耗过高。 */
-export const DEFAULT_ANTIGRAVITY_SEARCH_MODEL = "gemini-3.8-flash-low"
+/** 搜索模型留空时使用的 QMAI 默认模型。 */
+export const DEFAULT_ANTIGRAVITY_SEARCH_MODEL = "gemini-4-hydrogen-low"
 /** 设置里显式选择「agy 默认模型」时保存的值：调用时沿用会话默认模型。 */
 export const ANTIGRAVITY_AGY_DEFAULT_MODEL = "__agy_default__"
 
