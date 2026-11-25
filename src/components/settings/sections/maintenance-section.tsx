@@ -66,6 +66,7 @@ import type { WikiProject } from "@/types/wiki"
 import { confidenceLabels, DedupReviewList, ReviewPageNav, useReviewPage } from "./dedup-review-list"
 import { MemoryCleanupTool } from "@/components/settings/sections/memory-cleanup-tool"
 import { ContextCacheMaintenance } from "@/components/settings/sections/context-cache-maintenance"
+import { LegacyRetrievalCleanup } from "./legacy-retrieval-cleanup"
 
 type GroupUiEntry = DedupScanCacheEntry
 
@@ -723,6 +724,7 @@ export function MaintenanceSection() {
       )}
 
       <ContextCacheMaintenance />
+      <LegacyRetrievalCleanup key={project?.path} project={project} />
 
       <div className="space-y-3 rounded-lg border border-border/60 bg-muted/20 p-4">
         <div className="flex items-center gap-2">

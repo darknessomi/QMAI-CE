@@ -224,6 +224,8 @@ pub fn run() {
             commands::project::open_file_location,
             commands::sag::sag_search,
             commands::sag::sag_cancel,
+            commands::legacy_retrieval::clear_legacy_project_retrieval,
+            app_state::clear_legacy_retrieval_credentials,
             commands::sag::sag_scope_fingerprint,
             commands::sag::sag_test_jev,
             commands::sag::sag_judge_pair,

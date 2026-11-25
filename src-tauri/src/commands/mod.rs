@@ -10,6 +10,7 @@ pub mod cursor_cli;
 pub mod extract_images;
 pub mod file_sync;
 pub mod fs;
+pub mod legacy_retrieval;
 pub mod local_cli_config;
 pub mod project;
 pub mod reader_window;
