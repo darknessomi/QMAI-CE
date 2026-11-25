@@ -1,10 +1,7 @@
 /**
  * Antigravity CLI（agy）主 Agent 代理的前端入口。
  *
- * 带工具的 Agent 请求不走原来的纯文本子进程通道，而是交给 Rust 端
- * `src-tauri/src/commands/antigravity_agent.rs` 托管的本机 OpenAI 兼容代理：
- * 代理把 QMAI 的工具通过 MCP 暴露给 agy，agy 调工具时以标准 `tool_calls` 返回。
- * 不带工具的普通调用和反重力搜索保持原样。
+ * 本机 OpenAI 兼容代理通过 ACP 创建会话，经 HTTP MCP 把工具请求交回 QMAI。
  */
 import type { LlmConfig } from "@/stores/wiki-store"
 import type { RequestOverrides } from "./llm-providers"
@@ -36,7 +33,10 @@ export function shouldUseAntigravityAgentProxy(
   config: Pick<LlmConfig, "provider">,
   overrides?: RequestOverrides,
 ): boolean {
-  return config.provider === "antigravity-cli" && Array.isArray(overrides?.tools) && overrides.tools.length > 0
+  return config.provider === "antigravity-cli"
+    && overrides?.toolChoice !== "none"
+    && Array.isArray(overrides?.tools)
+    && overrides.tools.length > 0
 }
 
 export async function ensureAntigravityAgentProxy(invoke: Invoke = defaultInvoke): Promise<AntigravityAgentProxyStatus> {

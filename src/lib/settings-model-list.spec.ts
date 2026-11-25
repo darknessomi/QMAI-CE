@@ -142,7 +142,7 @@ describe("settings model list", () => {
     expect(result.models).toEqual(["gpt-5.6-luna", "gpt-5.6-sol", "gpt-5.6-terra"])
   })
 
-  it("reads the Antigravity CLI catalog from agy models", async () => {
+  it("reads the Antigravity model catalog detected by ACP", async () => {
     vi.mocked(invoke).mockResolvedValueOnce({
       installed: true,
       version: "1.3.5",

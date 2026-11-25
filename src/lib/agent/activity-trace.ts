@@ -391,6 +391,8 @@ function inferStageIdFromToolName(name: string): string {
 export function resolveAgentStageTitle(stageId: string, fallbackTitle?: string): string {
   const titles: Record<string, string> = {
     task_understanding: "任务理解",
+    prepare_agent_context: "准备主 Agent 上下文",
+    agent_dispatch: "等待主 Agent 响应",
     capability_selection: "能力选择",
     read_context: "读取上下文",
     plot_analysis: "分析剧情走向",

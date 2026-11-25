@@ -1,4 +1,5 @@
 import { runAiChatSession } from "@/lib/agent/ai-chat-session"
+import { createStageStartedEvent } from "@/lib/agent/activity-trace"
 import { buildAgentConfig } from "@/lib/agent/config"
 import { runNovelPrePluginChain } from "@/lib/agent/novel-pre-plugin-chain"
 import { resolveRequiredToolsOnce } from "@/lib/agent/required-tools-gate"
@@ -82,6 +83,7 @@ async function runDefaultSession(ctx: WritingSessionContext): Promise<string> {
   ])
   const registry = new ToolRegistry()
   const novelMode = useWikiStore.getState().novelMode
+  ctx.onActivityEvent?.(createStageStartedEvent({ stageId: "task_understanding", title: "识别写作任务", summary: "" }))
   const taskRoute = await routeTask(ctx.message, {
     llmConfig: ctx.agentLlm,
     signal: ctx.signal,
@@ -110,6 +112,7 @@ async function runDefaultSession(ctx: WritingSessionContext): Promise<string> {
     invokePluginTool: invokePluginToolViaTauri(),
     runDeepChapterGeneration,
   })
+  ctx.onActivityEvent?.(createStageStartedEvent({ stageId: "prepare_agent_context", title: "准备主 Agent 上下文", summary: "" }))
   const prePlugin = await runNovelPrePluginChain({
     input: {
       userMessage: ctx.message,
@@ -139,6 +142,14 @@ async function runDefaultSession(ctx: WritingSessionContext): Promise<string> {
   })
   const systemPrompt = prePlugin?.finalSystemPrompt?.trim() || agentConfig.systemPrompt
   let reply = ""
+  ctx.onActivityEvent?.(createStageStartedEvent({ stageId: "agent_dispatch", title: "等待主 Agent 响应", summary: "" }))
+  let awaitingAgent = true
+  const markAgentResponse = () => {
+    if (!awaitingAgent) return
+    awaitingAgent = false
+    ctx.onActivityEvent?.({ id: "agent_dispatch:response", stageId: "agent_dispatch",
+      kind: "stage_output", title: "主 Agent 已响应", content: "", timestamp: Date.now() })
+  }
   const record = await runAiChatSession({
     userMessage: ctx.message,
     projectPath,
@@ -158,12 +169,13 @@ async function runDefaultSession(ctx: WritingSessionContext): Promise<string> {
     ],
     callbacks: {
       onText: (chunk) => {
+        if (chunk.trim()) markAgentResponse()
         reply += chunk
         ctx.onText?.(chunk)
       },
       onActivityEvent: ctx.onActivityEvent,
-      onToolEvent: ctx.onToolEvent,
-      onFinalContent: (content) => { reply = content; ctx.onText?.(content) },
+      onToolEvent: (event) => { markAgentResponse(); ctx.onToolEvent?.(event) },
+      onFinalContent: (content) => { markAgentResponse(); reply = content; ctx.onText?.(content) },
       onDone: () => {},
       onError: (error) => {
         throw error

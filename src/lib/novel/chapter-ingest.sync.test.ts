@@ -64,6 +64,7 @@ function listDirRecursive(path: string): FileNode[] {
 }
 
 vi.mock("@/commands/fs", () => ({
+  readMarkdownBatch: async (paths: string[]) => paths.map(path => files.get(normalizePathForTest(path)) ?? null),
   readFile: vi.fn(async (path: string) => {
     const normalized = normalizePathForTest(path)
     const content = files.get(normalized)

@@ -3,14 +3,14 @@ import type { FileNode } from "@/types/wiki"
 
 vi.mock("@/commands/fs", () => ({
   listDirectory: vi.fn(),
-  readFile: vi.fn(),
+  readMarkdownBatch: vi.fn(),
 }))
 
-import { listDirectory, readFile } from "@/commands/fs"
+import { listDirectory, readMarkdownBatch } from "@/commands/fs"
 import { buildRetrievalGraph, clearGraphCache, getRelatedNodes } from "./graph-relevance"
 
 const mockedListDirectory = vi.mocked(listDirectory)
-const mockedReadFile = vi.mocked(readFile)
+const mockedReadBatch = vi.mocked(readMarkdownBatch)
 
 function wikiTree(projectPath: string): FileNode[] {
   return [
@@ -33,12 +33,12 @@ beforeEach(() => {
 
 test("shares in-flight graph builds for the same project and data version", async () => {
   mockedListDirectory.mockResolvedValue(wikiTree("/Project"))
-  mockedReadFile.mockImplementation(async (path) => {
+  mockedReadBatch.mockImplementation(async paths => paths.map(path => {
     if (path.endsWith("A.md")) {
       return "---\ntype: entity\ntitle: Alpha\n---\n\n# Alpha\n[[B]]"
     }
     return "---\ntype: entity\ntitle: Beta\n---\n\n# Beta\n"
-  })
+  }))
 
   const [first, second] = await Promise.all([
     buildRetrievalGraph("/Project", 12),
@@ -47,7 +47,7 @@ test("shares in-flight graph builds for the same project and data version", asyn
 
   expect(first).toBe(second)
   expect(mockedListDirectory).toHaveBeenCalledTimes(1)
-  expect(mockedReadFile).toHaveBeenCalledTimes(2)
+  expect(mockedReadBatch).toHaveBeenCalledTimes(1)
 })
 
 test("does not reuse graph cache across projects with the same data version", async () => {
@@ -55,12 +55,12 @@ test("does not reuse graph cache across projects with the same data version", as
     const projectPath = String(wikiRoot).replace(/\/wiki$/, "")
     return wikiTree(projectPath)
   })
-  mockedReadFile.mockImplementation(async (path) => {
+  mockedReadBatch.mockImplementation(async paths => paths.map(path => {
     if (String(path).startsWith("/ProjectA/")) {
       return "---\ntype: entity\ntitle: Project A Node\n---\n\n# Project A Node\n"
     }
     return "---\ntype: entity\ntitle: Project B Node\n---\n\n# Project B Node\n"
-  })
+  }))
 
   const first = await buildRetrievalGraph("/ProjectA", 12)
   const second = await buildRetrievalGraph("/ProjectB", 12)
@@ -75,12 +75,12 @@ test("别名冲突保留目录中第一个候选，精确匹配及直接关系�
   mockedListDirectory.mockResolvedValue(ids.map((id) => ({
     name: `${id}.md`, path: `/Project/wiki/entities/${id}.md`, is_dir: false,
   })))
-  mockedReadFile.mockImplementation(async (path) => {
+  mockedReadBatch.mockImplementation(async paths => paths.map(path => {
     const text = path.endsWith("/远航.md")
       ? "- [[CROWN  GATE|城门]] — 合作\n- [[Crown-Gate]] — 位于"
       : ""
     return `---\ntype: entity\n---\n${text}`
-  })
+  }))
 
   const graph = await buildRetrievalGraph("/Project")
   const source = graph.nodes.get("远航")!

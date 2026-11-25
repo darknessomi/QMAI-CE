@@ -157,6 +157,23 @@ pub async fn read_file(path: String) -> Result<String, String> {
         .map_err(|e| format!("read_file blocking task join error: {e}"))?
 }
 
+/// 写作检索一轮会读取上万页。每批只跨一次 WebView IPC，并保留单页读取的解码和旧目录映射。
+#[tauri::command]
+pub async fn read_markdown_batch(paths: Vec<String>) -> Result<Vec<Option<String>>, String> {
+    if paths.len() > 128 || paths.iter().any(|path| !path.ends_with(".md")) {
+        return Err("每批最多读取 128 个 Markdown 文件".into());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        run_guarded("read_markdown_batch", || {
+            Ok(paths.iter().map(|path| {
+                read_plain_text_file(&resolve_project_storage_path(path)).ok()
+            }).collect())
+        })
+    })
+    .await
+    .map_err(|e| format!("批量读取 Markdown 失败：{e}"))?
+}
+
 /// Core logic for `preprocess_file`, callable from both Tauri commands and Axum handlers.
 pub fn do_preprocess_file(path: &str) -> Result<String, String> {
     run_guarded("preprocess_file", || {
@@ -1740,6 +1757,23 @@ pub async fn get_file_md5(path: String) -> Result<String, String> {
 mod tests {
     use super::*;
     use std::io::Write;
+
+    #[test]
+    fn markdown_batch_keeps_order_missing_files_and_legacy_encoding() {
+        tauri::async_runtime::block_on(async {
+            let root = tempfile::tempdir().unwrap();
+            let qm = root.path().join("QM");
+            fs::create_dir(&qm).unwrap();
+            fs::write(qm.join("页.md"), [0xD6, 0xD0]).unwrap();
+            fs::write(qm.join("空.md"), "").unwrap();
+            let paths = ["页.md", "缺.md", "空.md"].map(|name| {
+                root.path().join("wiki").join(name).to_string_lossy().into_owned()
+            });
+            assert_eq!(read_markdown_batch(paths.to_vec()).await.unwrap(),
+                vec![Some("中".into()), None, Some(String::new())]);
+            assert!(read_markdown_batch(vec!["页.md".into(); 129]).await.is_err());
+        });
+    }
 
     #[test]
     fn folder_commands_preserve_legacy_and_virtual_projects() {

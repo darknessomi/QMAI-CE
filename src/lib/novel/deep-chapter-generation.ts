@@ -691,6 +691,10 @@ export async function runDeepChapterGeneration(
   };
   if (!resumeCheckpoint) {
     startChapterWorkflowStep(callbacks, contextWorkflowStep);
+    emitDeepChapterStageStarted(
+      callbacks, "read_context", "读取上下文",
+      "读取大纲、上一章结尾、近期剧情、人物状态、伏笔和时间线。",
+    );
   }
 
   // 阶段0：前情分析。快速模式始终跳过；标准/严格模式跟随写作设置。
@@ -740,27 +744,7 @@ export async function runDeepChapterGeneration(
   );
   assertNotAborted(signal);
 
-  if (workflowProfile.mode !== "fast" && novelConfig.writingWebSearchEnabled) {
-    contextPack = await maybeInjectWritingEntityWebSearch({
-      input,
-      deps,
-      contextPack,
-      previousChaptersAnalysis,
-      planBlueprint,
-      workflowConfig,
-      callbacks,
-      signal,
-    });
-    assertNotAborted(signal);
-  }
-
   if (!resumeCheckpoint) {
-    emitDeepChapterStageStarted(
-      callbacks,
-      "read_context",
-      "读取上下文",
-      "读取大纲、上一章结尾、近期剧情、人物状态、伏笔和时间线。",
-    );
     emitDeepChapterActivity(callbacks, {
       id: `deep_chapter:read_context:sources:${Date.now()}`,
       stageId: "read_context",
@@ -814,6 +798,14 @@ export async function runDeepChapterGeneration(
       title: "阶段产物",
       content: describeContextPackHandoff(workflowProfile),
     });
+  }
+
+  if (workflowProfile.mode !== "fast" && novelConfig.writingWebSearchEnabled) {
+    contextPack = await maybeInjectWritingEntityWebSearch({
+      input, deps, contextPack, previousChaptersAnalysis, planBlueprint,
+      workflowConfig, callbacks, signal,
+    });
+    assertNotAborted(signal);
   }
 
   // 任务书(workflowConfig)、初稿/返修/阶段6局部修改(writingConfig)可能

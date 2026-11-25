@@ -52,6 +52,9 @@ export const realFs = {
   readFile: async (p: string): Promise<string> => {
     return fs.readFile(p, "utf-8")
   },
+  readMarkdownBatch: (paths: string[]) => Promise.all(
+    paths.map(p => fs.readFile(p, "utf-8").catch(() => null)),
+  ),
   writeFile: async (p: string, contents: string): Promise<void> => {
     await fs.mkdir(path.dirname(p), { recursive: true })
     await fs.writeFile(p, contents, "utf-8")

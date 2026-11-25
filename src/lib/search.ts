@@ -2,6 +2,7 @@ import { wikiEmbeddingId, wikiEmbeddingPath, wikiEmbeddingTitle } from "./embedd
 import { readFile, listDirectory } from "@/commands/fs"
 import type { FileNode } from "@/types/wiki"
 import { normalizePath } from "@/lib/path-utils"
+import { mapWikiMarkdown } from "./wiki-markdown-batches"
 
 /**
  * One image reference extracted from a matched page's markdown.
@@ -265,9 +266,12 @@ export async function searchWiki(
     const tList = Math.round(performance.now() - t0)
     console.log("[searchWiki] wikiFiles:", wikiFiles.length)
     const t1 = performance.now()
-    await searchFiles(wikiFiles, effectiveTokens, query, results)
+    const queryPhrase = query.trim().toLowerCase().replace(TRIM_PUNCT_RE, "")
+    const matches = await mapWikiMarkdown(wikiFiles, (file, content) =>
+      scoreFile(file, content, effectiveTokens, queryPhrase, query))
+    for (const match of matches) results.push(match)
     const tRead = Math.round(performance.now() - t1)
-    console.log("[searchWiki] searchFiles done in", tRead, "ms")
+    console.log("[searchWiki] 读取并匹配页面耗时", tRead, "ms")
     console.log(
       `[Search:token] wiki/ ${wikiFiles.length} files | list=${tList}ms read+match=${tRead}ms`,
     )
@@ -276,7 +280,7 @@ export async function searchWiki(
   }
 
   // ── Build the token-side ranking (still based on the score field
-  // populated by searchFiles above). Snapshot it BEFORE the vector
+  // populated by the token scan above). Snapshot it BEFORE the vector
   // step, so adding vector-only pages doesn't shift token ranks.
   const tokenSorted = [...results].sort((a, b) => b.score - a.score)
   const tokenRank = new Map<string, number>()
@@ -395,17 +399,6 @@ export async function searchWiki(
 }
 
 /**
- * Bound on concurrent `readFile` calls during search. Going wider
- * than this saturates the Tauri IPC channel and starts QUEUING
- * work behind the search request — the wider you go, the SLOWER
- * a single search gets past about 16-32 in-flight reads (measured
- * in dev against a 200-file project). 16 is a comfortable middle
- * ground that gives near-linear speedup over sequential without
- * choking the IPC layer.
- */
-const SEARCH_READ_CONCURRENCY = 16
-
-/**
  * Punctuation pattern shared between token splitting and the
  * phrase-bonus normalization below. Matched at start AND end of
  * the query — internal punctuation (`U.S.A.`, `2024-Q3`) stays
@@ -414,55 +407,8 @@ const SEARCH_READ_CONCURRENCY = 16
 const TRIM_PUNCT_RE =
   /^[\s,，。！？、；：""''（）()\-_/\\·~～…]+|[\s,，。！？、；：""''（）()\-_/\\·~～…]+$/g
 
-async function searchFiles(
-  files: FileNode[],
-  tokens: readonly string[],
-  query: string,
-  results: SearchResult[],
-): Promise<void> {
-  // Strip leading / trailing punctuation from the query before using
-  // it as a phrase-bonus probe. Without this, `query="总资产。"`
-  // tries to substring-match `总资产。` inside titles / content that
-  // never have the period at that spot — the phrase-bonus signal
-  // (worth +50 in titles, +20 per occurrence in content) silently
-  // goes to zero and the page's RRF rank slides. Same surface that
-  // bit the search-view image filter, fixed there in token space;
-  // here we apply the analog in phrase space.
-  //
-  // Internal punctuation is preserved on purpose: queries like
-  // "2024-Q3" or domain names should still phrase-match exactly.
-  const queryPhrase = query.trim().toLowerCase().replace(TRIM_PUNCT_RE, "")
-
-  // Process files in fixed-size concurrent batches. Promise.all over
-  // the entire list would work but spawns N IPC calls simultaneously
-  // — tested at N=200, that's where we saw the slowdown above.
-  for (let i = 0; i < files.length; i += SEARCH_READ_CONCURRENCY) {
-    const batch = files.slice(i, i + SEARCH_READ_CONCURRENCY)
-    const batchNum = Math.floor(i / SEARCH_READ_CONCURRENCY) + 1
-    const totalBatches = Math.ceil(files.length / SEARCH_READ_CONCURRENCY)
-    console.log("[searchFiles] batch", batchNum, "/", totalBatches, "| reading", batch.length, "files...")
-    const batchResults = await Promise.all(
-      batch.map(async (file) => {
-        let content: string
-        try {
-          content = await readFile(file.path)
-        } catch {
-          return null
-        }
-        return scoreFile(file, content, tokens, queryPhrase, query)
-      }),
-    )
-    console.log("[searchFiles] batch", batchNum, "done, matched", batchResults.filter(Boolean).length)
-    for (const r of batchResults) {
-      if (r) results.push(r)
-    }
-  }
-}
-
 /**
- * Pure scoring pass — no IO. Extracted so `searchFiles` can run
- * the IO and the matching independently and so this function can
- * be unit-tested without mocking readFile.
+ * Pure scoring pass over one Markdown page.
  */
 function scoreFile(
   file: FileNode,

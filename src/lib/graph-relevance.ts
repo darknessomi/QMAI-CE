@@ -1,5 +1,5 @@
-import { mapWithConcurrency } from "@/lib/async-pool"
-import { readFile, listDirectory } from "@/commands/fs"
+import { mapWikiMarkdown } from "./wiki-markdown-batches"
+import { listDirectory } from "@/commands/fs"
 import type { FileNode } from "@/types/wiki"
 import { normalizePath } from "@/lib/path-utils"
 import { NOVEL_RELATION_LABELS } from "@/lib/novel/graph-adapter"
@@ -249,15 +249,8 @@ async function buildRetrievalGraphForProject(
   const mdFiles = flattenMdFiles(tree)
 
   // First pass: read all files and build raw node data
-  const pages = await mapWithConcurrency(mdFiles, 12, async (file) => {
+  const rawNodes = await mapWikiMarkdown(mdFiles, (file, content) => {
     const id = fileNameToId(file.name)
-    let content = ""
-    try {
-      content = await readFile(file.path)
-    } catch {
-      return null
-    }
-
     const fm = extractFrontmatter(content)
     if (fm.isHistorical) {
       return null
@@ -273,7 +266,6 @@ async function buildRetrievalGraphForProject(
       fileName: file.name,
     }
   })
-  const rawNodes = pages.filter(page => page !== null)
   const nodeIds = new Set(rawNodes.map((n) => n.id))
 
   const aliases = new Map<string, string>()

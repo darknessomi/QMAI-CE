@@ -36,6 +36,10 @@ export async function readFile(path: string): Promise<string> {
   return invoke<string>("read_file", { path })
 }
 
+export function readMarkdownBatch(paths: string[]): Promise<(string | null)[]> {
+  return invoke<(string | null)[]>("read_markdown_batch", { paths })
+}
+
 export async function writeFile(path: string, contents: string): Promise<void> {
   await invoke<void>("write_file", { path, contents })
   notifyProjectFileMutation({ type: "write", path })

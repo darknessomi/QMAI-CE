@@ -194,6 +194,7 @@ pub fn run() {
             migration_gate::fail_novel_migration_preparation,
             migration_gate::leave_novel_migration,
             commands::fs::read_file,
+            commands::fs::read_markdown_batch,
             commands::fs::write_file,
             commands::fs::write_file_if_absent,
             commands::fs::write_export_file,

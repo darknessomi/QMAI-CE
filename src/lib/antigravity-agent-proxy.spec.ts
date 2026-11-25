@@ -33,6 +33,7 @@ describe("antigravity agent proxy", () => {
 
   it("only routes tool requests through the proxy", () => {
     expect(shouldUseAntigravityAgentProxy(base, { tools: [tool] as never })).toBe(true)
+    expect(shouldUseAntigravityAgentProxy(base, { tools: [tool] as never, toolChoice: "none" })).toBe(false)
     expect(shouldUseAntigravityAgentProxy(base, { tools: [] as never })).toBe(false)
     expect(shouldUseAntigravityAgentProxy(base, undefined)).toBe(false)
     expect(shouldUseAntigravityAgentProxy({ provider: "cursor-cli" }, { tools: [tool] as never })).toBe(false)

@@ -1,25 +1,10 @@
-//! Antigravity CLI（`agy`）主 Agent 代理。
-//!
-//! agy 没有原生 function calling，也没有 ACP。这里仿照 cursor-api-proxy 的做法，在本机
-//! 127.0.0.1 上起一个带随机令牌的 OpenAI 兼容接口（`/v1/chat/completions`，SSE 流式）：
-//!
-//! 1. 请求带 `tools` 时启动一个 agy 进程，并给它一个只属于本回合的 MCP 服务
-//!    （同一个端口下的 `/mcp/<session>`），把 QMAI 传来的工具原样暴露出去。
-//! 2. agy 调用 MCP 工具时先按 JSON Schema 校验参数；不合格直接把错误和正确 schema
-//!    回给 agy 让它重试，不打扰 QMAI。合格的调用被“挂起”，以标准 `tool_calls`
-//!    返回给 QMAI。
-//! 3. QMAI 执行工具后带着 `role:"tool"` 消息再次请求，代理按 `tool_call_id` 找回挂起的
-//!    调用，把结果交给 agy，同一个 agy 进程继续往下跑。
-//!
-//! 隔离：每个回合使用独立的临时 HOME（链接登录凭据，macOS 上再链接登录钥匙串），在里面写
-//! MCP 配置和权限规则，不碰用户全局 `~/.gemini`，所以反重力搜索和用户自己的 agy 不受影响。
-//! 权限规则只放行 `mcp(qmai/*)`，拒绝 agy 自带的读写文件、执行命令和读网页工具。
+//! 通过 agy ACP 会话向主 Agent 提供本机 OpenAI 兼容接口。
+//! 每个隔离会话通过 HTTP MCP 公开当前请求的工具。只有经过参数校验的 tools/call
+//! 会挂起交给 QMAI 执行，后续请求按 tool_call_id 把结果交回原会话。
 
 use std::collections::{HashMap, VecDeque};
 use std::io::{Read, Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
-use std::path::{Path, PathBuf};
-use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
@@ -28,25 +13,19 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
 use serde_json::{json, Map, Value};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::process::{Child, Command};
+use tokio::sync::oneshot;
 use uuid::Uuid;
 
-use super::antigravity_cli::{configure_agy_command, find_agy_command};
-use super::local_cli_config::current_local_cli_environment;
+use super::antigravity_acp::{self, SessionTools, Usage, MCP_NAME as MCP_SERVER_NAME};
 
 /// 主 Agent 默认模型：用户没选模型时用 medium 档。
 pub const DEFAULT_AGENT_MODEL: &str = "gemini-3.8-flash-medium";
 /// 挂起的工具调用最多等多久（与 Cursor CLI 的 30 分钟兜底一致）。
-const PENDING_TOOL_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+const PENDING_TOOL_TIMEOUT: Duration = antigravity_acp::TOOL_TIMEOUT;
 /// 同一批并行工具调用的合并窗口。
 const TOOL_BATCH_WINDOW: Duration = Duration::from_millis(200);
 const SSE_KEEPALIVE: Duration = Duration::from_secs(5);
-const PRINT_TIMEOUT: &str = "0";
-const MCP_SERVER_NAME: &str = "qmai";
-const OAUTH_TOKEN_FILE: &str = "antigravity-oauth-token";
-const INSTALLATION_ID_FILE: &str = "installation_id";
-
+const CALL_PREFIX: &str = "call_agy_";
 static PROXY: OnceLock<Mutex<Option<Arc<Proxy>>>> = OnceLock::new();
 
 fn proxy_slot() -> &'static Mutex<Option<Arc<Proxy>>> {
@@ -72,13 +51,14 @@ enum Event {
     Text(String),
     ToolCalls(Vec<PendingCall>),
     Done {
-        usage: Option<Value>,
+        usage: Option<Usage>,
         error: Option<String>,
     },
 }
 
 struct Session {
     id: String,
+    mcp_token: String,
     model: String,
     tools: HashMap<String, Value>,
     tool_defs: Vec<Value>,
@@ -87,8 +67,8 @@ struct Session {
     pending: Mutex<HashMap<String, Sender<Result<String, String>>>>,
     batch: Mutex<Vec<PendingCall>>,
     batch_generation: AtomicU64,
-    child: Mutex<Option<Child>>,
-    home: PathBuf,
+    cancel: Mutex<Option<oneshot::Sender<()>>>,
+    tools_enabled: Arc<AtomicBool>,
     closed: AtomicBool,
 }
 
@@ -113,9 +93,9 @@ impl Session {
         if self.closed.swap(true, Ordering::SeqCst) {
             return;
         }
-        if let Ok(mut child) = self.child.lock() {
-            if let Some(child) = child.as_mut() {
-                let _ = child.start_kill();
+        if let Ok(mut cancel) = self.cancel.lock() {
+            if let Some(stop) = cancel.take() {
+                let _ = stop.send(());
             }
         }
         if let Ok(mut pending) = self.pending.lock() {
@@ -123,7 +103,6 @@ impl Session {
                 let _ = sender.send(Err("青幕写作已取消本次工具调用。".to_string()));
             }
         }
-        let _ = std::fs::remove_dir_all(&self.home);
         self.signal.notify_all();
     }
 }
@@ -312,6 +291,12 @@ pub(crate) fn build_agent_prompt(messages: &[Value], tool_defs: &[Value]) -> Str
             _ => parts.push(format!("<user>\n{text}\n</user>")),
         }
     }
+    if tool_defs.is_empty() {
+        return format!(
+            "以下是青幕写作的对话记录。请直接完成最后一条用户请求，本轮只返回文本。\n\n{}",
+            parts.join("\n\n")
+        );
+    }
     let schemas = tool_defs
         .iter()
         .map(|tool| {
@@ -357,73 +342,13 @@ fn openai_tools_to_mcp(tools: &[Value]) -> Vec<Value> {
         .collect()
 }
 
-/// 解析 agy 一行 stream-json，返回要转发的事件。
-fn parse_agy_line(
-    line: &str,
-    usage: &mut Option<Value>,
-    error: &mut Option<String>,
-) -> Option<Event> {
-    let value: Value = serde_json::from_str(line.trim()).ok()?;
-    if let Some(update) = value.get("step_update") {
-        if update.get("step_type").and_then(Value::as_str) == Some("agent_response") {
-            if let Some(delta) = update.get("text_delta").and_then(Value::as_str) {
-                if !delta.is_empty() {
-                    return Some(Event::Text(delta.to_string()));
-                }
-            }
-        }
-        if update.get("step_type").and_then(Value::as_str) == Some("tool") {
-            if let Some(name) = update.get("tool_name").and_then(Value::as_str) {
-                if name != "call_mcp_tool"
-                    && update.get("state").and_then(Value::as_str) == Some("ACTIVE")
-                {
-                    eprintln!("[antigravity-agent] agy 尝试使用自带工具 {name}");
-                }
-            }
-        }
-        return None;
-    }
-    if let Some(result) = value.get("result") {
-        *usage = result.get("usage").cloned();
-        let status = result.get("status").and_then(Value::as_str).unwrap_or("");
-        if status != "SUCCESS" {
-            let detail = result
-                .get("error")
-                .and_then(|e| {
-                    e.as_str()
-                        .map(str::to_string)
-                        .or_else(|| Some(e.to_string()))
-                })
-                .unwrap_or_else(|| status.to_string());
-            *error = Some(format!("Antigravity CLI 返回失败：{detail}"));
-        }
-    }
-    None
-}
-
-fn openai_usage(usage: &Value) -> Value {
-    let input = usage
-        .get("input_tokens")
-        .and_then(Value::as_u64)
-        .unwrap_or(0);
-    let output = usage
-        .get("output_tokens")
-        .and_then(Value::as_u64)
-        .unwrap_or(0);
-    let cached = usage
-        .get("cache_read_tokens")
-        .and_then(Value::as_u64)
-        .unwrap_or(0);
-    let thinking = usage
-        .get("thinking_tokens")
-        .and_then(Value::as_u64)
-        .unwrap_or(0);
+fn openai_usage(usage: &Usage) -> Value {
     json!({
-        "prompt_tokens": input,
-        "completion_tokens": output,
-        "total_tokens": usage.get("total_tokens").and_then(Value::as_u64).unwrap_or(input + output),
-        "prompt_tokens_details": { "cached_tokens": cached },
-        "completion_tokens_details": { "reasoning_tokens": thinking },
+        "prompt_tokens": usage.input_tokens,
+        "completion_tokens": usage.output_tokens,
+        "total_tokens": usage.total_tokens,
+        "prompt_tokens_details": { "cached_tokens": usage.cached_input_tokens },
+        "completion_tokens_details": { "reasoning_tokens": usage.reasoning_tokens },
     })
 }
 
@@ -470,132 +395,6 @@ fn tool_calls_delta(calls: &[PendingCall]) -> Value {
 // 隔离的 HOME
 // ---------------------------------------------------------------------------
 
-fn real_agy_dir() -> Option<PathBuf> {
-    let home = current_local_cli_environment()
-        .home
-        .or_else(|| std::env::var("USERPROFILE").ok())?;
-    Some(PathBuf::from(home).join(".gemini").join("antigravity-cli"))
-}
-
-fn sessions_root() -> PathBuf {
-    std::env::temp_dir().join(format!("qmai-agy-agent-{}", std::process::id()))
-}
-
-/// 上次异常退出留下的空目录（只删空目录，不会动另一个正在运行的实例的会话）。
-fn remove_empty_stale_roots() {
-    let Ok(entries) = std::fs::read_dir(std::env::temp_dir()) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        if entry
-            .file_name()
-            .to_string_lossy()
-            .starts_with("qmai-agy-agent-")
-        {
-            let _ = std::fs::remove_dir(entry.path());
-        }
-    }
-}
-
-fn link_or_copy(src: &Path, dst: &Path) -> std::io::Result<()> {
-    #[cfg(unix)]
-    {
-        std::os::unix::fs::symlink(src, dst)
-    }
-    #[cfg(not(unix))]
-    {
-        std::fs::copy(src, dst).map(|_| ())
-    }
-}
-
-pub(crate) fn agent_settings_json() -> Value {
-    json!({
-        "permissions": {
-            "allow": [format!("mcp({MCP_SERVER_NAME}/*)")],
-            "deny": ["read_file(*)", "write_file(*)", "command(*)", "read_url(*)"],
-        }
-    })
-}
-
-pub(crate) fn agent_mcp_config(url: &str, token: &str) -> Value {
-    json!({
-        "mcpServers": {
-            MCP_SERVER_NAME: {
-                "serverUrl": url,
-                "headers": { "Authorization": format!("Bearer {token}") },
-                "disabled": false,
-            }
-        }
-    })
-}
-
-/// 为一个回合准备隔离 HOME：带上仍存在的登录凭据文件、MCP 和权限配置。
-/// agy 1.5.5 把登录态放在系统钥匙串，不再写 `antigravity-oauth-token`。文件缺失时继续，
-/// 由调用方链接钥匙串；agy 自己未登录时再返回登录错误。
-fn prepare_isolated_home(
-    root: &Path,
-    real_dir: &Path,
-    mcp_url: &str,
-    token: &str,
-) -> Result<(PathBuf, PathBuf), String> {
-    let cli_dir = root.join(".gemini").join("antigravity-cli");
-    let config_dir = root.join(".gemini").join("config");
-    let work = root.join("work");
-    for dir in [&cli_dir, &config_dir, &work] {
-        std::fs::create_dir_all(dir).map_err(|e| format!("无法创建 Antigravity 隔离目录：{e}"))?;
-    }
-    let token_src = real_dir.join(OAUTH_TOKEN_FILE);
-    if token_src.exists() {
-        link_or_copy(&token_src, &cli_dir.join(OAUTH_TOKEN_FILE))
-            .map_err(|e| format!("无法引用 Antigravity 登录凭据：{e}"))?;
-    }
-    let installation = real_dir.join(INSTALLATION_ID_FILE);
-    if installation.exists() {
-        let _ = std::fs::copy(&installation, cli_dir.join(INSTALLATION_ID_FILE));
-    }
-    std::fs::write(
-        cli_dir.join("settings.json"),
-        agent_settings_json().to_string(),
-    )
-    .map_err(|e| format!("无法写入 Antigravity 权限规则：{e}"))?;
-    std::fs::write(
-        config_dir.join("mcp_config.json"),
-        agent_mcp_config(mcp_url, token).to_string(),
-    )
-    .map_err(|e| format!("无法写入 Antigravity MCP 配置：{e}"))?;
-    Ok((root.to_path_buf(), work))
-}
-
-/// agy 用绝对路径调用 `/usr/bin/security` 写默认钥匙串。`security` 按进程的 `HOME` 找
-/// `Library/Keychains/login.keychain-db`。隔离目录里没有这个文件时，macOS 会弹出
-/// 「找不到用于储存 antigravity 的钥匙串」。这里只放符号链接，`security` 会解析到用户
-/// 原来的登录钥匙串；临时目录删除后链接消失，钥匙串搜索列表不变。
-#[cfg(any(target_os = "macos", all(unix, test)))]
-fn link_login_keychain(home: &Path, login_keychain: &Path) -> Result<(), String> {
-    let name = login_keychain
-        .file_name()
-        .ok_or_else(|| "登录钥匙串路径无效".to_string())?;
-    let dir = home.join("Library").join("Keychains");
-    std::fs::create_dir_all(&dir).map_err(|e| format!("无法创建钥匙串目录：{e}"))?;
-    std::os::unix::fs::symlink(login_keychain, dir.join(name))
-        .map_err(|e| format!("无法链接登录钥匙串：{e}"))?;
-    Ok(())
-}
-
-#[cfg(target_os = "macos")]
-fn login_keychain_path() -> Option<PathBuf> {
-    let home = current_local_cli_environment().home?;
-    let dir = PathBuf::from(home).join("Library").join("Keychains");
-    for name in ["login.keychain-db", "login.keychain"] {
-        let path = dir.join(name);
-        if path.is_file() {
-            return Some(path);
-        }
-    }
-    None
-}
-
-// ---------------------------------------------------------------------------
 // HTTP
 // ---------------------------------------------------------------------------
 
@@ -693,8 +492,6 @@ fn start_proxy() -> Result<Arc<Proxy>, String> {
         .local_addr()
         .map_err(|e| format!("无法读取代理端口：{e}"))?
         .port();
-    let _ = std::fs::remove_dir_all(sessions_root());
-    remove_empty_stale_roots();
     let proxy = Arc::new(Proxy {
         port,
         token: format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple()),
@@ -734,8 +531,16 @@ fn handle_connection(proxy: Arc<Proxy>, mut stream: TcpStream) {
         write_json(&mut stream, 200, &json!({"ok": true}));
         return;
     }
-    let expected = format!("Bearer {}", proxy.token);
-    if header_value(&request.headers, "authorization") != Some(expected.as_str()) {
+    let session_id = path.strip_prefix("/mcp/");
+    let session = session_id.and_then(|id| proxy.session(id));
+    let expected = match (session_id, &session) {
+        (Some(_), Some(session)) => Some(&session.mcp_token),
+        (None, _) => Some(&proxy.token),
+        _ => None,
+    };
+    let supplied = header_value(&request.headers, "authorization")
+        .and_then(|value| value.strip_prefix("Bearer "));
+    if expected.is_none() || expected.map(String::as_str) != supplied {
         write_json(
             &mut stream,
             401,
@@ -743,8 +548,8 @@ fn handle_connection(proxy: Arc<Proxy>, mut stream: TcpStream) {
         );
         return;
     }
-    if let Some(session_id) = path.strip_prefix("/mcp/") {
-        handle_mcp(&proxy, session_id, &request, &mut stream);
+    if let Some(session) = session {
+        handle_mcp(&proxy, &session, &request, &mut stream);
         return;
     }
     match (request.method.as_str(), path.as_str()) {
@@ -762,7 +567,12 @@ fn handle_connection(proxy: Arc<Proxy>, mut stream: TcpStream) {
     }
 }
 
-fn handle_mcp(proxy: &Arc<Proxy>, session_id: &str, request: &HttpRequest, stream: &mut TcpStream) {
+fn handle_mcp(
+    proxy: &Arc<Proxy>,
+    session: &Arc<Session>,
+    request: &HttpRequest,
+    stream: &mut TcpStream,
+) {
     if request.method == "GET" {
         write_response(stream, 405, "text/plain", "");
         return;
@@ -777,14 +587,6 @@ fn handle_mcp(proxy: &Arc<Proxy>, session_id: &str, request: &HttpRequest, strea
         return;
     };
     let reply = |result: Value| json!({"jsonrpc": "2.0", "id": id, "result": result});
-    let Some(session) = proxy.session(session_id) else {
-        write_json(
-            stream,
-            200,
-            &json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32000, "message": "会话已结束"}}),
-        );
-        return;
-    };
     let method = message.get("method").and_then(Value::as_str).unwrap_or("");
     let response = match method {
         "initialize" => reply(json!({
@@ -803,7 +605,7 @@ fn handle_mcp(proxy: &Arc<Proxy>, session_id: &str, request: &HttpRequest, strea
                 .pointer("/params/arguments")
                 .cloned()
                 .unwrap_or(json!({}));
-            reply(call_tool(proxy, &session, &name, args))
+            reply(call_tool(proxy, session, &name, args))
         }
         "ping" => reply(json!({})),
         _ => reply(json!({})),
@@ -817,6 +619,9 @@ fn tool_result(text: String, is_error: bool) -> Value {
 
 /// 校验并挂起一次工具调用，直到 QMAI 带着工具结果回来。
 fn call_tool(proxy: &Arc<Proxy>, session: &Arc<Session>, name: &str, args: Value) -> Value {
+    if !session.tools_enabled.load(Ordering::Acquire) {
+        return tool_result("青幕尚在接收分段资料，此时不能执行工具。".into(), true);
+    }
     let schema = session.tools.get(name);
     let errors = match schema {
         Some(schema) => validate_tool_arguments(schema, &args),
@@ -824,14 +629,17 @@ fn call_tool(proxy: &Arc<Proxy>, session: &Arc<Session>, name: &str, args: Value
     };
     if !errors.is_empty() {
         eprintln!(
-            "[antigravity-agent] 参数校验失败 {name} {args}: {}",
+            "[antigravity-agent] 参数校验失败 {name}: {}",
             errors.join("; ")
         );
         return tool_result(tool_error_text(name, &errors, schema), true);
     }
-    let call_id = format!("call_{}", Uuid::new_v4().simple());
+    let call_id = format!("{CALL_PREFIX}{}", Uuid::new_v4().simple());
     let (sender, receiver) = mpsc::channel();
     if let Ok(mut pending) = session.pending.lock() {
+        if session.closed.load(Ordering::Acquire) {
+            return tool_result("此工具会话已结束。".into(), true);
+        }
         pending.insert(call_id.clone(), sender);
     }
     if let Ok(mut index) = proxy.call_index.lock() {
@@ -860,7 +668,14 @@ fn call_tool(proxy: &Arc<Proxy>, session: &Arc<Session>, name: &str, args: Value
             flush_session.push(Event::ToolCalls(calls));
         }
     });
+    let started = Instant::now();
+    eprintln!("[antigravity-acp] 工具={name} 调用={call_id} 等待青幕执行");
     let outcome = receiver.recv_timeout(PENDING_TOOL_TIMEOUT);
+    eprintln!(
+        "[antigravity-acp] 工具={name} 调用={call_id} 回填成功={} 等待毫秒={}",
+        matches!(&outcome, Ok(Ok(_))),
+        started.elapsed().as_millis()
+    );
     if let Ok(mut index) = proxy.call_index.lock() {
         index.remove(&call_id);
     }
@@ -900,20 +715,42 @@ fn trailing_tool_results(messages: &[Value]) -> Vec<(String, String)> {
     results
 }
 
-/// 找到挂起这些工具调用的会话，把结果交回去。找不到就返回 None（会新开一个 agy）。
-fn resume_session(proxy: &Proxy, messages: &[Value]) -> Option<Arc<Session>> {
+/// 本轮生成的调用只能交回原会话。连接失效时重开会话可能使模型重复执行已经成功的工具。
+fn resume_session(proxy: &Proxy, messages: &[Value]) -> Result<Option<Arc<Session>>, String> {
     let results = trailing_tool_results(messages);
-    let first = results.first()?;
-    let session_id = proxy.call_index.lock().ok()?.get(&first.0).cloned()?;
-    let session = proxy.session(&session_id)?;
-    let mut pending = session.pending.lock().ok()?;
+    let Some((first, _)) = results.first() else {
+        return Ok(None);
+    };
+    let session_id = proxy
+        .call_index
+        .lock()
+        .map_err(|_| "工具调用索引不可用")?
+        .get(first)
+        .cloned();
+    let Some(session) = session_id.and_then(|id| proxy.session(&id)) else {
+        if results.iter().any(|(id, _)| id.starts_with(CALL_PREFIX)) {
+            return Err("原 ACP 工具会话已结束，无法回填结果。".into());
+        }
+        // 来自历史对话或其它后端的工具结果仍可作为上下文。
+        return Ok(None);
+    };
+    let mut pending = session.pending.lock().map_err(|_| "工具调用状态不可用")?;
+    let mut seen = std::collections::HashSet::new();
+    if results
+        .iter()
+        .any(|(id, _)| !pending.contains_key(id) || !seen.insert(id))
+    {
+        return Err("工具结果重复或不属于此 ACP 会话。".into());
+    }
     for (id, text) in results {
         if let Some(sender) = pending.remove(&id) {
-            let _ = sender.send(Ok(text));
+            sender
+                .send(Ok(text))
+                .map_err(|_| "ACP 工具已结束等待，无法回填结果。")?;
         }
     }
     drop(pending);
-    Some(session)
+    Ok(Some(session))
 }
 
 fn spawn_session(proxy: &Arc<Proxy>, body: &Value) -> Result<Arc<Session>, String> {
@@ -925,9 +762,10 @@ fn spawn_session(proxy: &Arc<Proxy>, body: &Value) -> Result<Arc<Session>, Strin
     let tools = body
         .get("tools")
         .and_then(Value::as_array)
-        .cloned()
+        .filter(|_| body["tool_choice"] != "none")
+        .map(Vec::as_slice)
         .unwrap_or_default();
-    let tool_defs = openai_tools_to_mcp(&tools);
+    let tool_defs = openai_tools_to_mcp(tools);
     let model = body
         .get("model")
         .and_then(Value::as_str)
@@ -936,25 +774,12 @@ fn spawn_session(proxy: &Arc<Proxy>, body: &Value) -> Result<Arc<Session>, Strin
         .unwrap_or(DEFAULT_AGENT_MODEL)
         .to_string();
     let session_id = Uuid::new_v4().simple().to_string();
-    let real_dir = real_agy_dir()
-        .ok_or_else(|| "无法确定用户主目录，找不到 Antigravity 登录凭据。".to_string())?;
-    let mcp_url = format!("{}/mcp/{session_id}", proxy.base_url());
-    let (home, work) = prepare_isolated_home(
-        &sessions_root().join(&session_id),
-        &real_dir,
-        &mcp_url,
-        &proxy.token,
-    )?;
-    #[cfg(target_os = "macos")]
-    if let Some(keychain) = login_keychain_path() {
-        if let Err(error) = link_login_keychain(&home, &keychain) {
-            let _ = std::fs::remove_dir_all(&home);
-            return Err(error);
-        }
-    }
+    let (stop, cancelled) = oneshot::channel();
+    let tools_enabled = Arc::new(AtomicBool::new(false));
     let prompt = build_agent_prompt(&messages, &tool_defs);
     let session = Arc::new(Session {
         id: session_id.clone(),
+        mcp_token: Uuid::new_v4().simple().to_string(),
         model: model.clone(),
         tools: tool_defs
             .iter()
@@ -971,9 +796,15 @@ fn spawn_session(proxy: &Arc<Proxy>, body: &Value) -> Result<Arc<Session>, Strin
         pending: Mutex::new(HashMap::new()),
         batch: Mutex::new(Vec::new()),
         batch_generation: AtomicU64::new(0),
-        child: Mutex::new(None),
-        home: home.clone(),
+        cancel: Mutex::new(Some(stop)),
+        tools_enabled: tools_enabled.clone(),
         closed: AtomicBool::new(false),
+    });
+    let acp_tools = (!session.tools.is_empty()).then(|| SessionTools {
+        url: format!("{}/mcp/{session_id}", proxy.base_url()),
+        token: session.mcp_token.clone(),
+        names: session.tools.keys().cloned().collect(),
+        enabled: tools_enabled,
     });
     proxy
         .sessions
@@ -981,178 +812,27 @@ fn spawn_session(proxy: &Arc<Proxy>, body: &Value) -> Result<Arc<Session>, Strin
         .map_err(|_| "代理状态不可用".to_string())?
         .insert(session_id, session.clone());
 
-    let (ready_tx, ready_rx) = mpsc::channel::<Result<(), String>>();
     let task_session = session.clone();
     let task_proxy = proxy.clone();
     tauri::async_runtime::spawn(async move {
-        let result = run_agy(task_session.clone(), &home, &work, &model, prompt, ready_tx).await;
-        if let Err(error) = result {
-            task_session.push(Event::Done {
+        let result =
+            antigravity_acp::complete(&model, &prompt, None, acp_tools, cancelled, |text| {
+                task_session.push(Event::Text(text.to_string()));
+            })
+            .await;
+        let event = match result {
+            Ok(usage) => Event::Done { usage, error: None },
+            Err(error) => Event::Done {
                 usage: None,
                 error: Some(error),
-            });
-        }
-        // 进程结束后留一会儿让 HTTP 端把最后的事件发出去，再清理。
+            },
+        };
+        task_session.push(event);
+        // 断开的客户端可能收不到终态；给当前响应留出排空事件的时间。
         tokio::time::sleep(Duration::from_secs(2)).await;
-        if task_session
-            .pending
-            .lock()
-            .map(|p| p.is_empty())
-            .unwrap_or(true)
-        {
-            task_proxy.drop_session(&task_session);
-        }
+        task_proxy.drop_session(&task_session);
     });
-    match ready_rx.recv_timeout(Duration::from_secs(30)) {
-        Ok(Ok(())) => Ok(session),
-        Ok(Err(error)) => {
-            proxy.drop_session(&session);
-            Err(error)
-        }
-        Err(_) => {
-            proxy.drop_session(&session);
-            Err("启动 agy 超时".to_string())
-        }
-    }
-}
-
-async fn run_agy(
-    session: Arc<Session>,
-    home: &Path,
-    work: &Path,
-    model: &str,
-    prompt: String,
-    ready: Sender<Result<(), String>>,
-) -> Result<(), String> {
-    let fail = |ready: &Sender<Result<(), String>>, message: String| {
-        let _ = ready.send(Err(message.clone()));
-        Err(message)
-    };
-    let agy = match find_agy_command().await {
-        Ok(agy) => agy,
-        Err(_) => return fail(&ready, "未找到 agy。请先安装 Antigravity CLI。".to_string()),
-    };
-    let mut cmd = Command::new(&agy);
-    configure_agy_command(&mut cmd).await;
-    cmd.env("HOME", home)
-        .env("USERPROFILE", home)
-        .env("ANTIGRAVITY_BROWSER_TOOLS_ENABLED", "false")
-        .args([
-            "--input-format",
-            "stream-json",
-            "--output-format",
-            "stream-json",
-            "--print-timeout",
-            PRINT_TIMEOUT,
-            "--model",
-            model,
-        ])
-        .current_dir(work)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true);
-    let mut child = match cmd.spawn() {
-        Ok(child) => child,
-        Err(e) => return fail(&ready, format!("无法启动 agy：{e}")),
-    };
-    let (Some(mut stdin), Some(stdout), Some(stderr)) =
-        (child.stdin.take(), child.stdout.take(), child.stderr.take())
-    else {
-        return fail(&ready, "agy 进程缺少标准输入输出".to_string());
-    };
-    let line = format!(
-        "{}\n",
-        json!({"event": "user", "message": {"content": prompt}})
-    );
-    if let Err(e) = stdin.write_all(line.as_bytes()).await {
-        return fail(&ready, format!("写入 agy 失败：{e}"));
-    }
-    let _ = stdin.flush().await;
-    if let Ok(mut slot) = session.child.lock() {
-        *slot = Some(child);
-    }
-    let _ = ready.send(Ok(()));
-
-    let stderr_task = tokio::spawn(async move {
-        let mut lines = BufReader::new(stderr).lines();
-        let mut tail = String::new();
-        while let Ok(Some(line)) = lines.next_line().await {
-            eprintln!("[antigravity-agent stderr] {line}");
-            tail.push_str(&line);
-            tail.push('\n');
-            if tail.len() > 4000 {
-                tail = tail.split_off(tail.len() - 2000);
-            }
-        }
-        tail
-    });
-    let mut reader = BufReader::new(stdout).lines();
-    let mut usage = None;
-    let mut error = None;
-    let mut got_result = false;
-    let mut stdin = Some(stdin);
-    while let Ok(Some(line)) = reader.next_line().await {
-        if line.contains("\"event\":\"result\"") {
-            got_result = true;
-        }
-        if let Some(event) = parse_agy_line(&line, &mut usage, &mut error) {
-            session.push(event);
-        }
-        if got_result {
-            // stream-json 模式下关闭 stdin，agy 处理完本回合就会退出。
-            stdin.take();
-            break;
-        }
-    }
-    drop(stdin);
-    let child = session.child.lock().ok().and_then(|mut slot| slot.take());
-    if let Some(mut child) = child {
-        if tokio::time::timeout(Duration::from_secs(3), child.wait())
-            .await
-            .is_err()
-        {
-            let _ = child.start_kill();
-        }
-    }
-    let stderr_tail = tokio::time::timeout(Duration::from_secs(1), stderr_task)
-        .await
-        .ok()
-        .and_then(|r| r.ok())
-        .unwrap_or_default();
-    if !got_result && error.is_none() && !session.closed.load(Ordering::SeqCst) {
-        let detail = stderr_tail.trim();
-        error = Some(if is_auth_error(detail) {
-            "Antigravity CLI 未登录或登录已过期，请在终端运行 agy 重新登录。".to_string()
-        } else if detail.is_empty() {
-            "Antigravity CLI 意外退出，没有返回结果。".to_string()
-        } else {
-            format!(
-                "Antigravity CLI 意外退出：{}",
-                detail
-                    .chars()
-                    .rev()
-                    .take(600)
-                    .collect::<String>()
-                    .chars()
-                    .rev()
-                    .collect::<String>()
-            )
-        });
-    }
-    session.push(Event::Done { usage, error });
-    Ok(())
-}
-
-fn is_auth_error(detail: &str) -> bool {
-    let lower = detail.to_lowercase();
-    [
-        "not logged into antigravity",
-        "authentication required",
-        "unauthenticated",
-    ]
-    .iter()
-    .any(|needle| lower.contains(needle))
+    Ok(session)
 }
 
 fn handle_chat(proxy: &Arc<Proxy>, request: &HttpRequest, mut stream: TcpStream) {
@@ -1174,14 +854,18 @@ fn handle_chat(proxy: &Arc<Proxy>, request: &HttpRequest, mut stream: TcpStream)
         .unwrap_or_default();
     let streaming = body.get("stream").and_then(Value::as_bool).unwrap_or(false);
     let session = match resume_session(proxy, &messages) {
-        Some(session) => session,
-        None => match spawn_session(proxy, &body) {
+        Ok(Some(session)) => session,
+        Ok(None) => match spawn_session(proxy, &body) {
             Ok(session) => session,
             Err(error) => {
                 write_json(&mut stream, 500, &json!({"error": {"message": error}}));
                 return;
             }
         },
+        Err(error) => {
+            write_json(&mut stream, 409, &json!({"error": {"message": error}}));
+            return;
+        }
     };
     let completion_id = format!("chatcmpl-{}", Uuid::new_v4().simple());
     if streaming {
@@ -1237,7 +921,9 @@ fn stream_events(proxy: &Arc<Proxy>, session: &Arc<Session>, id: &str, mut strea
                 let mut out = chunk(id, &model, tool_calls_delta(&calls), None, None);
                 out.push_str(&chunk(id, &model, json!({}), Some("tool_calls"), None));
                 out.push_str("data: [DONE]\n\n");
-                let _ = stream.write_all(out.as_bytes());
+                if stream.write_all(out.as_bytes()).is_err() {
+                    proxy.drop_session(session);
+                }
                 return;
             }
             Some(Event::Done { usage, error }) => {
@@ -1381,7 +1067,6 @@ pub fn shutdown_antigravity_agent_proxy() {
     if let Some(proxy) = proxy_slot().lock().ok().and_then(|mut slot| slot.take()) {
         proxy.shutdown();
     }
-    let _ = std::fs::remove_dir_all(sessions_root());
 }
 
 #[cfg(test)]
@@ -1445,24 +1130,6 @@ mod tests {
     }
 
     #[test]
-    fn agy_lines_become_events() {
-        let mut usage = None;
-        let mut error = None;
-        let text = r#"{"event":"step_update","step_update":{"step_type":"agent_response","state":"ACTIVE","text_delta":"你好"}}"#;
-        assert_eq!(
-            parse_agy_line(text, &mut usage, &mut error),
-            Some(Event::Text("你好".into()))
-        );
-        let result = r#"{"event":"result","result":{"status":"SUCCESS","usage":{"input_tokens":10,"output_tokens":2,"total_tokens":12}}}"#;
-        assert_eq!(parse_agy_line(result, &mut usage, &mut error), None);
-        assert_eq!(openai_usage(usage.as_ref().unwrap())["total_tokens"], 12);
-        assert!(error.is_none());
-        let failed = r#"{"event":"result","result":{"status":"ERROR","error":"quota exceeded"}}"#;
-        parse_agy_line(failed, &mut usage, &mut error);
-        assert!(error.unwrap().contains("quota exceeded"));
-    }
-
-    #[test]
     fn tool_call_chunks_follow_openai_shape() {
         let calls = vec![
             PendingCall {
@@ -1487,66 +1154,6 @@ mod tests {
     }
 
     #[test]
-    fn isolated_home_has_rules_mcp_config_and_login_only() {
-        let base = std::env::temp_dir().join(format!("qmai-agy-test-{}", Uuid::new_v4().simple()));
-        let real = base.join("real");
-        std::fs::create_dir_all(&real).unwrap();
-        let (home, work) =
-            prepare_isolated_home(&base.join("s0"), &real, "http://x", "t").unwrap();
-        assert!(work.is_dir());
-        assert!(!home
-            .join(".gemini/antigravity-cli")
-            .join(OAUTH_TOKEN_FILE)
-            .exists());
-        std::fs::write(real.join(OAUTH_TOKEN_FILE), "tok").unwrap();
-        let (home, work) = prepare_isolated_home(
-            &base.join("s1"),
-            &real,
-            "http://127.0.0.1:1/mcp/s1",
-            "secret",
-        )
-        .unwrap();
-        assert!(work.is_dir());
-        let token =
-            std::fs::read_to_string(home.join(".gemini/antigravity-cli").join(OAUTH_TOKEN_FILE))
-                .unwrap();
-        assert_eq!(token, "tok");
-        let settings: Value = serde_json::from_str(
-            &std::fs::read_to_string(home.join(".gemini/antigravity-cli/settings.json")).unwrap(),
-        )
-        .unwrap();
-        assert_eq!(settings["permissions"]["allow"][0], "mcp(qmai/*)");
-        assert!(settings["permissions"]["deny"]
-            .as_array()
-            .unwrap()
-            .contains(&json!("command(*)")));
-        let mcp: Value = serde_json::from_str(
-            &std::fs::read_to_string(home.join(".gemini/config/mcp_config.json")).unwrap(),
-        )
-        .unwrap();
-        assert_eq!(
-            mcp["mcpServers"]["qmai"]["headers"]["Authorization"],
-            "Bearer secret"
-        );
-        let _ = std::fs::remove_dir_all(&base);
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn isolated_home_links_login_keychain_without_copying_it() {
-        let base = std::env::temp_dir().join(format!("qmai-agy-kc-{}", Uuid::new_v4().simple()));
-        let keychain = base.join("login.keychain-db");
-        let home = base.join("home");
-        std::fs::create_dir_all(&base).unwrap();
-        std::fs::write(&keychain, "keychain-bytes").unwrap();
-        link_login_keychain(&home, &keychain).unwrap();
-        let linked = home.join("Library/Keychains/login.keychain-db");
-        assert!(linked.symlink_metadata().unwrap().file_type().is_symlink());
-        assert_eq!(std::fs::read_link(&linked).unwrap(), keychain);
-        let _ = std::fs::remove_dir_all(&base);
-    }
-
-    #[test]
     fn proxy_rejects_bad_token_and_resumes_parked_calls() {
         let proxy = start_proxy().unwrap();
         let send = |path: &str, token: &str, body: &str| -> String {
@@ -1561,6 +1168,7 @@ mod tests {
         // 手工放一个会话，模拟 agy 通过 MCP 调工具。
         let session = Arc::new(Session {
             id: "s1".into(),
+            mcp_token: "session-test-token".into(),
             model: "m".into(),
             tools: [("read_chapter".to_string(), schema())]
                 .into_iter()
@@ -1571,8 +1179,8 @@ mod tests {
             pending: Mutex::new(HashMap::new()),
             batch: Mutex::new(Vec::new()),
             batch_generation: AtomicU64::new(0),
-            child: Mutex::new(None),
-            home: std::env::temp_dir().join("qmai-agy-none"),
+            cancel: Mutex::new(None),
+            tools_enabled: Arc::new(AtomicBool::new(true)),
             closed: AtomicBool::new(false),
         });
         proxy
@@ -1580,7 +1188,9 @@ mod tests {
             .lock()
             .unwrap()
             .insert("s1".into(), session.clone());
-        let token = proxy.token.clone();
+        assert!(send("/v1/chat/completions", &session.mcp_token, "{}").contains("401"));
+        assert!(send("/mcp/s1", &proxy.token, "{}").contains("401"));
+        let token = session.mcp_token.clone();
         let bad = send(
             "/mcp/s1",
             &token,
@@ -1603,9 +1213,73 @@ mod tests {
         assert_eq!(calls[0].name, "read_chapter");
         let messages =
             vec![json!({"role": "tool", "tool_call_id": calls[0].id, "content": "第三章正文"})];
-        assert!(resume_session(&proxy, &messages).is_some());
+        let mut mixed = messages.clone();
+        mixed.push(
+            json!({"role":"tool","tool_call_id":"call_agy_unknown","content":"另一轮的结果"}),
+        );
+        assert!(resume_session(&proxy, &mixed).is_err());
+        assert!(resume_session(&proxy, &messages).unwrap().is_some());
+        assert!(resume_session(&proxy, &messages).is_err());
         let mcp_reply = caller.join().unwrap();
         assert!(mcp_reply.contains("第三章正文") && mcp_reply.contains("isError\":false"));
+        proxy.shutdown();
+    }
+    #[tokio::test]
+    #[ignore = "使用已登录的 agy 验证长输入及超过 3 分钟的 MCP 工具，消耗模型额度"]
+    async fn live_acp_tool_preserves_long_input_and_returns_the_result_once() {
+        let proxy = start_proxy().unwrap();
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .timeout(Duration::from_secs(240))
+            .build()
+            .unwrap();
+        let endpoint = format!("{}/v1/chat/completions", proxy.base_url());
+        let (context, marks) = antigravity_acp::long_test_input();
+        let messages = vec![
+            json!({"role":"user","content": format!("{context}\n请恰好调用一次 read_ticket，三个参数依次填入首、中、末编号。工具返回一个随机票号。读取后只回复该票号。")}),
+        ];
+        let mut body = json!({"model":"gemini-4-hydrogen-high","messages":messages,"tools":[{"type":"function","function":{
+            "name":"read_ticket","description":"核对登记本中的三个编号，返回当天票号",
+            "parameters":{"type":"object","properties":{"first":{"type":"string"},"middle":{"type":"string"},"last":{"type":"string"}},"required":["first","middle","last"]}
+        }}]});
+        let call = |body: Value| {
+            client
+                .post(&endpoint)
+                .bearer_auth(&proxy.token)
+                .json(&body)
+                .send()
+        };
+        let reply: Value = call(body.clone()).await.unwrap().json().await.unwrap();
+        let msg = reply.pointer("/choices/0/message").expect("缺少助手消息");
+        let calls = msg["tool_calls"].as_array().expect("未调用 MCP 工具");
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0]["function"]["name"], "read_ticket");
+        let args: Value =
+            serde_json::from_str(calls[0]["function"]["arguments"].as_str().unwrap()).unwrap();
+        assert_eq!(
+            args,
+            json!({"first":marks[0],"middle":marks[1],"last":marks[2]})
+        );
+        // 故意跨过 agy 默认 180 秒工具期限。随机结果只在回填时交给模型。
+        tokio::time::sleep(Duration::from_secs(190)).await;
+        assert_eq!(proxy.call_index.lock().unwrap().len(), 1);
+        let ticket = Uuid::new_v4().simple().to_string();
+        let history = body["messages"].as_array_mut().unwrap();
+        history.push(msg.clone());
+        history.push(json!({"role":"tool","tool_call_id":calls[0]["id"],"content":ticket}));
+        let reply: Value = call(body).await.unwrap().json().await.unwrap();
+        assert_eq!(
+            reply
+                .pointer("/choices/0/finish_reason")
+                .and_then(Value::as_str),
+            Some("stop")
+        );
+        assert!(reply
+            .pointer("/choices/0/message/content")
+            .and_then(Value::as_str)
+            .unwrap()
+            .contains(&ticket));
+        assert!(proxy.call_index.lock().unwrap().is_empty());
         proxy.shutdown();
     }
 }

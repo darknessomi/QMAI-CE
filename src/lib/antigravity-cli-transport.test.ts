@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { LlmConfig } from "@/stores/wiki-store"
-import { createAntigravityStreamParser, emptyOutputMessage, streamAntigravityCli } from "./antigravity-cli-transport"
+import { streamAntigravityCli } from "./antigravity-cli-transport"
 
 type EventHandler = (event: { payload: unknown }) => void
 
@@ -59,70 +59,38 @@ beforeEach(() => {
   scripted.exit = { code: 0, stderr: "" }
 })
 
-describe("antigravity stream parser", () => {
-  it("concatenates agent_response text deltas and ignores tool steps", () => {
-    const parse = createAntigravityStreamParser()
-    const init = parse('{"event":"init","init":{"tools":["run_command"]}}')
-    const tool = parse('{"event":"step_update","step_update":{"step_type":"tool","tool_name":"run_command","text_delta":"nope"}}')
-    const active = parse('{"event":"step_update","step_update":{"step_type":"agent_response","state":"ACTIVE","text_delta":"苹"}}')
-    const done = parse('{"event":"step_update","step_update":{"step_type":"agent_response","state":"DONE","text_delta":"果"}}')
-    expect(init.token).toBeNull()
-    expect(tool.token).toBeNull()
-    expect(active.token).toBe("苹")
-    expect(done.token).toBe("果")
-  })
-
-  it("reports a non-success result without treating it as text", () => {
-    const parse = createAntigravityStreamParser()
-    const parsed = parse('{"event":"result","result":{"status":"ERROR","response":"","error":"invalid model"}}')
-    expect(parsed.token).toBeNull()
-    expect(parsed.terminalStatus).toBe("ERROR")
-    expect(parsed.terminalError).toBe("invalid model")
-  })
-})
-
 describe("streamAntigravityCli", () => {
-  it("keeps a successful run when stderr only has the early login line", async () => {
-    scripted.lines = [
-      '{"event":"step_update","step_update":{"step_type":"agent_response","state":"DONE","text_delta":"ok"}}',
-      '{"event":"result","result":{"status":"SUCCESS","response":"ok","usage":{"input_tokens":3,"output_tokens":1,"total_tokens":4}}}',
-    ]
-    scripted.exit = { code: 0, stderr: "You are not logged into Antigravity.\n" }
-    const tokens: string[] = []
-    let error: Error | null = null
-    let done = false
-    await streamAntigravityCli(config, [{ role: "user", content: "ping" }], {
-      onToken: (token) => { tokens.push(token) },
-      onDone: () => { done = true },
-      onError: (err) => { error = err },
-    })
-    expect(tokens).toEqual(["ok"])
-    expect(error).toBeNull()
-    expect(done).toBe(true)
+  it("delivers ACP text chunks once and forwards the measured usage", async () => {
+    const usage = { inputTokens: 3, outputTokens: 2, totalTokens: 5, cachedInputTokens: 1 }
+    scripted.lines = [JSON.stringify({ text: "苹" }), JSON.stringify({ text: "果" }), JSON.stringify({ usage })]
+    const onToken = vi.fn()
+    const onUsage = vi.fn()
+    const onDone = vi.fn()
+    const onError = vi.fn()
+    await streamAntigravityCli(config, [{ role: "user", content: "ping" }], { onToken, onUsage, onDone, onError })
+    expect(onToken.mock.calls.flat()).toEqual(["苹", "果"])
+    expect(onUsage).toHaveBeenCalledWith(usage)
+    expect(onDone).toHaveBeenCalledOnce()
+    expect(onError).not.toHaveBeenCalled()
   })
 
-  it("sends a failed result to onError", async () => {
-    scripted.lines = [
-      '{"event":"result","result":{"status":"ERROR","response":"","error":"invalid model selection"}}',
-    ]
-    scripted.exit = { code: 1, stderr: "" }
-    const onError = vi.fn<(error: Error) => void>()
+  it("reports a failed ACP turn even after partial text has arrived", async () => {
+    scripted.lines = [JSON.stringify({ text: "半段" })]
+    scripted.exit = { code: 1, stderr: "Antigravity ACP 达到生成上限，本回合输出不完整。" }
+    const onDone = vi.fn()
+    const onError = vi.fn()
     await streamAntigravityCli(config, [{ role: "user", content: "ping" }], {
-      onToken: () => {},
-      onDone: () => {},
-      onError,
+      onToken: vi.fn(), onDone, onError,
     })
-    expect(onError).toHaveBeenCalledWith(expect.objectContaining({
-      message: expect.stringContaining("invalid model selection"),
-    }))
+    expect(onError).toHaveBeenCalledWith(new Error(scripted.exit.stderr))
+    expect(onDone).not.toHaveBeenCalled()
   })
 
-  it("explains a headless command denial without suggesting skipped permissions", () => {
-    const message = emptyOutputMessage(
-      "jetski: no output produced — a tool required the \"command\" permission that headless mode cannot prompt for, so it was auto-denied.",
-    )
-    expect(message).toContain("无头模式不能弹出授权")
-    expect(message).not.toContain("dangerously-skip-permissions")
-    expect(message).not.toContain("settings.json")
+  it("reports an empty response", async () => {
+    const onError = vi.fn()
+    await streamAntigravityCli(config, [{ role: "user", content: "ping" }], {
+      onToken: vi.fn(), onDone: vi.fn(), onError,
+    })
+    expect(onError).toHaveBeenCalledWith(new Error("Antigravity ACP 没有返回正文。"))
   })
 })
