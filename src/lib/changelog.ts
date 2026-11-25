@@ -79,6 +79,20 @@ const FOUR_POINT_FIVE_ZERO_ZH: string[] = [
   "为会员用户提供更好的使用体验和额度管理能力。",
 ];
 
+const FOUR_POINT_EIGHT_TWO_ZH: string[] = [
+  "写作、项目搜索和知识库问答改用 SAG2 检索。配置 JEV 后可从原文多轮查找证据并定位到行；未配置时使用本地关键词等基础检索。",
+  "普通写作可检索实体和概念。回写旧章时，混有草稿、大纲或后续剧情的页面会按来源章检索，只引用目标章之前允许 AI 读取的定稿原文。",
+  "实体和概念查重支持用 SAG2 查找候选，再由 JEV 核对两页原文。已有的非重复标记继续生效。",
+  "维护工具新增两个清理入口，可分别清理当前项目的旧向量索引与重排配置，以及本机应用保存的旧模型凭据。",
+  "Antigravity CLI 的写作和联网搜索已接入 ACP，联网搜索默认使用 Gemini 4 Hydrogen Low。",
+];
+
+const FOUR_POINT_EIGHT_TWO_CHANGELOG: ChangelogEntry = {
+  version: "4.8.2",
+  date: "2026-11-25",
+  highlights: { en: FOUR_POINT_EIGHT_TWO_ZH, zh: FOUR_POINT_EIGHT_TWO_ZH },
+};
+
 const FOUR_POINT_EIGHT_ONE_ZH: string[] = [
   "人物档案支持手动分组和重新归档，归档后同步更新大纲引用。",
   "章节与大纲的侧栏宽度可按小说分别保存。大纲侧栏新增分栏标签和实时搜索，切换人物小传时保留目录展开状态。",
@@ -2276,6 +2290,8 @@ export function currentVersionChangelog(version: string): ChangelogEntry[] {
    * 才是「当前版本发布说明」的取数口 —— 漏了这里，发布说明会退化成
    * 一行「QMAI x.y.z 发布版本」，scripts/release-notes.spec.mjs 会拦下来。
    */
+  if (version === FOUR_POINT_EIGHT_TWO_CHANGELOG.version)
+    return [FOUR_POINT_EIGHT_TWO_CHANGELOG];
   if (version === FOUR_POINT_EIGHT_ONE_CHANGELOG.version)
     return [FOUR_POINT_EIGHT_ONE_CHANGELOG];
   if (version === FOUR_POINT_EIGHT_ZERO_CHANGELOG.version)
@@ -2481,6 +2497,7 @@ export function currentVersionChangelog(version: string): ChangelogEntry[] {
 
 export function allChangelog(): ChangelogEntry[] {
   return [
+    FOUR_POINT_EIGHT_TWO_CHANGELOG,
     FOUR_POINT_EIGHT_ONE_CHANGELOG,
     FOUR_POINT_EIGHT_ZERO_CHANGELOG,
     FOUR_POINT_SEVEN_TWO_CHANGELOG,
