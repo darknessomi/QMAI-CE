@@ -8,12 +8,6 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/darknessomi/QMAI-CE/releases">
-    <img src="https://img.shields.io/github/v/release/darknessomi/QMAI-CE?style=flat-square" alt="Release" />
-  </a>
-  <a href="https://github.com/darknessomi/QMAI-CE/releases/latest">
-    <img src="https://img.shields.io/github/downloads/darknessomi/QMAI-CE/total?style=flat-square" alt="所有发行附件的累计下载次数，点击前往最新版" />
-  </a>
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-blue?style=flat-square" alt="Platform" />
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-blue?style=flat-square" alt="查看 GPL-3.0 许可证" /></a>
 </p>
