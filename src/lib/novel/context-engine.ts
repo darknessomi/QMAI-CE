@@ -17,7 +17,7 @@ import { buildPersonaSkillContext } from "./persona-skill-context"
 import { withMemoryWriteLock } from "./memory-cleanup-policy"
 import { eligibleLocalSource, isAuthoritativeGenerationPath, isHistoricalProjectionSnippet, novelMixedSearch } from "./search-adapter"
 import { getJevConfigState } from "@/lib/jev-config"
-import { fitSagEvidence, formatSagEvidence, prepareSagChapterScope, searchSagProject, type ChapterScope } from "@/lib/sag-search"
+import { buildSagEvidence, fitSagEvidence, prepareSagChapterScope, searchSagProject, type ChapterScope, type SagEvidenceSource } from "@/lib/sag-search"
 import { fitChapterOutline } from "./chapter-outline-excerpt"
 import {
   DataSourceRegistry,
@@ -96,6 +96,7 @@ export interface ChapterSearchEvidence {
   chapterNumber?: number
   scopeKey?: string
   text: string
+  sources?: SagEvidenceSource[]
   warning?: string
 }
 
@@ -193,7 +194,7 @@ export async function buildContextPack(
       const hits = await searchSagProject(pp, query, context.config.searchTopK, {
         beforeChapter, signal: options?.signal, scope,
       })
-      evidence = { chapterNumber: context.chapterNumber, scopeKey, text: formatSagEvidence(pp, hits) }
+      evidence = { chapterNumber: context.chapterNumber, scopeKey, ...buildSagEvidence(pp, hits) }
     }
   } catch (error) {
     options?.signal?.throwIfAborted()

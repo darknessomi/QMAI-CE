@@ -11,14 +11,8 @@ export function applyAgentToolEvent(
 ): ToolCallRecord[] {
   const current = records ?? []
   const existingIndex = current.findIndex((record) => record.id === event.callId)
-  const status =
-    event.type === "result"
-      ? "done"
-      : event.type === "error"
-        ? "error"
-        : event.type === "approval_required"
-          ? "approval_required"
-          : "running"
+  const status = event.type === "call_started" ? "running"
+    : event.type === "result" ? "done" : event.type
 
   const nextRecord: ToolCallRecord = {
     id: event.callId,

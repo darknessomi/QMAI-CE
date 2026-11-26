@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { DEFAULT_NOVEL_CONFIG, useWikiStore } from "@/stores/wiki-store"
 import { useChatStore, type Conversation, type DisplayMessage } from "@/stores/chat-store"
 import type { ConversationRunStates } from "@/lib/conversation-run-state"
+import type { ContextPack } from "@/lib/novel/context-engine"
 import * as writing from "./writing-conversation"
 import { runWritingConversation, type WritingConversationDeps } from "./writing-conversation"
 import { createWritingProgressStore, writingProgressStore, type WritingProgress } from "./writing-progress"
@@ -64,11 +65,13 @@ afterEach(() => {
 })
 
 describe("background MCP writing", () => {
-  it("wires the default generator's activity, tool and final output callbacks into progress", async () => {
+  it("将阶段详情、子工具和引用保存到聊天，进度接口和进度文件只保留状态", async () => {
+    const path = "/book/QM/outlines/秘密大纲.md"
     vi.mocked(runAiChatSession).mockImplementation(async (input) => {
-      input.callbacks.onActivityEvent?.({ id: "draft:start", stageId: "generate_draft", kind: "stage_started", title: "草稿", content: "秘密正文", timestamp: Date.now() })
-      input.callbacks.onToolEvent?.({ type: "call_started", callId: "child:1", parentCallId: "parent:1", name: "chapter_generate_draft", params: { content: "秘密输入" }, timestamp: Date.now() })
-      input.callbacks.onToolEvent?.({ type: "result", callId: "child:1", parentCallId: "parent:1", name: "chapter_generate_draft", params: {}, result: "秘密正文", timestamp: Date.now() })
+      input.callbacks.onActivityEvent?.({ id: "draft:output", stageId: "generate_draft", kind: "stage_output", title: "草稿", content: "秘密阶段摘要", timestamp: Date.now() })
+      input.callbacks.onReasoningToken?.("秘密思考")
+      input.callbacks.onToolEvent?.({ type: "call_started", callId: "child:1", parentCallId: "parent:1", name: "read_outline", params: { path }, timestamp: Date.now() })
+      input.callbacks.onToolEvent?.({ type: "result", callId: "child:1", parentCallId: "parent:1", name: "read_outline", params: { path }, result: "秘密大纲内容", timestamp: Date.now() })
       input.callbacks.onFinalContent?.("完整正文")
       return { toolCalls: [], roundsUsed: 1, finalText: "完整正文" }
     })
@@ -77,8 +80,17 @@ describe("background MCP writing", () => {
     const result = await h.terminal(await h.start(), "completed")
     expect(result.stages.some((stage) => stage.id === "generate_draft")).toBe(true)
     expect(result.tools[0]).toMatchObject({ id: "child:1", parentCallId: "parent:1", status: "done" })
-    expect(h.history().messages[1].content).toBe("完整正文")
+    expect(h.history().messages[1]).toMatchObject({
+      content: "完整正文", reasoning_content: "秘密思考",
+      agentStages: expect.arrayContaining([expect.objectContaining({
+        id: "generate_draft", summary: "秘密阶段摘要",
+        events: expect.arrayContaining([expect.objectContaining({ id: "draft:output", content: "秘密阶段摘要" })]),
+      })]),
+      agentToolCalls: [expect.objectContaining({ parentCallId: "parent:1", params: { path }, result: "秘密大纲内容" })],
+      references: [{ path: "wiki/outlines/秘密大纲.md", title: "秘密大纲" }],
+    })
     expect(JSON.stringify(result)).not.toContain("秘密")
+    expect(h.files.get(result.progressPath)).not.toContain("秘密")
   })
 
   it.each([
@@ -115,6 +127,9 @@ describe("background MCP writing", () => {
     expect(stopped.content[0].text).toBe("已停止生成。")
     await h.terminal(run, "cancelled")
     expect(h.history().messages.map((message) => message.content)).toEqual(["编写第 200 章", "已停止生成。"])
+    expect(h.history().messages[1].agentStages).toContainEqual(expect.objectContaining({
+      id: "generate_draft", status: "cancelled", summary: "秘密正文",
+    }))
   })
 
   it("marks completed only after the complete reply is saved", async () => {
@@ -162,6 +177,30 @@ describe("background MCP writing", () => {
       return "完整正文"
     })
     await h.terminal(await h.start(), "completed")
+  })
+
+  it("仅保存实际送入上下文或成功读取的文件，同一文件只列一次", async () => {
+    const included = { path: "QM/chapters/第1章.md", title: "前章", anchor: "【前章出处】" }
+    const excluded = { path: "wiki/chapters/第2章.md", title: "未送入", anchor: "【另一出处】" }
+    vi.mocked(runNovelPrePluginChain).mockResolvedValue({
+      errors: [], executedPlugins: [],
+      finalSystemPrompt: included.anchor + "\n引文正文",
+      novelSystemPrompt: included.anchor + "\n引文正文",
+      contextPack: { sagEvidence: { text: "", sources: [included, excluded] } } as ContextPack,
+    })
+    vi.mocked(runAiChatSession).mockImplementation(async ({ callbacks }) => {
+      for (const type of ["result", "cancelled"] as const) {
+        const path = type === "result" ? included.path : excluded.path
+        callbacks.onToolEvent?.({ type, callId: type, name: "read_chapter", params: { path }, timestamp: Date.now() })
+      }
+      return { toolCalls: [], roundsUsed: 1, finalText: "完成" }
+    })
+    const h = fixture()
+    h.deps.runSession = undefined
+    await h.terminal(await h.start(), "completed")
+    const message = h.history().messages[1]
+    expect(message.references?.map(reference => reference.path)).toEqual(["wiki/chapters/第1章.md"])
+    expect(message.agentToolCalls?.find(call => call.id === "cancelled")?.status).toBe("cancelled")
   })
 
   it("reports a history save failure rather than completed", async () => {

@@ -8,6 +8,7 @@ import { readPreviousChapterBodies } from "@/lib/novel/previous-chapters-analysi
 import { useWikiStore, DEFAULT_NOVEL_CONFIG } from "@/stores/wiki-store"
 import { createTempProject, realFs, writeFileRaw } from "@/test-helpers/fs-temp"
 import { runWritingConversation } from "./writing-conversation"
+import { loadChatHistory } from "@/lib/persist"
 
 vi.mock("@/commands/fs", async original => ({
   ...await original<typeof import("@/commands/fs")>(), ...(await import("@/test-helpers/fs-temp")).realFs,
@@ -78,7 +79,7 @@ function setupModel(tools: boolean) {
 
 async function writeViaMcp() {
   return runWritingConversation({ projectPath: book.path, message: userRequest }, {
-    readLive: () => null, loadHistory: async () => ({ conversations: [], messages: [], runStates: {} }), saveHistory: async () => {},
+    readLive: () => null, loadHistory: async () => ({ conversations: [], messages: [], runStates: {} }),
   })
 }
 
@@ -95,6 +96,8 @@ describe("MCP 写作实际组包与模型输入", () => {
     expect(JSON.stringify(messages)).toContain(quote)
     expect(JSON.stringify(messages)).not.toContain("run_chapter_workflow")
     expect(searchCalls()).toHaveLength(1)
+    const history = await loadChatHistory(book.path)
+    expect(history.messages.at(-1)?.references).toEqual([{ path: "wiki/chapters/第1章.md", title: "渡口" }])
   })
 
   it("主 Agent 将证据交给真实章节工具，正文提示词复用同一次判定", async () => {

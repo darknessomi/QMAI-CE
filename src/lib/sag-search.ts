@@ -117,13 +117,23 @@ export async function searchSagProject(
   return sagSearchFiles(projectPath, query, files, topK, signal, { beforeChapter, scopeFingerprint: scope?.fingerprint })
 }
 
-export function formatSagEvidence(projectPath: string, hits: SagHit[]): string {
+export interface SagEvidenceSource {
+  title: string
+  path: string
+  anchor: string
+}
+
+export function buildSagEvidence(projectPath: string, hits: SagHit[]) {
   const prefix = normalizePath(projectPath).replace(/\/+$/, "") + "/"
-  return hits.map(hit => {
+  const sources: SagEvidenceSource[] = []
+  const text = hits.map(hit => {
     const path = normalizePath(hit.path)
     const relative = path.startsWith(prefix) ? path.slice(prefix.length) : path
-    return `【${hit.title} · ${relative} 第 ${hit.startLine}–${hit.endLine} 行】\n${hit.content}`
+    const anchor = `【${hit.title} · ${relative} 第 ${hit.startLine}–${hit.endLine} 行】`
+    sources.push({ title: hit.title, path: relative, anchor })
+    return `${anchor}\n${hit.content}`
   }).join("\n\n")
+  return { text, sources }
 }
 
 /** 保留引文开头的出处，不能把后一个段落的末尾拼到前一条引文上。 */

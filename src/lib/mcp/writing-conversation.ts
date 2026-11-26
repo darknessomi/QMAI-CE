@@ -1,5 +1,7 @@
 import { runAiChatSession } from "@/lib/agent/ai-chat-session"
-import { createStageStartedEvent } from "@/lib/agent/activity-trace"
+import { applyAgentActivityEvent, createAgentActivityEvent, createStageStartedEvent, settleRunningAgentStages } from "@/lib/agent/activity-trace"
+import { applyAgentToolActivityEvent, applyAgentToolEvent, settleRunningAgentToolCalls } from "@/lib/agent/tool-events"
+import { agentToolCallsToMessageReferences, normalizeReferencePath } from "@/components/chat/agent-message-metadata"
 import { buildAgentConfig, effectiveToolsEnabled } from "@/lib/agent/config"
 import { runNovelPrePluginChain } from "@/lib/agent/novel-pre-plugin-chain"
 import { resolveRequiredToolsOnce } from "@/lib/agent/required-tools-gate"
@@ -12,7 +14,7 @@ import { loadAllLinkedSkillsContent, loadUserSkillConfig, resolveEnabledWritingS
 import { deriveConversationTitle } from "@/lib/conversation-title"
 import { loadChatHistory, saveChatHistory } from "@/lib/persist"
 import { normalizePath } from "@/lib/path-utils"
-import { useChatStore, type Conversation, type DisplayMessage } from "@/stores/chat-store"
+import { useChatStore, type Conversation, type DisplayMessage, type MessageReference } from "@/stores/chat-store"
 import { useWikiStore } from "@/stores/wiki-store"
 import { getPluginToolDescriptors, invokePluginToolViaTauri } from "@/lib/plugins/tool-sync"
 import type { ConversationRunStates } from "@/lib/conversation-run-state"
@@ -30,6 +32,7 @@ export interface WritingSessionContext extends ResolvedWritingParameters {
   onActivityEvent?: (event: AgentActivityEvent) => void
   onToolEvent?: (event: AgentToolEvent) => void
   onText?: (text: string) => void
+  onReasoningToken?: (chunk: string) => void
   onNeedsInput?: (message: string) => void
   onRetrievalWarning?: () => void
 }
@@ -155,6 +158,15 @@ async function runDefaultSession(ctx: WritingSessionContext): Promise<string> {
   const systemPrompt = toolsEnabled
     ? prePlugin?.finalSystemPrompt?.trim() || agentConfig.systemPrompt
     : [agentConfig.systemPrompt, "本轮未启用工具，请直接根据已有资料完成用户要求。", prePlugin?.novelSystemPrompt].filter(Boolean).join("\n\n")
+  const sourceRefs = chapterEvidence?.sources
+    ?.filter(source => systemPrompt.includes(source.anchor + "\n"))
+    .map(source => ({ type: "wiki", title: source.title, path: source.path }))
+  ctx.onActivityEvent?.(createAgentActivityEvent({
+    id: "prepare_agent_context:ready", stageId: "prepare_agent_context", kind: "stage_output",
+    title: "写作上下文已准备",
+    content: sourceRefs?.length ? `已将 ${sourceRefs.length} 段原文引文加入上下文。` : "已组装本轮写作请求。",
+    sourceRefs,
+  }))
   let reply = ""
   ctx.onActivityEvent?.(createStageStartedEvent({ stageId: "agent_dispatch", title: "等待主 Agent 响应", summary: "" }))
   let awaitingAgent = true
@@ -162,7 +174,7 @@ async function runDefaultSession(ctx: WritingSessionContext): Promise<string> {
     if (!awaitingAgent) return
     awaitingAgent = false
     ctx.onActivityEvent?.({ id: "agent_dispatch:response", stageId: "agent_dispatch",
-      kind: "stage_output", title: "主 Agent 已响应", content: "", timestamp: Date.now() })
+      kind: "stage_output", title: "主 Agent 已响应", content: "已收到主 Agent 响应。", timestamp: Date.now() })
   }
   const record = await runAiChatSession({
     userMessage: ctx.message,
@@ -188,6 +200,7 @@ async function runDefaultSession(ctx: WritingSessionContext): Promise<string> {
         ctx.onText?.(chunk)
       },
       onActivityEvent: ctx.onActivityEvent,
+      onReasoningToken: ctx.onReasoningToken,
       onToolEvent: (event) => { markAgentResponse(); ctx.onToolEvent?.(event) },
       onFinalContent: (content) => { markAgentResponse(); reply = content; ctx.onText?.(content) },
       onDone: () => {},
@@ -277,6 +290,10 @@ export async function runWritingConversation(input: {
     const assistant: DisplayMessage = {
       id: createId(), role: "assistant", content: "", timestamp: now, conversationId: target.id,
       isAgentRunning: true, generationTiming: { startedAt: now },
+      agentStages: applyAgentActivityEvent([], createAgentActivityEvent({
+        id: "preparing:started", stageId: "preparing", kind: "stage_started", title: "准备写作上下文",
+        content: "开始准备本轮写作所需的上下文。", timestamp: now,
+      })),
     }
 
     async function execute(): Promise<string> {
@@ -285,13 +302,28 @@ export async function runWritingConversation(input: {
       let status: Exclude<WritingRunStatus, "running"> = "completed"
       let problem: string | undefined
       let failure: unknown
+      const references = new Map<string, MessageReference>()
       try {
         try {
           reply = await (deps.runSession ?? runDefaultSession)({
             ...parameters, projectPath, conversationId: target.id, message, history, signal: controller.signal,
-            onActivityEvent: progress.activity,
-            onToolEvent: progress.tool,
+            onActivityEvent: (event) => {
+              assistant.agentStages = applyAgentActivityEvent(assistant.agentStages, event)
+              for (const source of event.sourceRefs ?? []) {
+                if (source.type === "wiki" && source.path) {
+                  const path = normalizeReferencePath(source.path)
+                  references.set(path, { title: source.title, path })
+                }
+              }
+              progress.activity(event)
+            },
+            onToolEvent: (event) => {
+              assistant.agentToolCalls = applyAgentToolEvent(assistant.agentToolCalls, event)
+              assistant.agentStages = applyAgentToolActivityEvent(assistant.agentStages, event)
+              progress.tool(event)
+            },
             onText: (text) => { partial += text },
+            onReasoningToken: (chunk) => { assistant.reasoning_content = (assistant.reasoning_content ?? "") + chunk },
             onNeedsInput: (text) => { status = "needs_input"; problem = text },
             onRetrievalWarning: progress.retrievalWarning,
           })
@@ -313,17 +345,16 @@ export async function runWritingConversation(input: {
         if (controller.signal.aborted) { status = "cancelled"; reply = STOPPED_GENERATION_TEXT; problem = undefined }
         assistant.content = reply
         assistant.isAgentRunning = false
-        assistant.generationTiming!.finishedAt = Date.now()
+        const finishedAt = Date.now()
+        assistant.generationTiming!.finishedAt = finishedAt
         const view = progress.snapshot()
         const settled = status === "failed" ? "error" : status === "cancelled" ? "cancelled" : "done"
-        assistant.agentStages = view.stages.map((stage) => ({
-          ...stage, summary: "", events: [],
-          ...(stage.status === "running" || stage.status === "pending" ? { status: settled, finishedAt: Date.now() } : {}),
-        }))
-        assistant.agentToolCalls = view.tools.map((tool) => ({
-          ...tool, params: {}, result: "",
-          ...(tool.status === "running" ? { status: settled, finishedAt: Date.now() } : {}),
-        }))
+        for (const reference of agentToolCallsToMessageReferences(assistant.agentToolCalls)) {
+          references.set(reference.path, reference)
+        }
+        if (references.size) assistant.references = [...references.values()]
+        assistant.agentStages = settleRunningAgentStages(assistant.agentStages, settled, finishedAt)
+        assistant.agentToolCalls = settleRunningAgentToolCalls(assistant.agentToolCalls, settled, finishedAt)
         // 执行期间可能切换项目或产生其他会话，收尾必须重新读取并只合并本轮。
         const currentLive = (deps.readLive ?? defaultReadLive)()
         const sameProject = Boolean(currentLive?.projectPath && normalizePath(currentLive.projectPath) === projectPath)
