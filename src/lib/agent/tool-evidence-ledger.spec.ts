@@ -2,6 +2,18 @@ import { describe, expect, it } from "vitest"
 import { ToolEvidenceLedger } from "./tool-evidence-ledger"
 
 describe("ToolEvidenceLedger", () => {
+  it("章纲按模型窗口保留中段要求，显式工具限额仍可收紧", () => {
+    const text = `# 第20章 夜访\n${"甲".repeat(8000)}\n场景二：不得提前开门。\n${"乙".repeat(8000)}`
+    const params = { path: "QM/outlines/章纲/第20章.md" }
+    const ledger = new ToolEvidenceLedger(undefined, 204_800)
+    expect(ledger.format("read_outline", params, text)).toContain(text)
+    expect(ledger.format("read_outline", { path: "材料/书信.md" }, text)).not.toContain("不得提前开门")
+    const clipped = new ToolEvidenceLedger(undefined, 8192).format("read_outline", params, text)
+    expect(clipped).toContain("不得提前开门")
+    expect(clipped.length).toBeLessThan(8192)
+    expect(new ToolEvidenceLedger(300, 204_800).format("read_outline", params, text)).not.toContain("不得提前开门")
+  })
+
   it("相同工具、参数和结果再次出现时返回证据引用", () => {
     const ledger = new ToolEvidenceLedger(500)
     const first = ledger.format("read_chapter", { chapter: 1 }, "第一章完整内容")

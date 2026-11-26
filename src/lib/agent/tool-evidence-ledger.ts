@@ -1,4 +1,9 @@
 import { formatToolResultForModel } from "./tool-result"
+import { trustDeclaredContextWindow } from "@/lib/llm-context-size"
+import { estimateContextTokens } from "@/lib/context-hub/token-estimator"
+import { computeNovelContextTokenBudget } from "@/lib/context-budget"
+import { fitChapterOutline } from "@/lib/novel/chapter-outline-excerpt"
+import { isChapterOutlineRead } from "@/lib/novel/outline-context-index"
 
 function stableValue(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(stableValue)
@@ -21,7 +26,7 @@ export class ToolEvidenceLedger {
   private readonly entries = new Map<string, { id: string; resultHash: string }>()
   private sequence = 0
 
-  constructor(private readonly resultLimit: number) {}
+  constructor(private readonly resultLimit?: number, private readonly windowTokens?: number) {}
 
   format(toolName: string, params: Record<string, unknown>, result: string): string {
     const key = `${toolName}:${JSON.stringify(stableValue(params))}`
@@ -32,9 +37,19 @@ export class ToolEvidenceLedger {
     }
     const id = `evidence-${String(++this.sequence).padStart(3, "0")}`
     this.entries.set(key, { id, resultHash: hash })
+    // 显式配置仍按调用方字符限额。默认的章纲读取则使用本轮模型的资料预算。
+    let content: string
+    if (toolName === "read_outline" && this.resultLimit === undefined
+      && isChapterOutlineRead(params.path ?? params.name, result)) {
+      const window = trustDeclaredContextWindow(this.windowTokens)
+      const budget = Math.min(computeNovelContextTokenBudget(window), Math.floor(window * 0.75))
+      content = estimateContextTokens(result) <= budget ? result : fitChapterOutline(result, budget)
+    } else {
+      content = formatToolResultForModel(toolName, result, this.resultLimit)
+    }
     return [
       `工具证据 ID：${id}`,
-      formatToolResultForModel(toolName, result, this.resultLimit),
+      content,
     ].join("\n")
   }
 }

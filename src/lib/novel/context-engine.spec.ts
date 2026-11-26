@@ -168,6 +168,20 @@ describe("trimContextPack 两级裁剪", () => {
     expect(result.prompt).toContain("第9章摘要")
   })
 
+  it("总纲和卷纲过长时，整章生成与普通组包都优先保住本章章纲", () => {
+    const chapter = "本章场景\n" + "甲".repeat(7500) + "中段必须交还钥匙" + "乙".repeat(7500)
+    const background = "通用背景".repeat(20_000)
+    const pack = {
+      ...basePack, task: "写本章", chapterOutlineContext: chapter, volumeOutlineContext: background,
+      projectOutline: background, outline: [background, chapter].join("\n"),
+    }
+    for (const excludeOutline of [false, true]) {
+      const { prompt } = trimContextPack(pack, 16_000, { excludeOutline })
+      expect(prompt).toContain(chapter)
+      expect(prompt).not.toContain(background)
+    }
+  })
+
   it("第一级裁剪：从低优先级字段开始整个删除", () => {
     const result = trimContextPack(fullPack, 100)
     expect(result.trimmedFields.length).toBeGreaterThan(0)

@@ -121,10 +121,10 @@ describe("DataSourceCacheAdapter", () => {
     await harness.adapter.load(source, context, async () => "第2章章纲")
 
     expect(harness.storage.readArtifact).toHaveBeenCalledWith(
-      expect.stringMatching(/^data-source:chapterOutline:v3:/),
+      expect.stringMatching(/^data-source:chapterOutline:v4:/),
     )
     expect(harness.storage.writeArtifact).toHaveBeenCalledWith(
-      expect.stringMatching(/^data-source:chapterOutline:v3:/),
+      expect.stringMatching(/^data-source:chapterOutline:v4:/),
       expect.objectContaining({ sourceName: "chapterOutline", value: "第2章章纲" }),
     )
   })

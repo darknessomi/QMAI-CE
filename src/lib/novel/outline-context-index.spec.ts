@@ -119,13 +119,13 @@ describe("outline context index", () => {
     vi.mocked(listDirectory).mockResolvedValue([
       directory(`${root}/章纲`, [file(chapterPath)]),
     ])
-    vi.mocked(readFile).mockResolvedValue("# 第239章：钢铁来潮\n\n## 场景一\n完整场景要求\n\n## 伏笔\n回收暗线")
+    const outline = `# 第239章：钢铁来潮\n\n${"甲".repeat(9000)}\n## 场景一\n完整场景要求\n${"乙".repeat(9000)}\n## 伏笔\n回收暗线`
+    vi.mocked(readFile).mockResolvedValue(outline)
 
     const result = resolveChapterOutline(await loadOutlineDocumentIndex("/book"), 239)
 
     expect(result.sourceKind).toBe("standalone")
-    expect(result.content).toContain("完整场景要求")
-    expect(result.content).toContain("回收暗线")
+    expect(result.content).toBe(outline)
   })
 
   it("旧版根目录 type:outline 文件仍以明确的补零章标题分类", async () => {

@@ -108,6 +108,22 @@ describe("session context summary", () => {
 
 
 describe("缓存友好的历史选择", () => {
+  it("超出一个 token 时只移除最早的一轮", () => {
+    const history = Array.from({ length: 10 }, (_, i) => ({
+      role: i % 2 ? "assistant" : "user",
+      content: "甲".repeat(i ? 396 : 397),
+    }))
+    expect(selectContextHistoryMessages(history, "已有摘要", 4000)).toEqual(history.slice(2))
+  })
+
+  it("整轮放不下时仍保留最新的用户要求和未保存草稿", () => {
+    const history = [
+      { role: "user", content: "旧要求" }, { role: "assistant", content: "旧回答" },
+      { role: "user", content: "保留交接细节" }, { role: "assistant", content: "正文".repeat(5000) },
+    ]
+    expect(selectContextHistoryMessages(history, "摘要", 4000)).toEqual(history.slice(-2))
+  })
+
   it("预算内保留逐条追加的短历史，不因已有摘要而每轮滑动两条消息", () => {
     const history = [
       { role: "user", content: "保持悬疑主线" },

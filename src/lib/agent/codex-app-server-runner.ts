@@ -25,7 +25,6 @@ import {
 } from "./required-tool-fallback"
 import { withWritingWakeLock } from "../writing-wake-lock"
 import { ToolEvidenceLedger } from "./tool-evidence-ledger"
-import { DEFAULT_TOOL_RESULT_CONTEXT_LIMIT } from "./tool-result"
 import type { AgentConfig, AgentMessage, AgentRunCallbacks, AgentRunRecord } from "./types"
 
 interface ThreadStartResponse {
@@ -134,7 +133,7 @@ export class CodexAppServerRunner {
       providerRequestCountAvailable: false,
     }
     const client = getCodexAppServerClient()
-    const evidenceLedger = new ToolEvidenceLedger(config.toolResultContextLimit ?? DEFAULT_TOOL_RESULT_CONTEXT_LIMIT)
+    const evidenceLedger = new ToolEvidenceLedger(config.toolResultContextLimit, config.llmConfig.maxContextSize)
     let threadId = ""
     let activeTurnId = ""
     let turnText = ""

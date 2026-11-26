@@ -92,12 +92,12 @@ const CHAPTER_SCOPED_SOURCES = new Set([
 // This prevents a previously cached wrong-chapter outline from surviving the fix.
 const SOURCE_CACHE_VERSIONS: Partial<Record<string, number>> = {
   writingStyle: 3,
-  cognitionText: 1,
+  cognitionText: 2,
   outline: 4,
-  chapterOutline: 3,
+  chapterOutline: 4,
   volumeContext: 2,
   // 速记缓存保留候选小传来源，组包时再与当前人物档案合并。
-  sectionBriefing: 6,
+  sectionBriefing: 7,
   graphSearchResults: 3,
   searchResults: 2,
   snapshots: 2,
@@ -105,7 +105,7 @@ const SOURCE_CACHE_VERSIONS: Partial<Record<string, number>> = {
   fallbackCharacterStates: 2,
   fallbackForeshadowingStates: 2,
   fallbackTimeline: 2,
-  recentChapterContents: 1,
+  recentChapterContents: 2,
   fallbackPreviousEnding: 1,
   fallbackRecentSummaries: 1,
   relatedSettings: 2,

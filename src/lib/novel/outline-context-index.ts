@@ -93,7 +93,6 @@ const SOURCE_START = "<!-- qmai-outline-source:start -->"
 const SOURCE_END = "<!-- qmai-outline-source:end -->"
 const INDEX_READ_CONCURRENCY = 16
 const MAX_OUTLINE_DOCUMENT_CHARS = 18_000
-const MAX_CHAPTER_CONTEXT_CHARS = 14_000
 const indexRequests = new Map<string, Promise<OutlineDocumentIndex>>()
 
 function relativeOutlinePath(root: string, path: string): string {
@@ -136,6 +135,12 @@ function kindFromHeading(title: string): OutlineSegmentKind | null {
   if (/世界观|背景设定|核心设定|规则设定|力量体系|能力体系|金手指|地理设定|地点设定|组织势力|势力设定/.test(compact)) return "setting"
   if (/完整新书规划|总纲|故事大纲|全书大纲|总体规划/.test(compact)) return "master"
   return null
+}
+
+export function isChapterOutlineRead(resource: unknown, content: string): boolean {
+  const path = typeof resource === "string" ? normalizePath(resource).replace(/^(?:.*\/)?outlines\//i, "") : ""
+  const parsed = parsePersonaProjectionFrontmatter(content)
+  return classifyDocument(path, parsed.body, parsed.frontmatter) === "chapter"
 }
 
 function classifyDocument(relativePath: string, body: string, frontmatter: Record<string, unknown> | null): OutlineSegmentKind {
@@ -519,6 +524,7 @@ function excerptHeadTail(content: string, maxChars: number): string {
   const trimmed = content.trim()
   if (trimmed.length <= maxChars) return trimmed
   const marker = "\n\n【本资料过长，中段已按上下文预算省略】\n\n"
+  if (maxChars <= marker.length + 1) return trimmed.slice(0, maxChars)
   const room = Math.max(0, maxChars - marker.length)
   const headChars = Math.floor(room * 0.58)
   return `${trimmed.slice(0, headChars).trimEnd()}${marker}${trimmed.slice(-(room - headChars)).trimStart()}`
@@ -757,7 +763,7 @@ export function resolveChapterOutline(index: OutlineDocumentIndex, chapterNumber
      */
     if (range && !scoped.trim() && headings.length > 0) continue
     return {
-      content: excerptHeadTail(scoped.trim() ? scoped : standalone.content, MAX_CHAPTER_CONTEXT_CHARS),
+      content: scoped.trim() || standalone.content.trim(),
       sourceKind: "standalone",
       sourcePaths: [standalone.relativePath],
     }
@@ -771,7 +777,7 @@ export function resolveChapterOutline(index: OutlineDocumentIndex, chapterNumber
       content: [
         `【章纲来源：卷纲兜底】未找到第${chapterNumber}章独立章纲，以下内容从目标卷纲摘录：章号精确命中时给本章那一节，只有故事粒度的卷纲则给本章所属故事的环节。`,
         ...volumeExtracts,
-      ].join("\n\n").slice(0, MAX_CHAPTER_CONTEXT_CHARS),
+      ].join("\n\n"),
       sourceKind: "volume",
       sourcePaths,
     }
@@ -787,7 +793,7 @@ export function resolveChapterOutline(index: OutlineDocumentIndex, chapterNumber
         content: [
           `【章纲来源：${kind === "chapter-plan" ? "章节规划表" : "总纲"}兜底】未找到第${chapterNumber}章独立章纲，以下为结构化目标摘录。`,
           ...matches.map((item) => item.content),
-        ].join("\n\n").slice(0, MAX_CHAPTER_CONTEXT_CHARS),
+        ].join("\n\n"),
         sourceKind: kind,
         sourcePaths: Array.from(new Set(matches.map((item) => item.segment.relativePath))),
       }

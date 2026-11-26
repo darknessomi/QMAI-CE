@@ -2,6 +2,7 @@ import { resolveContextPackTokenBudget } from "@/lib/context-budget"
 import { fitSagEvidence } from "@/lib/sag-search"
 import { SourceCanonOverflowError, type ContextPack } from "@/lib/novel/context-engine"
 import { estimateContextTokens } from "./token-estimator"
+import { fitChapterOutline } from "@/lib/novel/chapter-outline-excerpt"
 import {
   type ContextFragmentDisposition,
   type ContextFragmentTrace,
@@ -36,6 +37,7 @@ interface ContextFragment {
   text: string
   required?: boolean
   sourceEvidence?: boolean
+  chapterOutline?: boolean
   layer: "stable" | "summary" | "dynamic"
 }
 
@@ -85,7 +87,7 @@ function dynamicFragments(input: ComposeContextInput, expanded: boolean): Contex
     ...referenceFragments(input),
     { title: "本轮任务", text: pack.task, required: true, layer: "dynamic" },
     { title: "章节目标", text: pack.chapterGoal, required: true, layer: "dynamic" },
-    { title: "分卷与当前章纲", text: pack.chapterOutlineContext ?? "", required: true, layer: "dynamic" },
+    { title: "分卷与当前章纲", text: pack.chapterOutlineContext ?? "", required: true, chapterOutline: true, layer: "dynamic" },
     { title: "本章相关材料", text: pack.relevantMaterials ?? "", required: true, layer: "dynamic" },
     { title: "必须做到", text: pack.mustDo, required: true, layer: "dynamic" },
     { title: "必须避免", text: pack.mustAvoid, required: true, layer: "dynamic" },
@@ -98,6 +100,7 @@ function dynamicFragments(input: ComposeContextInput, expanded: boolean): Contex
     { title: "修订要求", text: pack.revisionDirectives, layer: "dynamic" },
   ]
   const optional: ContextFragment[] = [
+    { title: "本卷背景与章节规划", text: pack.volumeOutlineContext ?? "", layer: "dynamic" },
     { title: "时间线", text: pack.timeline, layer: "dynamic" },
     { title: "人物认知", text: pack.cognitionStates, layer: "dynamic" },
     { title: "下一章建议", text: pack.nextChapterAdvice, layer: "dynamic" },
@@ -154,7 +157,7 @@ function fitFragment(fragment: ContextFragment, tokenBudget: number): ContextFra
   if (fragmentTokens(fragment) <= tokenBudget) return fragment
   let low = 0
   let high = fragment.text.length
-  const truncate = fragment.sourceEvidence ? fitSagEvidence : truncateWithMarker
+  const truncate = fragment.sourceEvidence ? fitSagEvidence : fragment.chapterOutline ? fitChapterOutline : truncateWithMarker
   while (low < high) {
     const middle = Math.ceil((low + high) / 2)
     const text = truncate(fragment.text, middle)

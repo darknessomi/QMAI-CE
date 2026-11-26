@@ -107,6 +107,22 @@ describe("snapshots 数据源：跳过被选中章节的派生快照", () => {
     expect(result.previousChapterEnding).not.toContain("第2章")
   })
 
+  it("只对紧邻上一章保留完整长正文，更早章节继续取首尾", async () => {
+    const body = `${"甲".repeat(4000)}中段交接约定${"乙".repeat(4000)}`
+    readFile.mockImplementation(async (path: string) => {
+      const n = path.endsWith("001.md") ? 1 : 2
+      return `---\nchapter_number: ${n}\nchapter_status: final\n---\n${body}`
+    })
+    const source = getAllDataSources().find(item => item.name === "recentChapterContents")!
+    const entries = await source.load({
+      projectPath: PROJECT, task: "写第三章", chapterNumber: 3,
+      config: { recentSummaryWindow: 2, searchTopK: 5, snapshotLookback: 2, revisionFeedbackWindowConfig: null },
+    })
+    expect(entries).toHaveLength(2)
+    expect(entries[0]).not.toContain("中段交接约定")
+    expect(entries[1]).toContain(body)
+  })
+
   it("没有排除标记时两条摘要都在（不改变原有行为）", async () => {
     readFile.mockImplementation(async (path: string) => FILES[path]
       ?? (path.endsWith("002.md") ? "---\nchapter_number: 2\n---\n\n第二章正文\n" : CHAPTER_FILES[path] ?? ""))

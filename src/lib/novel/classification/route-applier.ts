@@ -2,7 +2,7 @@ import type { ContextPack } from "../context-engine"
 import type { RouteRule, DataSourceCategory } from "./types"
 
 const CATEGORY_TO_FIELDS: Record<DataSourceCategory, Array<keyof ContextPack>> = {
-  outline: ["outline", "chapterGoal"],
+  outline: ["outline", "chapterGoal", "projectOutline", "chapterOutlineContext", "volumeOutlineContext"],
   recent_summaries: ["recentSummaries"],
   chapter_content: ["recentChapterContents", "previousChapterEnding"],
   character_states: ["characterStates", "cognitionStates"],

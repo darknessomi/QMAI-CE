@@ -224,7 +224,10 @@ const recentChapterContentsDataSource: DataSource<string[]> = {
         if (!content) continue
         const body = stripFrontmatterBody(content)
         if (!body) continue
-        contents.push(`## 第${chapterNumber}章正文片段\n${excerptChapterContent(body)}`)
+        const previous = chapterNumber === context.chapterNumber - 1
+        contents.push(previous
+          ? `## 第${chapterNumber}章正文\n${body}`
+          : `## 第${chapterNumber}章正文片段\n${excerptChapterContent(body)}`)
       } catch {}
     }
     return contents

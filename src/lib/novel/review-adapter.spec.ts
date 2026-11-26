@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { LlmConfig } from "@/stores/wiki-store"
 import type { StreamCallbacks } from "@/lib/llm-client"
+import { estimateChatMessagesTokens } from "@/lib/chat-request-budget"
 import type { ContextPack } from "./context-engine"
 import { buildReviewPrompt, reviewChapter, REVIEW_STAGE_TIMEOUT_MS, REVIEW_TIMEOUT_MESSAGE } from "./review-adapter"
 
@@ -470,6 +471,41 @@ describe("review-adapter staged review", () => {
 
     expect(streamChatMock).toHaveBeenCalledTimes(2)
     expect(siblingSignal?.aborted).toBe(true)
+  })
+
+  it("超过三段的正文完整送审，分段标题不占用原文字数", async () => {
+    const parts = ["甲", "乙", "丙"].map(c => c.repeat(11_999) + "尾")
+    parts.push("最后一段的约定。")
+    const seen: string[] = []
+    streamChatMock.mockImplementation(async (_config, messages, callbacks) => {
+      const prompt = String(messages[messages.length - 1]?.content)
+      seen.push(prompt)
+      callbacks.onToken("[]")
+      callbacks.onDone()
+    })
+    await reviewChapter("E:/Novel", parts.join(""), 8, { contextPack, throwOnFailure: true })
+    expect(seen).toHaveLength(parts.length)
+    parts.forEach((part, index) => expect(seen[index]).toContain(part))
+  })
+
+  it("审稿窗口小于写作前缀时重新组包，并为每段保留输出空间", async () => {
+    const originalWindow = llmConfig.maxContextSize
+    llmConfig.maxContextSize = 16_384
+    const body = "甲".repeat(11_900) + "正文末尾"
+    let covered = 0
+    try {
+      streamChatMock.mockImplementation(async (_config, messages, callbacks, _signal, overrides) => {
+        expect(estimateChatMessagesTokens(messages) + overrides.max_tokens).toBeLessThanOrEqual(Math.floor(16_384 * 0.9))
+        const text = messages[messages.length - 1].content as string
+        covered += text.match(/甲/g)?.length ?? 0
+        callbacks.onToken("[]")
+        callbacks.onDone()
+      })
+      await reviewChapter("E:/Novel", body, 8, { contextPack, cachePrefix: "长".repeat(30_000), throwOnFailure: true })
+      expect(covered).toBe(11_900)
+    } finally {
+      llmConfig.maxContextSize = originalWindow
+    }
   })
 
   it("uses the configured review reasoning effort instead of forcing high", async () => {

@@ -18,6 +18,7 @@ import { withMemoryWriteLock } from "./memory-cleanup-policy"
 import { eligibleLocalSource, isAuthoritativeGenerationPath, isHistoricalProjectionSnippet, novelMixedSearch } from "./search-adapter"
 import { getJevConfigState } from "@/lib/jev-config"
 import { fitSagEvidence, formatSagEvidence, prepareSagChapterScope, searchSagProject, type ChapterScope } from "@/lib/sag-search"
+import { fitChapterOutline } from "./chapter-outline-excerpt"
 import {
   DataSourceRegistry,
   type ContextLoadContext,
@@ -49,9 +50,9 @@ const FIELD_PRIORITY: Record<string, number> = {
    */
   sourceCanon: 4.5,
   outline: 6,
-  /** 本章章纲：写作链路（excludeOutline）下替代 mergedOutline 里的章纲部分，
-   *  让「作品大纲」可以稳定前置、章纲下沉。优先级紧贴 outline。 */
-  chapterOutlineContext: 6.5,
+  // 先保原作正典与本章要求，再装检索命中和卷级背景。
+  chapterOutlineContext: 4.6,
+  volumeOutlineContext: 12.5,
   recentSummaries: 7,
   previousChapterEnding: 8,
   characterStates: 9,
@@ -105,8 +106,9 @@ export interface ContextPack {
   outline: string
   /** 全书总纲和设定；与当前章节无关。缺失表示旧版未分层上下文。 */
   projectOutline?: string
-  /** 当前分卷、章节规划和章纲；仅放在动态任务层。 */
+  /** 本章章纲。旧包可能同时包含卷纲。 */
   chapterOutlineContext?: string
+  volumeOutlineContext?: string
   /** 当前章命中的材料；只进动态层，不进稳定大纲。 */
   relevantMaterials?: string
   /** 仅供写作实体补搜提取候选名称，不注入任务书、正文或审稿提示词。 */
@@ -379,18 +381,12 @@ async function buildContextPackFromRawData(
     outline: mergedOutline,
     ...(outlineLayers ? {
       projectOutline: outlineLayers.project,
-      // outlineLayers.task 已经包含「卷纲 + 章纲」。旧写法把 task、volumeContext、
-      // chapterOutline 无条件拼在一起，同一段章纲会出现 2~3 次（浪费 token，
-      // 也让模型读到重复段落）。这里只追加**确实没被 task 覆盖**的部分，
-      // 索引落后/漏收时仍然不会丢内容。
-      chapterOutlineContext: (() => {
-        const taskText = outlineLayers.task.trim()
-        const extras = [rawData.volumeContext, rawData.chapterOutline]
-          .map((value) => (typeof value === "string" ? value.trim() : ""))
-          .filter(Boolean)
-        if (!taskText) return joinNonEmpty(extras, "\n\n")
-        const uncovered = extras.filter((value) => !taskText.includes(value.slice(0, Math.min(200, value.length))))
-        return joinNonEmpty([taskText, ...uncovered], "\n\n")
+      chapterOutlineContext: rawData.chapterOutline ?? "",
+      volumeOutlineContext: (() => {
+        const chapter = rawData.chapterOutline?.trim()
+        const taskText = chapter ? outlineLayers.task.replace(chapter, "").trim() : outlineLayers.task.trim()
+        const volume = rawData.volumeContext?.trim()
+        return joinNonEmpty([taskText, volume && !taskText.includes(volume) && !chapter?.includes(volume) ? volume : ""], "\n\n")
       })(),
       relevantMaterials: outlineLayers.materials,
     } : {}),
@@ -911,6 +907,7 @@ const FIELD_CONFIGS: FieldConfig[] = [
   { titleKey: "novel.contextPack.recentRevisionDirectives", fieldKey: "revisionDirectives" },
   { titleKey: "novel.contextPack.requiredOutline", fieldKey: "outline" },
   { titleKey: "novel.contextPack.chapterOutline", fieldKey: "chapterOutlineContext" },
+  { titleKey: "novel.contextPack.volumeOutline", fieldKey: "volumeOutlineContext" },
   { titleKey: "novel.contextPack.recentChapterContents", fieldKey: "recentChapterContents" },
   { titleKey: "novel.contextPack.recentPlotSummaries", fieldKey: "recentSummaries" },
   { titleKey: "novel.contextPack.previousChapterEnding", fieldKey: "previousChapterEnding" },
@@ -946,6 +943,7 @@ const FIELD_EMIT_ORDER: string[] = [
   "outline",
   // 写作链路里章纲单独成段，跟在（已稳定的）作品大纲之后
   "chapterOutlineContext",
+  "volumeOutlineContext",
   // 以下随章/随轮变化
   "task",
   "chapterGoal",
@@ -1006,7 +1004,7 @@ export function contextPackToPrompt(
   return result.prompt
 }
 
-function trimFieldContent(content: string | string[], maxChars: number): string | string[] {
+function trimFieldContent(content: string | string[], maxChars: number, fieldKey: string, sagEvidence: boolean): string | string[] {
   if (Array.isArray(content)) {
     if (content.length === 0) return content
     const result: string[] = []
@@ -1022,16 +1020,23 @@ function trimFieldContent(content: string | string[], maxChars: number): string 
     }
     if (result.length === 0 && content.length > 0) {
       const last = content[content.length - 1]
+      if (fieldKey === "recentChapterContents") return [trimTextField(last, maxChars)]
       return [last.slice(0, maxChars) + "..."]
     }
     return result
-  } else {
-    if (content.length <= maxChars) return content
-    if (maxChars < 50) return content.slice(0, maxChars) + "..."
-    const headChars = Math.floor(maxChars * 0.4)
-    const tailChars = maxChars - headChars - 5
-    return content.slice(0, headChars) + "\n...\n" + content.slice(-tailChars)
   }
+  if (fieldKey === "outline") return capOutlineSourcesToBudget(content, maxChars)
+  if (fieldKey === "chapterOutlineContext") return fitChapterOutline(content, maxChars)
+  if (fieldKey === "searchResults" && sagEvidence) return fitSagEvidence(content, maxChars)
+  return trimTextField(content, maxChars)
+}
+
+function trimTextField(content: string, maxChars: number): string {
+  if (content.length <= maxChars) return content
+  if (maxChars < 50) return content.slice(0, maxChars)
+  const headChars = Math.floor(maxChars * 0.4)
+  const tailChars = maxChars - headChars - 5
+  return content.slice(0, headChars) + "\n...\n" + content.slice(-tailChars)
 }
 
 export function trimContextPack(
@@ -1048,17 +1053,20 @@ export function trimContextPack(
     ? tokenBudget
     : resolveContextPackTokenBudget({ maxContextSize: options?.maxContextSize })
   const targetChars = Math.floor(resolvedTokenBudget * charsPerTokenForLanguage())
+  const separateOutlines = pack.projectOutline !== undefined && pack.volumeOutlineContext !== undefined
   const fieldData: { fieldKey: string; title: string; content: string | string[]; priority: number; charCount: number }[] = []
   for (const config of FIELD_CONFIGS) {
     if (options?.excludeOutline && config.fieldKey === "outline") {
       continue
     }
-    // 不排除 outline 时，章纲已经在 mergedOutline 里了，再单独输出会重复。
-    if (!options?.excludeOutline && config.fieldKey === "chapterOutlineContext") {
+    // 旧包可能只有合并大纲。新包分开装入作品背景和本章章纲，各自参与优先级裁剪。
+    if (!options?.excludeOutline && !separateOutlines && (config.fieldKey === "chapterOutlineContext" || config.fieldKey === "volumeOutlineContext")) {
       continue
     }
 
-    const rawContent = pack[config.fieldKey as keyof ContextPack] as string | string[] | undefined
+    const rawContent = separateOutlines && config.fieldKey === "outline"
+      ? pack.projectOutline
+      : pack[config.fieldKey as keyof ContextPack] as string | string[] | undefined
     const sag = config.fieldKey === "searchResults" && Boolean(pack.sagEvidence?.text)
     const content = sag && typeof rawContent === "string"
       ? fitSagEvidence(rawContent, Math.floor(targetChars / 5))
@@ -1145,11 +1153,7 @@ export function trimContextPack(
     const originalFieldChars = nextField.charCount
     
     if (targetContentChars > minKeepChars && nextField.charCount > targetContentChars) {
-      const trimmedContent = nextField.fieldKey === "outline" && typeof nextField.content === "string"
-        ? capOutlineSourcesToBudget(nextField.content, targetContentChars)
-        : nextField.fieldKey === "searchResults" && pack.sagEvidence?.text && typeof nextField.content === "string"
-          ? fitSagEvidence(nextField.content, targetContentChars)
-          : trimFieldContent(nextField.content, targetContentChars)
+      const trimmedContent = trimFieldContent(nextField.content, targetContentChars, nextField.fieldKey, Boolean(pack.sagEvidence?.text))
       const keptContentChars = Array.isArray(trimmedContent)
         ? trimmedContent.reduce((sum, item) => sum + item.length, 0)
         : trimmedContent.length

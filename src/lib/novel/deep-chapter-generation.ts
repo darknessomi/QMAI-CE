@@ -848,16 +848,24 @@ export async function runDeepChapterGeneration(
   // Same density as the token estimator / trimContextPack (CJK 1, English 4).
   const charsPerToken = charsPerTokenForLanguage();
   const totalContextCharBudget = totalContextTokenBudget * charsPerToken;
-  const outlineCharCap = Math.floor(
+  // 本章章纲和更高优先级的要求优先于通用背景；短章纲仍沿用原先的七成上限。
+  const reservedFields = [
+    contextPack.chapterOutlineContext, contextPack.sectionBriefing, contextPack.task,
+    contextPack.chapterGoal, contextPack.mustDo, contextPack.mustAvoid, contextPack.sourceCanon,
+    contextPack.recentChapterContents?.[contextPack.recentChapterContents.length - 1],
+  ].filter((value): value is string => Boolean(value));
+  const reservedChars = reservedFields.reduce((sum, value) => sum + value.length + 32, 0);
+  const outlineCharCap = Math.floor(Math.min(
     totalContextCharBudget * DEEP_CHAPTER_OUTLINE_MAX_FRAC,
-  );
+    totalContextCharBudget - reservedChars,
+  ));
   // 只用**作品级**大纲：卷纲与本章章纲改由 contextPackToPrompt 的
   // chapterOutlineContext 字段承担（排在稳定字段之后）。这样跨章时
   // 「作品大纲 + 规则/设定/文风」全部逐字节相同，可直接命中缓存。
-  const outlineText = capOutlineSourcesToBudget(
-    (contextPack.projectOutline ?? "").trim() || contextPack.outline || "",
+  const outlineText = outlineCharCap > 0 ? capOutlineSourcesToBudget(
+    contextPack.projectOutline ?? contextPack.outline ?? "",
     outlineCharCap,
-  );
+  ) : "";
 
   // 独立提取大纲，不通过contextPackToPrompt
   const outlinePrompt = outlineText

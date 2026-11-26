@@ -1,6 +1,11 @@
 import { streamChat, type StreamCallbacks } from "@/lib/llm-client"
 import i18n from "@/i18n"
-import type { ChatMessage } from "@/lib/llm-providers"
+import { getEffectiveMaxOutputTokens, reasoningOutputFloor, type ChatMessage } from "@/lib/llm-providers"
+import { planLlmRequestBudget, RESPONSE_RESERVE_FRAC, LlmContextBudgetError } from "@/lib/context-budget"
+import { trustDeclaredContextWindow } from "@/lib/llm-context-size"
+import { estimateChatMessagesTokens } from "@/lib/chat-request-budget"
+import { estimateContextTokens } from "@/lib/context-hub/token-estimator"
+import { mapWithConcurrency } from "@/lib/async-pool"
 import { useWikiStore } from "@/stores/wiki-store"
 import { getOutputLanguage, buildLanguageReminder } from "@/lib/output-language"
 import { contextPackToPrompt, buildContextPack, type ContextPack } from "./context-engine"
@@ -109,24 +114,22 @@ const REVIEW_STAGES = [
   "阶段7：二次复核",
 ]
 
-const REVIEW_CHUNK_SIZE = CHAPTER_BODY_EXCERPT_MAX_CHARS
-const REVIEW_MAX_CHUNKS = 3
+const REVIEW_CONCURRENCY = 3
 export const REVIEW_STAGE_TIMEOUT_MS = 300_000
 export const REVIEW_TIMEOUT_MESSAGE = "审稿模型输出超时"
 
-/**
- * 把超长章节分段用于审查。章节 ≤ 12000 字时返回单段；
- * 超过时按 12000 字一段切分，最多 3 段（覆盖 36000 字），超出部分追加到最后一段。
- */
-function splitChapterForReview(content: string): string[] {
-  if (content.length <= REVIEW_CHUNK_SIZE) return [content]
+function splitChapterForReview(content: string, maxChars: number): string[] {
+  if (content.length <= maxChars) return [content]
   const chunks: string[] = []
-  for (let i = 0; i < content.length && chunks.length < REVIEW_MAX_CHUNKS; i += REVIEW_CHUNK_SIZE) {
-    chunks.push(content.slice(i, i + REVIEW_CHUNK_SIZE))
-  }
-  const totalCovered = REVIEW_MAX_CHUNKS * REVIEW_CHUNK_SIZE
-  if (chunks.length === REVIEW_MAX_CHUNKS && content.length > totalCovered) {
-    chunks[REVIEW_MAX_CHUNKS - 1] += content.slice(totalCovered)
+  let start = 0
+  while (start < content.length) {
+    let end = Math.min(start + maxChars, content.length)
+    const last = content.charCodeAt(end - 1)
+    if (end < content.length && last >= 0xd800 && last <= 0xdbff) {
+      end += end - start === 1 ? 1 : -1
+    }
+    chunks.push(content.slice(start, end))
+    start = end
   }
   return chunks
 }
@@ -209,7 +212,7 @@ ${blueprintSection}
 4. 输出要求：在审查 JSON 中，角色相关问题 type 使用 "character_consistency"，relatedMemory 必须引用对应的状态/认知/大纲原文。
 
 ${i18n.t("novel.reviewPrompt.chapterContent")}
-${chapterContent.slice(0, CHAPTER_BODY_EXCERPT_MAX_CHARS)}
+${chapterContent}
 
 ${i18n.t("novel.reviewPrompt.outputFormat")}
 [
@@ -269,8 +272,6 @@ export async function reviewChapter(
 请在一次回复里先完成分阶段审查分析，再在最后只输出最终审查 JSON 数组，JSON 之外不要有多余内容。
 ${langReminder}`
 
-  // 章节超长时分段审查，合并所有段的审查结果
-  const chunks = splitChapterForReview(chapterContent)
   const stageThinking = new Map<string, string>()
   const reviewController = new AbortController()
   const reviewSignal = signal
@@ -278,46 +279,53 @@ ${langReminder}`
     : reviewController.signal
 
   try {
-    // 并行审查所有分段，缩短超长章节审查时延
-    const chunkResults = await Promise.all(chunks.map(async (chunk, i) => {
-      try {
+    const windowTokens = trustDeclaredContextWindow(llmConfig.maxContextSize)
+    const budget = planLlmRequestBudget({
+      maxContextSize: windowTokens,
+      desiredOutputTokens: Math.floor(windowTokens * RESPONSE_RESERVE_FRAC),
+      maxOutputTokensCap: getEffectiveMaxOutputTokens(llmConfig),
+      thinkingFloorTokens: reasoningOutputFloor({ ...llmConfig, reasoning: { mode: reviewReasoningEffort } }),
+      scaffoldReserveTokens: 0,
+      minimumContextTokens: Math.floor(windowTokens / 2),
+    })
+    let cachePrefix = options.cachePrefix?.trim() ? options.cachePrefix : undefined
+    let references = cachePrefix || contextPackToPrompt(contextPack, undefined, { maxContextSize: windowTokens })
+    const messagesFor = (body: string) => {
+      const prompt = buildReviewPrompt(contextPack, body, options.characterOnly, options.planBlueprint, windowTokens, references)
+      return buildReviewMessages(systemPrompt, prompt + REVIEW_OUTPUT_INSTRUCTIONS, cachePrefix, options.cacheSystemPrompt)
+    }
+    // 留出分段标题及消息开销。小窗口审稿先收缩写作时的参考资料，给正文留空间。
+    const remaining = () => budget.inputTokenBudget - estimateChatMessagesTokens(messagesFor("")) - 64
+    const desiredBody = Math.min(CHAPTER_BODY_EXCERPT_MAX_CHARS, chapterContent.length, Math.floor(budget.inputTokenBudget / 3))
+    let bodyRoom = remaining()
+    if (bodyRoom < desiredBody) {
+      const referenceBudget = estimateContextTokens(references) + bodyRoom - desiredBody
+      references = contextPackToPrompt(contextPack, Math.max(1, referenceBudget))
+      cachePrefix = undefined
+      bodyRoom = remaining()
+    }
+    if (bodyRoom < 1) throw new LlmContextBudgetError()
+    const chunkSize = Math.min(CHAPTER_BODY_EXCERPT_MAX_CHARS, bodyRoom)
+    const chunks = splitChapterForReview(chapterContent, chunkSize)
+    const chunkResults = await mapWithConcurrency(chunks, REVIEW_CONCURRENCY, async (chunk, i) => {
       if (reviewSignal.aborted) throw new Error("已停止生成")
       const chunkContent = chunks.length > 1
         ? `【第${i + 1}段/共${chunks.length}段】\n${chunk}`
         : chunk
-      const userPrompt = buildReviewPrompt(
-        contextPack,
-        chunkContent,
-        options.characterOnly,
-        options.planBlueprint,
-        llmConfig.maxContextSize,
-        options.cachePrefix,
-      )
       const stageTitle = chunks.length > 1
         ? (options.characterOnly ? `角色一致性审查（第${i + 1}/${chunks.length}段）` : `深度审查（第${i + 1}/${chunks.length}段）`)
         : (options.characterOnly ? "角色一致性审查" : "深度审查")
 
       const result = await runReviewStage(
         llmConfig,
-        systemPrompt,
-        [
-          userPrompt,
-          "",
-          "请在同一次回复中依次完成阶段1-7和上方全部审查维度：",
-          "- 先逐阶段、逐维度列出已核对依据与结论（每个维度给出 pass 或 issue）。",
-          "- 再做阶段7二次复核：删除没有正文证据或没有上下文 / 记忆 / 大纲依据的主观评价，补上遗漏的阻断问题。",
-          "",
-          "最终审查 JSON：",
-          "在完成上述全部分析之后，最后只输出最终 JSON 数组，不要输出解释、标题或 markdown。",
-        ].join("\n"),
+        messagesFor(chunkContent),
+        budget.outputTokens,
+        budget.windowTokens,
         stageTitle,
         options,
         stageThinking,
         reviewSignal,
         reviewReasoningEffort,
-        0,
-        options.cachePrefix,
-        options.cacheSystemPrompt,
       )
 
       const jsonMatch = extractJsonArray(result)
@@ -346,14 +354,11 @@ ${langReminder}`
         relatedMemory: String(item.relatedMemory || ""),
         suggestion: String(item.suggestion || ""),
       }))
-      } catch (error) {
-        reviewController.abort()
-        throw error
-      }
-    }))
+    })
 
     return chunkResults.flat()
   } catch (err) {
+    reviewController.abort()
     rethrowIfUserAbort(err, signal)
     console.error("[Novel Review] Failed:", err)
     if (options.throwOnFailure) {
@@ -385,34 +390,37 @@ function extractJsonArray(text: string): string | null {
   return greedy ? greedy[0] : null
 }
 
-async function runReviewStage(
-  llmConfig: ReturnType<typeof resolveNovelModel>,
+const REVIEW_OUTPUT_INSTRUCTIONS = [
+  "",
+  "",
+  "请在同一次回复中依次完成阶段1-7和上方全部审查维度：",
+  "- 先逐阶段、逐维度列出已核对依据与结论（每个维度给出 pass 或 issue）。",
+  "- 再做阶段7二次复核：删除没有正文证据或没有上下文 / 记忆 / 大纲依据的主观评价，补上遗漏的阻断问题。",
+  "",
+  "最终审查 JSON：",
+  "在完成上述全部分析之后，最后只输出最终 JSON 数组，不要输出解释、标题或 markdown。",
+].join("\n")
+
+function buildReviewMessages(
   systemPrompt: string,
   userPrompt: string,
-  stageTitle: string,
-  callbacks: NovelReviewCallbacks,
-  stageThinking: Map<string, string>,
-  signal?: AbortSignal,
-  reasoningMode: "low" | "medium" | "high" = "high",
-  retryCount = 0,
   cachePrefix?: string,
   cacheSystemPrompt?: string,
-): Promise<string> {
-  publishReviewStageThinking(stageThinking, callbacks, stageTitle, "正在分析...")
+): ChatMessage[] {
   // 复用写作前缀时，**审稿人设绝不能单独占一条前置 system**：那会让请求的第 0 个
   // 字节变成审稿专属文案，与写作前缀错位，缓存直接失效。审稿人设并进前缀之后。
   //
   // 但写作链路自带的稳定 system（`CHAPTER_SYSTEM_PROMPT`）必须原样带上：
   // 写作请求是 `[system: S][user: P + 阶段文案]`，审稿若只有 `[user: P + 审稿文案]`，
   // 第 0 字节就不同，一样命不中。带上同一份 S 后，两条请求共享 `S + P` 整段。
-  const messages: ChatMessage[] = cachePrefix
+  return cachePrefix
     ? [
         ...(cacheSystemPrompt ? [{ role: "system" as const, content: cacheSystemPrompt }] : []),
         {
           role: "user" as const,
           content: [
             { type: "text" as const, text: cachePrefix, cacheControl: true },
-            { type: "text" as const, text: `\n\n${systemPrompt}\n\n${userPrompt}` },
+            { type: "text" as const, text: `\n\n${systemPrompt}\n\n${userPrompt.slice(cachePrefix.trim().length)}` },
           ],
         },
       ]
@@ -420,9 +428,24 @@ async function runReviewStage(
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
       ]
+}
 
+async function runReviewStage(
+  llmConfig: ReturnType<typeof resolveNovelModel>,
+  messages: ChatMessage[],
+  outputTokens: number,
+  windowTokens: number,
+  stageTitle: string,
+  callbacks: NovelReviewCallbacks,
+  stageThinking: Map<string, string>,
+  signal?: AbortSignal,
+  reasoningMode: "low" | "medium" | "high" = "high",
+  retryCount = 0,
+): Promise<string> {
+  publishReviewStageThinking(stageThinking, callbacks, stageTitle, "正在分析...")
   let result = ""
   let reasoning = ""
+  let streamError: Error | undefined
   const renderThinking = () => {
     if (signal?.aborted) return
     const combined = reasoning
@@ -445,6 +468,7 @@ async function runReviewStage(
     },
     onDone: () => {},
     onError: (error: Error) => {
+      streamError = error
       console.error("[Novel Review] Stream error:", error)
     },
     onRequestTrace: callbacks.onRequestTrace,
@@ -467,7 +491,8 @@ async function runReviewStage(
       messages,
       streamCallbacks,
       combinedSignal,
-      { reasoning: { mode: reasoningMode } },
+      { reasoning: { mode: reasoningMode }, max_tokens: outputTokens },
+      { intactInputWindowTokens: windowTokens },
     )
     clearTimeout(timeoutId)
   } catch (err) {
@@ -478,7 +503,7 @@ async function runReviewStage(
       console.warn(`[Novel Review] Stage "${stageTitle}" failed, retrying (${retryCount + 1}/2)...`)
       publishReviewStageThinking(stageThinking, callbacks, stageTitle, "网络波动，正在重试...")
       await new Promise(resolve => setTimeout(resolve, 2000))
-      return runReviewStage(llmConfig, systemPrompt, userPrompt, stageTitle, callbacks, stageThinking, signal, reasoningMode, retryCount + 1, cachePrefix, cacheSystemPrompt)
+      return runReviewStage(llmConfig, messages, outputTokens, windowTokens, stageTitle, callbacks, stageThinking, signal, reasoningMode, retryCount + 1)
     }
     throw err
   }
@@ -488,6 +513,7 @@ async function runReviewStage(
   // 此时 content 通常是空的或半截 JSON。必须先按超时抛错，
   // 不能落到「未返回结构化 JSON」。
   if (timeoutFired) throw new Error(REVIEW_TIMEOUT_MESSAGE)
+  if (streamError) throw streamError
   return result.trim()
 }
 

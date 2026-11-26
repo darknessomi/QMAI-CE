@@ -18,12 +18,24 @@ export function selectContextHistoryMessages<T extends SessionSummaryMessage>(
   historyTokenBudget?: number,
 ): T[] {
   if (!summary?.trim()) return [...messages]
+  if (historyTokenBudget === 0) return []
   // 只对预算内纯文本历史保留完整增量前缀；图片等沿用近期消息策略。
   const textOnly = messages.every((message) => typeof message.content === "string"
     || (Array.isArray(message.content) && message.content.every((block) => block?.type === "text")))
   if (historyTokenBudget !== undefined && Number.isFinite(historyTokenBudget) && historyTokenBudget > 0 && textOnly) {
-    const tokens = messages.reduce((sum, message) => sum + estimateContextTokens(messageText(message.content)) + 4, 0)
-    if (tokens <= historyTokenBudget) return [...messages]
+    let start = messages.length
+    let used = 0
+    while (start > 0) {
+      let turnStart = start
+      do {
+        turnStart -= 1
+        used += estimateContextTokens(messageText(messages[turnStart]!.content)) + 4
+      } while (turnStart > 0 && messages[turnStart]!.role !== "user")
+      if (used > historyTokenBudget) break
+      start = turnStart
+    }
+    if (start < messages.length) return messages.slice(start)
+    // 最新一轮本身就很长（例如尚未保存的正文）时，沿用最近两条交给请求层裁剪。
   }
   return messages.slice(-2)
 }

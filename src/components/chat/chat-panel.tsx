@@ -159,6 +159,7 @@ import {
 } from "@/lib/context-usage"
 import { toOpenAITools } from "@/lib/agent/tools-schema"
 import { getEffectiveMaxContextSize } from "@/lib/llm-providers"
+import { estimateChatMessagesTokens } from "@/lib/chat-request-budget"
 import { ContextUsageRing } from "@/components/chat/context-usage-ring"
 import { enqueueUserMemoryLearning } from "@/lib/user-memory/learning-service"
 import { recordLatestUserMemoryFeedback } from "@/lib/user-memory/feedback-service"
@@ -1160,9 +1161,9 @@ export function ChatPanel() {
         (message.role === "user" || message.role === "assistant")
         && !message.discarded
         && !message.isAgentRunning
-      )),
+      )).slice(-maxHistoryMessages),
       activeConversation?.contextSummary?.text,
-      Math.min(4000, Math.floor((agentConfig?.llmConfig ? getEffectiveMaxContextSize(agentConfig.llmConfig) : 204_800) * 0.05)),
+      Math.floor((agentConfig?.llmConfig ? getEffectiveMaxContextSize(agentConfig.llmConfig) : 204_800) * 0.05),
     )
     const measuredAt = activeConversation?.lastContextUsage?.measuredAt ?? 0
     const pendingToolResultTexts = activeMessages
@@ -1190,6 +1191,7 @@ export function ChatPanel() {
     activeConversation?.contextSummary?.text,
     activeConversation?.lastContextUsage,
     activeMessages,
+    maxHistoryMessages,
     agentConfig?.llmConfig,
     agentConfig?.tools,
     agentSystemPrompt,
@@ -2036,26 +2038,25 @@ export function ChatPanel() {
         !prePluginResult?.enabledToolNames
         || prePluginResult.enabledToolNames.includes("read_chapter")
       )
-      const historyForModel = selectContextHistoryMessages(
-        activeConvMessages,
-        contextHubResult?.sessionSummary,
-        Math.min(4000, Math.floor(getEffectiveMaxContextSize(agentConfig.llmConfig) * 0.05)),
-      )
-      const historyMessages = await buildAgentHistoryMessages(historyForModel, {
+      const foldedHistory = await buildAgentHistoryMessages(activeConvMessages, {
         projectPath: pp,
         novelMode,
         readChapterToolAvailable,
       })
-      const agentMessages: AgentMessage[] = [
+      const prefixMessages: AgentMessage[] = [
         { role: "system", content: contextHubSystemContent ?? effectiveSystemPrompt },
         // 本轮资料前移：作为独立消息放在 system 之后、历史之前。
         // 它一章之内逐字节不变，下一轮才能被完整命中（实测 85.8% → 98.7%）。
         ...(contextHubPromptParts?.chapterPrefix.length
           ? [{ role: "user" as const, content: contextHubPromptParts.chapterPrefix }]
           : []),
-        ...historyMessages,
-        { role: "user", content: userContent },
       ]
+      const currentRequest: AgentMessage = { role: "user", content: userContent }
+      const windowTokens = getEffectiveMaxContextSize(agentConfig.llmConfig)
+      const fixedTokens = estimateChatMessagesTokens([...prefixMessages, currentRequest])
+      const historyBudget = Math.max(0, Math.min(Math.floor(windowTokens * 0.05), Math.floor(windowTokens * 0.75) - fixedTokens))
+      const historyMessages = selectContextHistoryMessages(foldedHistory, contextHubResult?.sessionSummary, historyBudget)
+      const agentMessages: AgentMessage[] = [...prefixMessages, ...historyMessages, currentRequest]
       const sessionRegistry = new ToolRegistry()
       agentRegistry.list().forEach((tool) => sessionRegistry.register(tool))
       if (contextHubResult) {
