@@ -28,12 +28,17 @@ describe("小说剧情检索", () => {
     await expect(novelMixedSearch({ projectPath: "/book", query: "问题" })).rejects.toThrow("失败")
     expect(searchWiki).not.toHaveBeenCalled()
   })
-  it("本地写作检索接受 QM 布局，并且仅允许前文定稿", async () => {
+  it("本地写作检索接受前文定稿和紧邻上一章的可读草稿", async () => {
     const content = "---\nchapter_number: 3\nchapter_status: final\n---\n原文"
     const path = "/book/QM/chapters/three.md"
     expect(await eligibleLocalSource(path, content, 4)).toBe(true)
     expect(await eligibleLocalSource(path, content, 3)).toBe(false)
-    expect(await eligibleLocalSource(path, content.replace("final", "draft"), 4)).toBe(false)
+    const draft = content.replace("final", "draft")
+    expect(await eligibleLocalSource(path, draft, 4)).toBe(true)
+    expect(await eligibleLocalSource(path, draft, 5)).toBe(false)
+    expect(await eligibleLocalSource(path, draft, 3)).toBe(false)
+    expect(await eligibleLocalSource(path, draft.replace("chapter_status: draft\n", ""), 4)).toBe(true)
+    expect(await eligibleLocalSource(path, draft.replace("chapter_status", "ai_exclude: true\nchapter_status"), 4)).toBe(false)
     expect(await eligibleLocalSource(path, content.replace("chapter_status", "ai_exclude: true\nchapter_status"), 4)).toBe(false)
   })
 })

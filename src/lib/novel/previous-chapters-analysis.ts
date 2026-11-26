@@ -40,7 +40,7 @@ export async function readPreviousChapterBodies(
   for (let i = Math.max(1, currentChapterNumber - analysisCount); i < currentChapterNumber; i++) {
     if (signal?.aborted) throw new Error("已停止生成")
     try {
-      const content = await readVisibleChapter(projectPath, i, scope?.chapters)
+      const content = await readVisibleChapter(projectPath, i, currentChapterNumber, scope)
       if (content) {
         const bodyStart = content.indexOf("---", 4)
         const body = bodyStart >= 0 ? content.slice(bodyStart + 3).trim() : content

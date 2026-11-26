@@ -66,8 +66,7 @@ const DATA_SOURCE_CATEGORY_MAP: Record<string, DataSourceCategory[]> = {
   cognitionText: ["character_states"],
 }
 
-function selectRecentChapterNumbersForContent(chapterNumber: number | undefined, count: number): number[] {
-  if (!chapterNumber || chapterNumber <= 1) return []
+function selectRecentChapterNumbersForContent(chapterNumber: number, count: number): number[] {
   const start = Math.max(1, chapterNumber - Math.max(1, count))
   const numbers: number[] = []
   for (let current = start; current < chapterNumber; current += 1) {
@@ -177,7 +176,9 @@ const snapshotDataSource: DataSource<{
       .filter((snapshot): snapshot is ChapterSnapshot => Boolean(snapshot))
       .filter((snapshot) => !excludedNumbers.has(snapshot.chapterNumber))
 
-    const previousSnapshot = validLookback[0]
+    const previousSnapshot = context.chapterScope?.previousDraftPath && chapterNumber
+      ? validLookback.find(snapshot => snapshot.chapterNumber === chapterNumber - 1)
+      : validLookback[0]
     const official = buildMemoryProjection(validLookback).officialSnapshots
     const recentSummaries = validSummarySnapshots.map((snapshot) => `第${snapshot.chapterNumber}章：${snapshot.summary}`)
     const characterStates = joinNonEmpty(
@@ -209,6 +210,7 @@ const recentChapterContentsDataSource: DataSource<string[]> = {
   name: "recentChapterContents",
   priority: 5,
   async load(context: ContextLoadContext): Promise<string[]> {
+    if (!context.chapterNumber) return []
     const chapterNumbers = selectRecentChapterNumbersForContent(
       context.chapterNumber,
       context.config.recentSummaryWindow,
@@ -218,7 +220,7 @@ const recentChapterContentsDataSource: DataSource<string[]> = {
     const contents: string[] = []
     for (const chapterNumber of chapterNumbers) {
       try {
-        const content = await readVisibleChapter(context.projectPath, chapterNumber, context.chapterScope?.chapters)
+        const content = await readVisibleChapter(context.projectPath, chapterNumber, context.chapterNumber, context.chapterScope)
         if (!content) continue
         const body = stripFrontmatterBody(content)
         if (!body) continue
@@ -270,7 +272,7 @@ const fallbackPreviousEndingDataSource: DataSource<string> = {
   async load(context: ContextLoadContext): Promise<string> {
     if (!context.chapterNumber || context.chapterNumber <= 1) return ""
     try {
-      const content = await readVisibleChapter(context.projectPath, context.chapterNumber - 1, context.chapterScope?.chapters)
+      const content = await readVisibleChapter(context.projectPath, context.chapterNumber - 1, context.chapterNumber, context.chapterScope)
       if (content) {
         const bodyStart = content.indexOf("---", 4)
         const body = bodyStart >= 0 ? content.slice(bodyStart + 3).trim() : content

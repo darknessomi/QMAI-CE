@@ -3,7 +3,7 @@ import { parseFrontmatter } from "@/lib/frontmatter"
 import { searchWiki } from "@/lib/search"
 import { isAiExcludedContent } from "./ai-exclude"
 import { parseChapterMeta } from "./chapter-meta"
-import { eligibleChapterNumber } from "@/lib/sag-search"
+import { eligibleChapterNumber, type ChapterScope } from "@/lib/sag-search"
 
 /** 累计状态只有在整个来源区间可读时才可作为前情。 */
 export function hasReadableHistory(through: number, readable: ReadonlyMap<number, string>): boolean {
@@ -12,10 +12,10 @@ export function hasReadableHistory(through: number, readable: ReadonlyMap<number
   return true
 }
 
-export async function readVisibleChapter(projectPath: string, number: number, readable?: ReadonlyMap<number, string>): Promise<string> {
-  const matches = (path: string, text: string) => eligibleChapterNumber(path, text, number + 1) === number
-  const path = readable
-    ? readable.get(number)
+export async function readVisibleChapter(projectPath: string, number: number, writingChapter: number, scope?: ChapterScope): Promise<string> {
+  const matches = (path: string, text: string) => eligibleChapterNumber(path, text, writingChapter) === number
+  const path = scope
+    ? scope.chapters.get(number) ?? (number === writingChapter - 1 ? scope.previousDraftPath : undefined)
     : (await searchWiki(projectPath, `chapter_number:${number}`, { localOnly: true, topK: 1, acceptFile: matches }))[0]?.path
   if (!path) return ""
   const text = await readFile(path).catch(() => "")

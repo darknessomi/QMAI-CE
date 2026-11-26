@@ -132,7 +132,7 @@ async fn fixed_sag2_oracle_matches_tokens_requests_expansion_rounds_and_ranking(
 }
 
 #[test]
-fn persists_fts_and_scopes_every_round_to_current_final_chapters() {
+fn writing_search_includes_the_previous_draft_without_unlocking_derived_pages() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path().canonicalize().unwrap();
     let chapter = |n, status, body| {
@@ -158,7 +158,18 @@ fn persists_fts_and_scopes_every_round_to_current_final_chapters() {
         "QM/chapters/禁读.md",
         "---\nai_exclude: 'YES'\nchapter_number: 1\nchapter_status: final\n---\n被排除的秘密。",
     );
-    let files = vec![first.clone(), future, draft, excluded];
+    let page = put(
+        &root,
+        "QM/entities/守卫.md",
+        "---\nsource_sequence: 2\n---\n旧快照秘密。",
+    );
+    let files = vec![first.clone(), future, draft.clone(), excluded, page];
+    let scope = store::fingerprint(root.to_str().unwrap(), files.clone(), Some(3)).unwrap();
+    assert_eq!(scope.previous_draft_path.as_ref(), Some(&draft));
+    assert_eq!(scope.chapters.len(), 1);
+    assert!(scope.pages.is_empty());
+    let later = store::fingerprint(root.to_str().unwrap(), files.clone(), Some(4)).unwrap();
+    assert!(later.previous_draft_path.is_none());
     let token = CancellationToken::new();
     // Warm the persisted FTS with a wider scope first.
     drop(store::Store::open(root.to_str().unwrap(), files.clone(), None, &token).unwrap());
@@ -167,16 +178,17 @@ fn persists_fts_and_scopes_every_round_to_current_final_chapters() {
     audit.execute_batch("CREATE TRIGGER changed BEFORE INSERT ON chunks BEGIN SELECT RAISE(ABORT,'hot query rebuilt chunks'); END;").unwrap();
     let limited =
         store::Store::open(root.to_str().unwrap(), files.clone(), Some(3), &token).unwrap();
-    assert_eq!(limited.chunk_count().unwrap(), 1);
+    assert_eq!(limited.chunk_count().unwrap(), 2);
     let result = limited
         .candidates(&text::match_query("通行许可"), None, &[], 5)
         .unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].start_line, 5);
-    assert!(limited
+    let secret = limited
         .candidates(&text::match_query("秘密"), None, &[], 5)
-        .unwrap()
-        .is_empty());
+        .unwrap();
+    assert_eq!(secret.len(), 1);
+    assert_eq!(secret[0].path, draft);
     fs::write(first, "---\nai_exclude: true\n---\n原文不可再发送").unwrap();
     assert!(limited.verify(&result, &token).is_err());
     drop(limited);
@@ -185,7 +197,7 @@ fn persists_fts_and_scopes_every_round_to_current_final_chapters() {
             .unwrap()
             .chunk_count()
             .unwrap(),
-        0
+        1
     );
 }
 
@@ -760,6 +772,10 @@ fn legacy_preambles_and_quoted_metadata_cannot_bypass_scope() {
     )
     .unwrap();
     assert!(writing.chapters.is_empty());
+    assert!(writing.previous_draft_path.is_none());
+    let legacy = mark("第1章-旧稿", "---\ntype: chapter\n---");
+    let scope = store::fingerprint(root.to_str().unwrap(), vec![legacy.clone()], Some(2)).unwrap();
+    assert_eq!(scope.previous_draft_path, Some(legacy));
 }
 
 #[test]

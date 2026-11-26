@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core"
 import { AgentRunner } from "@/lib/agent/runner"
 import { streamChat } from "@/lib/llm-client"
 import { buildContextPack, contextPackToPrompt } from "@/lib/novel/context-engine"
+import { readPreviousChapterBodies } from "@/lib/novel/previous-chapters-analysis"
 import { useWikiStore, DEFAULT_NOVEL_CONFIG } from "@/stores/wiki-store"
 import { createTempProject, realFs, writeFileRaw } from "@/test-helpers/fs-temp"
 import { runWritingConversation } from "./writing-conversation"
@@ -176,15 +177,30 @@ describe("MCP 写作实际组包与模型输入", () => {
     expect(searchCalls()).toHaveLength(2)
   })
 
-  it("无 JEV 时仅注入可见定稿，保留原有基础写作上下文", async () => {
+  it("无 JEV 时从上一章草稿原文承接，即使更早的定稿有结尾快照", async () => {
     setupModel(true)
     useWikiStore.setState({ jevConfig: null })
     const dir = book.path + "/wiki/chapters/"
-    const records = [[2, "draft", false], [3, "final", true], [6, "final", false]] as const
+    const records = [[2, "draft", false], [5, "draft", false], [6, "final", false]] as const
     for (const [n, status, excluded] of records) {
       await writeFileRaw(dir + `第${n}章.md`, `---\ntype: chapter\nchapter_number: ${n}\nchapter_status: ${status}\nai_exclude: ${excluded}\n---\n渡船的不可见事实${n}。`)
     }
+    const third = dir + "第3章.md"
+    const previousDraftPath = dir + "第4章.md"
+    await writeFileRaw(third, "---\nchapter_number: 3\nchapter_status: final\n---\n众人登船。")
+    await writeFileRaw(previousDraftPath, "---\nchapter_number: 4\nchapter_status: draft\n---\n渡船刚刚靠岸。")
+    await writeFileRaw(book.path + "/.qmai/novel/snapshots/003.snapshot.json",
+      JSON.stringify({ chapterNumber: 3, endingHook: "船刚出港。", summary: "众人登船。" }))
+    await writeFileRaw(dir + "第4章-禁读.md", "---\nchapter_number: 4\nchapter_status: draft\nai_exclude: true\n---\n渡船的不可见事实。")
+    vi.mocked(invoke).mockImplementation(async name => name === "sag_scope_fingerprint"
+      ? { fingerprint: "fifth", chapters: [{ path: chapter, chapterNumber: 1 }, { path: third, chapterNumber: 3 }], previousDraftPath, pages: {} }
+      : null)
     const pack = await buildContextPack(book.path, userRequest, 5)
+    expect(pack.previousChapterEnding).toBe("渡船刚刚靠岸。")
+    expect(pack.recentChapterContents?.join("\n")).toContain("渡船刚刚靠岸。")
+    const bodies = await readPreviousChapterBodies(book.path, 5, 3)
+    expect(bodies.map(ch => ch.number)).toEqual([3, 4])
+    expect(bodies.at(-1)?.content).toBe("渡船刚刚靠岸。")
     const text = JSON.stringify(pack)
     expect(text).toContain(quote)
     expect(text).not.toContain("渡船的不可见事实")

@@ -134,11 +134,16 @@ fn cache_path(root: &Path) -> Result<PathBuf> {
     Ok(db)
 }
 
+enum ChapterSource {
+    Final(u64),
+    PreviousDraft,
+}
+
 fn body<'a>(
     source: &'a str,
     chapter: Option<u64>,
     name: &str,
-) -> Option<(&'a str, usize, Option<u64>)> {
+) -> Option<(&'a str, usize, Option<ChapterSource>)> {
     body_if(source, chapter, name, |_| true)
 }
 
@@ -147,7 +152,7 @@ fn body_if<'a>(
     chapter: Option<u64>,
     name: &str,
     accept: impl FnOnce(&Value) -> bool,
-) -> Option<(&'a str, usize, Option<u64>)> {
+) -> Option<(&'a str, usize, Option<ChapterSource>)> {
     let source = source.strip_prefix('\u{feff}').unwrap_or(source);
     let ordinary = chapter.is_none().then_some((source, 0, None));
     // The editor also accepts a short preamble (e.g. a legacy fenced YAML
@@ -193,11 +198,8 @@ fn body_if<'a>(
         if !accept(&fields) {
             return None;
         }
-        let mut chapter_number = None;
+        let mut chapter_source = None;
         if let Some(bound) = chapter {
-            if field("chapter_status") != "final" {
-                return None;
-            }
             let numeric = field("chapter_number")
                 .trim()
                 .parse::<f64>()
@@ -221,12 +223,22 @@ fn body_if<'a>(
                     .parse()
                     .ok()
             })?;
-            chapter_number = Some(number);
             if number == 0 || number >= bound {
                 return None;
             }
+            let status = fields["chapter_status"].as_str();
+            let chapter_page =
+                metadata_number.is_some() || fields["type"].as_str() == Some("chapter");
+            chapter_source = Some(if status == Some("final") {
+                ChapterSource::Final(number)
+            } else if number == bound - 1 && (chapter_page || status == Some("draft")) {
+                // The editor displays legacy chapter pages without a final status as drafts.
+                ChapterSource::PreviousDraft
+            } else {
+                return None;
+            });
         }
-        return Some((&source[offset + line.len()..], index + 1, chapter_number));
+        return Some((&source[offset + line.len()..], index + 1, chapter_source));
     }
     if opening_line > 0 && !source[opening_end..].contains("ai_exclude") {
         ordinary
@@ -346,13 +358,13 @@ impl WritingScope {
         title: &str,
         relative: &Path,
         input: &str,
-    ) -> Option<(&'a str, usize, Option<u64>)> {
+    ) -> Option<(&'a str, usize, Option<ChapterSource>)> {
         if bound.is_none()
             || relative.starts_with("QM/chapters")
             || relative.starts_with("wiki/chapters")
         {
             let result = body(source, bound, title)?;
-            if let Some(n) = result.2 {
+            if let Some(ChapterSource::Final(n)) = result.2 {
                 self.chapters.insert(n, input.to_owned());
             }
             return Some(result);
@@ -483,6 +495,8 @@ fn signature(sources: &HashMap<String, Source>) -> String {
 pub struct Fingerprint {
     pub fingerprint: String,
     pub chapters: Vec<ScopedChapter>,
+    #[serde(rename = "previousDraftPath", skip_serializing_if = "Option::is_none")]
+    pub previous_draft_path: Option<String>,
     pub pages: BTreeMap<String, String>,
 }
 #[derive(serde::Serialize)]
@@ -502,6 +516,7 @@ pub(super) fn fingerprint(
         .canonicalize()
         .context("无法访问项目目录")?;
     let mut chapters = Vec::new();
+    let mut previous_draft_path = None;
     let mut pages = BTreeMap::new();
     let mut sources = HashMap::new();
     let mut seen = HashSet::new();
@@ -516,14 +531,16 @@ pub(super) fn fingerprint(
             .file_stem()
             .and_then(|s| s.to_str())
             .context("文件名无效")?;
-        if let Some((_, _, number)) =
+        if let Some((_, _, chapter_source)) =
             writing.body(&content, chapter, title, path.strip_prefix(&root)?, &input)
         {
-            if let Some(chapter_number) = number {
-                chapters.push(ScopedChapter {
+            match chapter_source {
+                Some(ChapterSource::Final(chapter_number)) => chapters.push(ScopedChapter {
                     path: input.clone(),
                     chapter_number,
-                });
+                }),
+                Some(ChapterSource::PreviousDraft) => previous_draft_path = Some(input.clone()),
+                None => {}
             }
             let hash = Sha256::digest(content.as_bytes());
             if writing.page_sources.contains_key(&input) {
@@ -547,6 +564,7 @@ pub(super) fn fingerprint(
     Ok(Fingerprint {
         fingerprint: signature(&sources),
         chapters,
+        previous_draft_path,
         pages,
     })
 }

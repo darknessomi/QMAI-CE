@@ -4,7 +4,7 @@ import { getJevConfig } from "@/lib/jev-config"
 import { normalizePath } from "@/lib/path-utils"
 import { parsePersonaProjectionFrontmatter } from "@/lib/novel/persona-projection"
 import { isAiExcluded } from "@/lib/novel/ai-exclude"
-import { isFinalChapter, parseChapterNumber } from "@/lib/novel/chapter-meta"
+import { isChapterPage, isFinalChapter, parseChapterNumber } from "@/lib/novel/chapter-meta"
 import type { FileNode } from "@/types/wiki"
 
 export interface SagHit {
@@ -58,11 +58,13 @@ export async function sagSearchFiles(
 export function eligibleChapterNumber(path: string, content: string, beforeChapter: number): number | null {
   if (!/\/(?:QM|wiki)\/chapters\//.test(normalizePath(path))) return null
   const { frontmatter } = parsePersonaProjectionFrontmatter(content)
-  if (!frontmatter || isAiExcluded(frontmatter) || !isFinalChapter(frontmatter)) return null
+  if (!frontmatter || isAiExcluded(frontmatter)) return null
   const name = normalizePath(path).split("/").pop() ?? ""
   const number = parseChapterNumber(frontmatter.chapter_number)
     ?? Number(/^(?:第\s*(\d+)\s*章|chapter[-_ ]?(\d+))/i.exec(name)?.slice(1).find(Boolean))
-  return Number.isInteger(number) && number > 0 && number < beforeChapter ? number : null
+  if (!Number.isInteger(number) || number <= 0 || number >= beforeChapter) return null
+  const previousDraft = number === beforeChapter - 1 && (isChapterPage(frontmatter) || frontmatter.chapter_status === "draft")
+  return isFinalChapter(frontmatter) || previousDraft ? number : null
 }
 
 async function listSagFiles(projectPath: string, beforeChapter?: number, includePages = false): Promise<string[]> {
@@ -82,6 +84,8 @@ async function listSagFiles(projectPath: string, beforeChapter?: number, include
 export interface ChapterScope {
   fingerprint: string
   chapters: ReadonlyMap<number, string>
+  /** 上一章草稿仅供读取正文，不能用来放行快照和派生设定。 */
+  previousDraftPath?: string
   /** 仅含全部来源章均可读的实体、概念页，以及此次校验的正文版本。 */
   pages: ReadonlyMap<string, string>
 }
@@ -91,12 +95,13 @@ export async function prepareSagChapterScope(projectPath: string, beforeChapter:
   const files = await listSagFiles(projectPath, beforeChapter, includePages)
   signal?.throwIfAborted()
   const result = files.length
-    ? await invoke<{ fingerprint: string; chapters: { path: string; chapterNumber: number }[]; pages: Record<string, string> }>("sag_scope_fingerprint", { projectPath, files, beforeChapter })
+    ? await invoke<{ fingerprint: string; chapters: { path: string; chapterNumber: number }[]; previousDraftPath?: string; pages: Record<string, string> }>("sag_scope_fingerprint", { projectPath, files, beforeChapter })
     : { fingerprint: "empty", chapters: [], pages: {} }
   signal?.throwIfAborted()
   return {
     files,
     fingerprint: result.fingerprint,
+    previousDraftPath: result.previousDraftPath,
     chapters: new Map(result.chapters.map(ch => [ch.chapterNumber, ch.path])),
     pages: new Map(Object.entries(result.pages).map(([path, hash]) => [normalizePath(path), hash])),
   }
