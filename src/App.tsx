@@ -367,7 +367,10 @@ function App() {
   useEffect(() => {
     async function init() {
       try {
-        const recoveryPath = await restoreDesktopMigration()
+        const recoveryPath = await restoreDesktopMigration().catch((error: unknown): false => {
+          if (error instanceof MigrationReturned) return false
+          throw error
+        })
         await restoreImportedUiPreferences().catch((error) => console.warn("恢复导入的界面偏好失败", error))
         // 先加载和应用主题
         const themeToUse = isTauri() ? await loadTheme() : readUiTestSkin()
@@ -492,6 +495,8 @@ function App() {
         }
         const savedRevisionFeedbackWindowConfig = await loadRevisionFeedbackWindowConfig()
         useWikiStore.getState().setRevisionFeedbackWindowConfig(savedRevisionFeedbackWindowConfig)
+        // 用户选择了返回书架，仍需加载上面的全局配置。
+        if (recoveryPath === false) return
         const lastProject = await getLastProject()
         const openingPath = recoveryPath ?? lastProject?.path
         if (openingPath) {
