@@ -33,13 +33,20 @@ fn valid_projection_path(path: &str, removal: bool) -> bool {
         .is_some_and(|digits| !digits.is_empty() && digits.bytes().all(|d| d.is_ascii_digit()));
     match (parts[0], parts[1]) {
         (".qmai", "retrieval") => volume || (!removal && leaf == "index.md"),
-        (".qmai", "novel") if !removal => matches!(
-            leaf,
-            "cognition-state.json"
-                | "character-states.json"
-                | "foreshadowing-tracker.json"
-                | "timeline.json"
-        ),
+        (".qmai", "novel") if !removal => {
+            matches!(
+                leaf,
+                "cognition-state.json"
+                    | "character-states.json"
+                    | "foreshadowing-tracker.json"
+                    | "timeline.json"
+            ) || leaf
+                .strip_prefix("cognition-state.legacy-")
+                .and_then(|name| name.strip_suffix(".bak"))
+                .is_some_and(|digest| {
+                    digest.len() == 64 && digest.bytes().all(|b| b.is_ascii_hexdigit())
+                })
+        }
         ("QM", "memory") if !removal => matches!(
             leaf,
             "character-states.md"

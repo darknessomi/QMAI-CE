@@ -480,17 +480,6 @@ fn empty_extraction_cache(path: &Path, kind: fs::FileType) -> Result<bool> {
         .is_none())
 }
 fn unknowns(project: &Path, report: &mut Report) -> Result<()> {
-    let breakpoint = project.join(".qm/breakpoint.json");
-    if breakpoint.is_file() {
-        let data = fs::read(&breakpoint).map_err(ioerr)?;
-        match serde_json::from_slice::<serde_json::Value>(&data) {
-            Ok(v) if v.is_null() => {}
-            _ => report.warnings.push(
-                "旧任务断点仍有内容，请先保存 .qm/breakpoint.json 中的任务信息并移出该文件。"
-                    .into(),
-            ),
-        }
-    }
     for (folder, known) in [
         (".qm", &["breakpoint.json"][..]),
         ("QM/tracking", TRACKING),
@@ -1441,6 +1430,21 @@ mod tests {
         assert!(report.changes.contains(&".qm".to_owned()));
         assert_eq!(fingerprint(&p).unwrap(), old);
         assert!(!external(&p).exists());
+    }
+    #[test]
+    fn migration_discards_legacy_task_breakpoint_with_content() {
+        let (_dir, p) = fixture();
+        let breakpoint = p.join(".qm/breakpoint.json");
+        let contents = r#"{"task":"未完成的旧任务"}"#;
+        fs::write(&breakpoint, contents).unwrap();
+
+        let report = run(&p, Mode::DryRun, |_| (), worker).unwrap();
+        assert_eq!(fs::read_to_string(&breakpoint).unwrap(), contents);
+        assert!(report.warnings.is_empty(), "{:?}", report.warnings);
+
+        run(&p, Mode::Apply, |_| (), worker).unwrap();
+        assert!(!p.join(".qm").exists());
+        assert!(!inspect(&p).unwrap().required);
     }
     #[test]
     fn missing_manifest_in_existing_layout_is_not_silently_written() {

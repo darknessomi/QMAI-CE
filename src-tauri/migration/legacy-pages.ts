@@ -1,5 +1,6 @@
 // Frozen renderer of the retired export format. Used only to prove that a
 // legacy page is reproducible before replacing it; never used by the app.
+import { createHash } from "node:crypto"
 import { join } from "node:path"
 import { readdir } from "node:fs/promises"
 import { readFile, fileExists, writeFileAtomic } from "./filesystem.mjs"
@@ -527,12 +528,14 @@ async function preserveEditedStatuses(project: string, snapshots: ChapterSnapsho
   if (changed) await writeFileAtomic(file, JSON.stringify(prior))
 }
 
-async function verifyCognition(project: string, snapshots: ChapterSnapshot[]) {
-  const path = join(project, ".qmai/novel/cognition-state.json")
+async function preserveLegacyCognition(project: string, snapshots: ChapterSnapshot[]) {
+  const dir = join(project, ".qmai/novel")
+  const path = join(dir, "cognition-state.json")
   if (!(await fileExists(path))) return
+  const original = await readFile(path)
   let existing: ReturnType<typeof emptyCognitionState>
   try {
-    existing = JSON.parse(await readFile(path))
+    existing = JSON.parse(original)
     if (!Array.isArray(existing.readerKnows) || !Array.isArray(existing.characters) ||
       existing.characters.some(c => !c || typeof c.character !== "string" || !Array.isArray(c.knows) || !Array.isArray(c.doesNotKnow))) {
       throw new Error()
@@ -551,14 +554,15 @@ async function verifyCognition(project: string, snapshots: ChapterSnapshot[]) {
     return rows.map(row => JSON.stringify(row)).sort()
   }
   if (JSON.stringify(normalized(existing)) !== JSON.stringify(normalized(expected))) {
-    throw new Error("旧 cognition-state.json 有无法从正文快照复现的认知内容，请保存人工修订后重试。")
+    const digest = createHash("sha256").update(original).digest("hex")
+    await writeFileAtomic(join(dir, `cognition-state.legacy-${digest}.bak`), original)
   }
 }
 
 export async function verifyLegacyPages(project: string, snapshots: ChapterSnapshot[]) {
   await verifyTracking(project)
   await preserveEditedStatuses(project, snapshots)
-  await verifyCognition(project, snapshots)
+  await preserveLegacyCognition(project, snapshots)
   const pages = renderLegacyPages(snapshots)
   let hasPages = false
   for (const [name, generated] of Object.entries(pages)) {
