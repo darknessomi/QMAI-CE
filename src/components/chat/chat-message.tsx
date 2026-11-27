@@ -778,10 +778,7 @@ function CitedReferencesPanel({
   /**
    * Open the raw source file for a page's first image and stage a
    * scroll target so the markdown preview lands on that image.
-   * Mirrors the lightbox "Jump to source document" path in
-   * search-view — same `findRawSourceForImage` resolver, same
-   * `pendingScrollImageSrc` store handoff, same fallback to
-   * opening the wiki page when no raw source is found.
+   * Fall back to the wiki page when the raw source can't be opened.
    */
   const handleJumpToImageSource = useCallback(
     async (firstUrl: string, fallbackPath: string) => {
@@ -875,11 +872,7 @@ function CitedReferencesPanel({
               {/*
                * Image badge — clickable, separately from the page
                * row. Click → resolve the FIRST image's raw source
-               * (`raw/sources/<slug>.<ext>`) and open the FULL
-               * combined-extraction preview, scrolled to that
-               * image. This mirrors the search-view lightbox
-               * "Jump to source document" behavior so the two
-               * surfaces feel consistent.
+               * (`raw/sources/<slug>.<ext>`) and open its preview.
                *
                * Icon: lucide `Image` (picture-frame outline with
                * mountain + sun) — direct visual cue for "image",

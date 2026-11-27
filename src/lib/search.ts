@@ -7,21 +7,6 @@ import type { FileNode } from "@/types/wiki"
 import { normalizePath } from "@/lib/path-utils"
 import { mapWikiMarkdown } from "./wiki-markdown-batches"
 
-/**
- * One image reference extracted from a matched page's markdown.
- *
- * `url` is verbatim what was inside the `![](...)` parens — this is
- * a forward-slash path that the markdown image resolver knows how
- * to map to a renderable URL. We deliberately keep it pre-resolution
- * so the search-result UI can filter by URL prefix (e.g. "only show
- * images from this source's media dir") before paying the cost of
- * `convertFileSrc`.
- */
-export interface ImageRef {
-  url: string
-  alt: string
-}
-
 export interface SearchResult {
   path: string
   title: string
@@ -29,19 +14,13 @@ export interface SearchResult {
   startLine?: number
   endLine?: number
   score: number
-  /**
-   * Image references found inside this result's markdown. Populated
-   * even when the query doesn't match the alt text — the UI splits
-   * "alt-matches-query" from "image just lives on this matched
-   * page" itself, so both views need the full set. May be empty.
-   */
-  images: ImageRef[]
 }
 
 interface SearchWikiOptions {
   topK?: number
   localOnly?: boolean
-  includePageImages?: boolean
+  /** 展示原文检索结果前复查页面的禁读状态。 */
+  recheckPageVisibility?: boolean
   /** 仅供内部按章号读取禁读标记。 */
   includeExcludedMetadata?: boolean
   signal?: AbortSignal
@@ -172,30 +151,6 @@ function extractTitle(content: string, fileName: string): string {
   return fileName.replace(/\.md$/, "").replace(/-/g, " ")
 }
 
-/**
- * Matches inline Markdown images with capture groups for alt text and URL.
- * Excludes:
- *   - HTML `<img src=...>` (we don't generate these)
- *   - Reference-style `![alt][ref]` (we don't generate these either)
- */
-const IMAGE_REF_RE = /!\[([^\]]*)\]\(([^)\s]+)\)/g
-
-function extractImageRefs(content: string): ImageRef[] {
-  const seen = new Set<string>()
-  const out: ImageRef[] = []
-  for (const m of content.matchAll(IMAGE_REF_RE)) {
-    const url = m[2]
-    // De-dupe within a single page: the same image may be
-    // referenced both inline (LLM-preserved) AND in the safety-net
-    // "## Embedded Images" section. Showing it twice in the
-    // results UI would just be visual noise.
-    if (seen.has(url)) continue
-    seen.add(url)
-    out.push({ url, alt: m[1] })
-  }
-  return out
-}
-
 function buildSnippet(content: string, query: string): string {
   const lower = content.toLowerCase()
   const lowerQuery = query.toLowerCase()
@@ -221,18 +176,18 @@ export async function searchWiki(
   const topK = options.topK ?? MAX_RESULTS
   if (!options.localOnly && getJevConfig()) {
     const hits = await searchSagProject(pp, query, topK, { signal: options.signal })
-    const pageImages = new Map<string, ImageRef[]>()
-    if (options.includePageImages) {
+    const visiblePaths = new Set<string>()
+    if (options.recheckPageVisibility) {
       for (const path of new Set(hits.map(hit => hit.path))) {
         options.signal?.throwIfAborted()
         const text = await readFile(path).catch(() => null)
-        if (text !== null && !isAiExcludedContent(text)) pageImages.set(path, extractImageRefs(text))
+        if (text !== null && !isAiExcludedContent(text)) visiblePaths.add(path)
       }
       options.signal?.throwIfAborted()
     }
-    return hits.filter(hit => !options.includePageImages || pageImages.has(hit.path)).map(hit => ({
+    return hits.filter(hit => !options.recheckPageVisibility || visiblePaths.has(hit.path)).map(hit => ({
       path: hit.path, title: hit.title, snippet: hit.content, score: hit.score,
-      startLine: hit.startLine, endLine: hit.endLine, images: pageImages.get(hit.path) ?? [],
+      startLine: hit.startLine, endLine: hit.endLine,
     }))
   }
 
@@ -323,7 +278,6 @@ function scoreFile(
     title,
     snippet: buildSnippet(content, snippetAnchor),
     score,
-    images: extractImageRefs(content),
   }
 }
 

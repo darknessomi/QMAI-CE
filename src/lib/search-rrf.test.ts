@@ -44,25 +44,20 @@ describe("项目检索路由", () => {
     expect(invoke).toHaveBeenCalledExactlyOnceWith("sag_search", expect.objectContaining({ files: expect.arrayContaining([path, join(project.path, "wiki/secret.md")]), query: "提问", config }))
   })
 
-  it("搜索面板从原页补回图片，保留段落排名并过滤刚被禁读的页面", async () => {
+  it("搜索面板保留段落排名并过滤刚被禁读的页面", async () => {
     useWikiStore.setState({ jevConfig: config })
     const path = join(project.path, "wiki/渡口.md")
     const privatePath = join(project.path, "wiki/工程图.md")
-    await realFs.writeFile(path, "# 渡口\n\n原文。\n\n![码头](assets/port.png)\n![重复](assets/port.png)")
+    await realFs.writeFile(path, "# 渡口\n\n原文。")
     await realFs.writeFile(privatePath, "# 工程图")
     invoke.mockImplementation(async () => {
-      await realFs.writeFile(privatePath, "---\nai_exclude: true\n---\n![内部图](private.png)")
+      await realFs.writeFile(privatePath, "---\nai_exclude: true\n---\n不得显示")
       return [path, privatePath, path].map((file, index) => ({
         path: file, title: "渡口", content: "段落" + index, startLine: 3 + index, endLine: 3 + index, score: 1 - index / 10,
       }))
     })
-    const displayed = await searchWiki(project.path, "渡口", { includePageImages: true })
+    const displayed = await searchWiki(project.path, "渡口", { recheckPageVisibility: true })
     expect(displayed.map(hit => [hit.snippet, hit.startLine])).toEqual([["段落0", 3], ["段落2", 5]])
-    for (const hit of displayed) expect(hit.images).toEqual([{ url: "assets/port.png", alt: "码头" }])
-    expect(JSON.stringify(invoke.mock.calls)).not.toContain("port.png")
-    invoke.mockResolvedValueOnce([{ path, title: "渡口", content: "段落0", startLine: 3, endLine: 3, score: 1 }])
-    const evidence = await searchWiki(project.path, "渡口")
-    expect(evidence).toMatchObject([{ snippet: "段落0", images: [] }])
   })
 
   it("写作只枚举章节目录并传入严格上界，第一章和空清单不发请求", async () => {

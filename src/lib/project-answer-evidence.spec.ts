@@ -15,7 +15,7 @@ beforeEach(() => {
 it("同一文件的两段引文分别标注行号，并保留原始顺序", async () => {
   vi.mocked(searchWiki).mockResolvedValue([4, 12].map(line => ({
     path: "/book/QM/entities/甲.md", title: "甲", startLine: line, endLine: line + 1,
-    snippet: "第" + line + "行的证据", score: 1, images: [],
+    snippet: "第" + line + "行的证据", score: 1,
   })))
   const content = await projectAnswerEvidence("/book", "谁收到文件？", signal, 8192)
   expect(content).toContain("〔QM/entities/甲.md，第 4–5 行〕")

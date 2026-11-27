@@ -20,7 +20,7 @@ vi.mock("@/commands/fs", () => ({
   },
 }))
 
-it("SAG2 命中原文后，即使只有配图也能从搜索面板展开图片", async () => {
+it("SAG2 命中带图片引用的页面时只展示原文搜索结果", async () => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true)
   const initial = useWikiStore.getState()
   useWikiStore.setState({
@@ -33,11 +33,12 @@ it("SAG2 命中原文后，即使只有配图也能从搜索面板展开图片",
   try {
     act(() => root.render(<SearchView />))
     await act(async () => { useWikiStore.getState().setSearchTrigger({ query: "旧信", ts: 1 }) })
-    const toggle = () => [...host.querySelectorAll("button")].find(button => button.textContent?.includes("显示全部"))
-    await vi.waitFor(() => expect(toggle()).toBeDefined())
+    await vi.waitFor(() => {
+      const hit = [...host.querySelectorAll("button")].find(button => button.textContent?.includes("渡口"))
+      expect(hit?.textContent).toContain("林青交还了旧信。")
+    })
     expect(host.querySelector("img")).toBeNull()
-    act(() => toggle()!.click())
-    expect(host.querySelector("img")?.alt).toBe("码头平面图")
+    expect(host.textContent).not.toMatch(/图片|显示全部/)
     expect(invoke).toHaveBeenCalledWith("sag_search", expect.objectContaining({ query: "旧信" }))
   } finally {
     act(() => root.unmount())

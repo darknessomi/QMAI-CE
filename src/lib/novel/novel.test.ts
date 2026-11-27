@@ -247,7 +247,6 @@ describe("context-pack freshness", () => {
             title: "旧查询",
             snippet: "手机 仍然在旧查询里出现",
             score: 0.95,
-            images: [],
           },
         ]
       }
@@ -257,14 +256,12 @@ describe("context-pack freshness", () => {
           title: "旧查询",
           snippet: "手机 仍然在旧查询里出现",
           score: 0.99,
-          images: [],
         },
         {
           path: "/project/wiki/entities/spirit-stone.md",
           title: "灵石",
           snippet: "灵石 是当前有效设定",
           score: 0.7,
-          images: [],
         },
       ]
     })

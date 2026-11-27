@@ -294,15 +294,7 @@
     "searching": "正在搜索...",
     "pressEnter": "按回车键搜索",
     "pageCount": "{{count}} 页",
-    "imageMatchCount": "{{count}} 张图片匹配",
-    "supportingImagesHint": "已匹配页面关联 +{{count}}",
-    "imagesSection": "图片",
-    "pagesSection": "页面",
-    "hideSupporting": "隐藏附属",
-    "showAllPlus": "显示全部 (+{{count}})",
-    "noCaption": "无说明",
-    "fromSource": "来源：",
-    "jumpToSource": "跳转到源文档"
+    "pagesSection": "页面"
   },
   "lint": {
     "title": "资料库检查",

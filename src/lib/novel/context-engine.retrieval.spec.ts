@@ -49,7 +49,6 @@ describe("searchRelevantContentUnified retrieval noise control", () => {
       title: "Shared Memory",
       snippet: "Different index excerpt",
       score: 0.5,
-      images: [],
     }])
 
     const output = await searchRelevantContentUnified(

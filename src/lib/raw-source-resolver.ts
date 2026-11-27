@@ -1,21 +1,9 @@
 /**
  * Map a wiki-side image reference back to its raw source file.
  *
- * Image URLs we generate always live under
- *   `<project>/wiki/media/<slug>/img-N.<ext>`
- * — emitted either ABSOLUTE (from the unified Rust extractor that
- * runs at `read_file` time) or WIKI-RELATIVE
- * (`media/<slug>/img-N.png`, from the post-write safety-net section
- * in `wiki/sources/<slug>.md`). The slug equals the basename of
- * the original raw source file (we wrote it that way at extraction
- * time in fs.rs's raw-sources-layout
- * heuristic), so finding the raw file is a stem match against
- * `<project>/raw/sources/`.
- *
- * Used in two places that want to "open the original document
- * around this image" rather than its LLM summary:
- *   - search-view's lightbox "Jump to source document" button
- *   - chat references panel's image badge (Phase 4 multimodal UI)
+ * Chat reference badges can open the source of an image stored by an
+ * earlier import. For `media/<slug>/img-N.<ext>` references, match the
+ * slug against the filenames under `<project>/raw/sources/`.
  *
  * Returns null when:
  *   - the URL doesn't match the expected media-directory shape, OR
@@ -64,12 +52,8 @@ export async function findRawSourceForImage(
 }
 
 /**
- * Normalize a markdown image URL to the absolute-path form that
- * the unified Rust extractor emits in raw-source previews. Used
- * by jump-to-source code paths that want to set a `<img data-mdsrc>`
- * scroll target on the raw-source preview — the raw side renders
- * absolute URLs, so a wiki-relative URL we got from a wiki page's
- * safety-net section needs to be promoted to absolute first.
+ * Turn a wiki-relative image URL into an absolute scroll target
+ * for a source preview that uses absolute image paths.
  *
  * Idempotent: passing an already-absolute URL returns it unchanged.
  */

@@ -9,7 +9,7 @@ vi.mock("@/commands/fs", () => ({ readFile: vi.fn() }))
 vi.mock("@/lib/search", () => ({ searchWiki: vi.fn() }))
 vi.mock("./ai-exclude-chapters", () => ({ listAiExcludedChapterNumbers: vi.fn(async () => new Set()) }))
 vi.mock("./chapter-ingest", () => ({ listSnapshots: vi.fn(), loadSnapshot: vi.fn() }))
-const hit = (path: string, title: string) => ({ path, title, snippet: title, score: 1, images: [] })
+const hit = (path: string, title: string) => ({ path, title, snippet: title, score: 1 })
 
 describe("基础混合检索", () => {
   beforeEach(() => {

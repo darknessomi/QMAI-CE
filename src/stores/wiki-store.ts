@@ -517,8 +517,8 @@ interface WikiState {
   pendingEditorHighlight: PendingEditorHighlight | null
   /**
    * One-shot scroll target for the markdown preview. When the user
-   * clicks an image in search results and chooses "jump to source",
-   * we set this to the image URL alongside `selectedFile`. The
+   * clicks an image badge in a chat reference, we set this to the
+   * image URL alongside `selectedFile`. The
    * markdown preview consumes it on its next render — finds the
    * `<img data-mdsrc="..."/>` whose attribute matches and scrolls
    * it into view, then clears this back to null so a stale target
