@@ -79,6 +79,21 @@ const FOUR_POINT_FIVE_ZERO_ZH: string[] = [
   "为会员用户提供更好的使用体验和额度管理能力。",
 ];
 
+const FOUR_POINT_EIGHT_FOUR_ZH: string[] = [
+  "续写时可检索并读取上一章草稿，写作上下文优先保留本章章纲和上一章正文，并按模型预算保留近期对话。",
+  "长章审稿会按模型的上下文窗口分段检查全文，修复超长正文末尾漏审的问题。",
+  "修复 MCP 写作对话中聊天记录和引用资料缺失的问题。",
+  "迁移旧项目时，会备份无法从章节快照重建的旧认知数据并继续迁移。已停用的旧任务断点也不会再阻塞迁移。",
+  "移除 Office 文件导入与 Word 导出。项目搜索结果移除配图展示，仍可查看原文命中和段落排名。",
+  "修复从项目返回书架后全局配置未继续加载的问题。",
+];
+
+const FOUR_POINT_EIGHT_FOUR_CHANGELOG: ChangelogEntry = {
+  version: "4.8.4",
+  date: "2026-11-27",
+  highlights: { en: FOUR_POINT_EIGHT_FOUR_ZH, zh: FOUR_POINT_EIGHT_FOUR_ZH },
+};
+
 const FOUR_POINT_EIGHT_THREE_ZH: string[] = [
   "回写旧章时，写作上下文会按章号和原文版本筛选设定、正典和文风资料。改写章节或将其设为「AI 不读取」后，旧缓存随之失效。",
   "维护工具新增「清理当前项目旧社区摘要」。清理后保留章节摘要、记忆快照和作者文件。",
@@ -2304,6 +2319,8 @@ export function currentVersionChangelog(version: string): ChangelogEntry[] {
    * 才是「当前版本发布说明」的取数口 —— 漏了这里，发布说明会退化成
    * 一行「QMAI x.y.z 发布版本」，scripts/release-notes.spec.mjs 会拦下来。
    */
+  if (version === FOUR_POINT_EIGHT_FOUR_CHANGELOG.version)
+    return [FOUR_POINT_EIGHT_FOUR_CHANGELOG];
   if (version === FOUR_POINT_EIGHT_THREE_CHANGELOG.version)
     return [FOUR_POINT_EIGHT_THREE_CHANGELOG];
   if (version === FOUR_POINT_EIGHT_TWO_CHANGELOG.version)
@@ -2513,6 +2530,7 @@ export function currentVersionChangelog(version: string): ChangelogEntry[] {
 
 export function allChangelog(): ChangelogEntry[] {
   return [
+    FOUR_POINT_EIGHT_FOUR_CHANGELOG,
     FOUR_POINT_EIGHT_THREE_CHANGELOG,
     FOUR_POINT_EIGHT_TWO_CHANGELOG,
     FOUR_POINT_EIGHT_ONE_CHANGELOG,
