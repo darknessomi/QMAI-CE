@@ -1,7 +1,6 @@
 //! Panic-to-error boundary for Tauri commands.
 //!
-//! Third-party parsers (docx-rs, calamine, …) are
-//! known to panic on malformed input instead of returning Err. Under
+//! Third-party parsers can panic on malformed input. Under
 //! `panic = "abort"` that kills the whole app; even with `panic =
 //! "unwind"`, letting a panic propagate through the `extern "C"` Tauri
 //! command boundary is UB. This helper catches panics at the command

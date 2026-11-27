@@ -24,19 +24,6 @@ export interface SettingsDraft {
   reasoning: ReasoningConfig | undefined
   localCliIsolation: boolean
 
-  // Multimodal (image captioning at ingest time)
-  multimodalEnabled: boolean
-  multimodalUseMainLlm: boolean
-  multimodalProvider: LlmProviderId
-  multimodalApiKey: string
-  multimodalModel: string
-  multimodalOllamaUrl: string
-  multimodalCustomEndpoint: string
-  multimodalAzureApiVersion: string
-  multimodalAzureModelFamily: AzureModelFamily
-  multimodalApiMode: CustomApiMode | undefined
-  multimodalConcurrency: number
-
   // Output preferences
   outputLanguage: OutputLanguage
   maxHistoryMessages: number

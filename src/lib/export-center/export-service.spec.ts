@@ -31,7 +31,7 @@ describe("统一导出保存服务", () => {
   it("取消保存窗口返回 cancelled，且不写文件", async () => {
     const adapters = deps([null])
 
-    const result = await exportDocuments([documents[0]], "txt", adapters)
+    const result = await exportDocuments([documents[0]], adapters)
 
     expect(result).toEqual({ status: "cancelled", exportedCount: 0 })
     expect(adapters.writeBinary).not.toHaveBeenCalled()
@@ -40,13 +40,16 @@ describe("统一导出保存服务", () => {
   it("清理默认文件名并将每部作品保存为独立 TXT 文件", async () => {
     const adapters = deps(["C:/Export/作品一.txt", "C:/Export/作品二.txt"])
 
-    const result = await exportDocuments(documents, "txt", adapters)
+    const result = await exportDocuments(documents, adapters)
 
     expect(result).toEqual({ status: "success", exportedCount: 2 })
     expect(adapters.saveFile.mock.calls.map((call) => call[0].defaultPath)).toEqual([
       "作品一.txt",
       "作品二.txt",
     ])
+    for (const [options] of adapters.saveFile.mock.calls) {
+      expect(options.filters).toEqual([{ name: "UTF-8 文本", extensions: ["txt"] }])
+    }
     expect(adapters.writeBinary).toHaveBeenCalledTimes(2)
     expect(new TextDecoder().decode(adapters.writeBinary.mock.calls[0][1])).toContain("甲")
   })
@@ -56,29 +59,17 @@ describe("统一导出保存服务", () => {
     let active = true
     adapters.writeBinary.mockImplementationOnce(async () => { active = false })
 
-    const result = await exportDocuments(documents, "txt", adapters, () => active)
+    const result = await exportDocuments(documents, adapters, () => active)
 
     expect(result).toEqual({ status: "cancelled", exportedCount: 1 })
     expect(adapters.saveFile).toHaveBeenCalledTimes(1)
-  })
-
-  it("DOCX 保存窗口和写入数据使用真实 docx 扩展名与 ZIP 字节", async () => {
-    const adapters = deps(["C:/Export/作品一.docx"])
-
-    await exportDocuments([documents[0]], "docx", adapters)
-
-    expect(adapters.saveFile.mock.calls[0][0]).toMatchObject({
-      defaultPath: "作品一.docx",
-      filters: [{ name: "Word 文档", extensions: ["docx"] }],
-    })
-    expect(Array.from(adapters.writeBinary.mock.calls[0][1].slice(0, 2))).toEqual([0x50, 0x4b])
   })
 
   it("写入失败时抛出中文错误且停止后续作品", async () => {
     const adapters = deps(["C:/Export/作品一.txt", "C:/Export/作品二.txt"])
     adapters.writeBinary.mockRejectedValueOnce(new Error("disk full"))
 
-    await expect(exportDocuments(documents, "txt", adapters)).rejects.toThrow("导出文件写入失败，请检查保存位置和磁盘空间。")
+    await expect(exportDocuments(documents, adapters)).rejects.toThrow("导出文件写入失败，请检查保存位置和磁盘空间。")
     expect(adapters.saveFile).toHaveBeenCalledTimes(1)
   })
 })

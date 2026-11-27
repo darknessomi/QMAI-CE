@@ -173,13 +173,7 @@ function extractTitle(content: string, fileName: string): string {
 }
 
 /**
- * Markdown image-reference regex. Matches `![alt](url)` capturing
- * groups 1=alt, 2=url. Identical to the regex in
- * `image-caption-pipeline.ts` — kept duplicated rather than shared
- * because the two modules have very different lifetimes (search
- * runs every keystroke; the pipeline runs at ingest), and a shared
- * symbol there would tie them together for no benefit.
- *
+ * Matches inline Markdown images with capture groups for alt text and URL.
  * Excludes:
  *   - HTML `<img src=...>` (we don't generate these)
  *   - Reference-style `![alt][ref]` (we don't generate these either)

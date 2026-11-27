@@ -92,6 +92,6 @@ export function filterDroppablePaths(paths: readonly string[], kind: ListKind): 
 /** 拖进来但没有一个能导入时的提示文案。 */
 export function describeUnsupportedDrop(paths: readonly string[], kind: ListKind): string {
   const what = kind === "chapter" ? "章节文档" : "大纲文档"
-  const extensions = kind === "chapter" ? "txt、md、mdx、doc、docx" : "md、txt、docx、pptx、xlsx 等文档格式"
+  const extensions = kind === "chapter" ? "txt、md、mdx" : "md、txt、csv、html 等文本格式"
   return `拖入的 ${paths.length} 个文件里没有可导入的${what}。支持的格式：${extensions}。`
 }

@@ -80,7 +80,7 @@ describe("cascadeDeleteWikiPage", () => {
 
   it("media-cascade tolerates a missing media directory (no images were extracted)", async () => {
     // Most wiki/sources/ pages won't have an associated media/<slug>/
-    // — only PDF/PPTX/DOCX sources with embedded images do. The
+    // — older sources with embedded images can have them. The
     // delete attempt fails with ENOENT and we swallow it silently.
     mockDeleteFile
       .mockResolvedValueOnce(undefined) // source page delete: OK

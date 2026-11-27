@@ -259,34 +259,6 @@ interface SearchApiConfig {
 }
 
 /**
- * Image-captioning settings (Phase 4 of the multimodal-images plan).
- *
- * Decoupled from `llmConfig` because vision-capable endpoints are
- * usually NOT the same model the user picks for analysis/generation:
- * - the analysis stage often goes to a strong text-only model (Claude
- *   Sonnet, DeepSeek, etc.) that doesn't speak vision at all;
- * - captioning is happy with a small local VL model (Qwen2.5-VL-7B,
- *   LLaVA-1.6) that costs near-zero per call.
- *
- * `enabled` is the master gate. When false the caption pipeline is
- * skipped entirely — `read_file`'s extracted images still appear
- * inline (with empty alt text) and the safety-net `## Embedded
- * Images` section still gets written, but we never touch the LLM.
- *
- * `useMainLlm`: when true (the default for first-time users we
- * onboard), captioning calls go through the same `llmConfig`
- * everything else uses. When false, the dedicated fields below are
- * sent through the same provider machinery — same `streamChat`,
- * same `getProviderConfig`, no duplicate code.
- *
- * `concurrency` bounds parallel caption requests during ingest.
- * 30-image PDFs with sequential captioning at ~10s/image (a Qwen3
- * thinking model on consumer GPU) take 5 minutes. At concurrency=4
- * that drops to ~75s. Going wider than 8 typically just queues
- * behind a single-GPU server's batch slot, so we cap the slider
- * UI at a tasteful max in the settings view.
- */
-/**
  * Global outbound HTTP proxy. When `enabled` and `url` is a valid
  * http(s) URL, the Rust setup hook reads this on app launch and
  * sets HTTP_PROXY / HTTPS_PROXY / NO_PROXY env vars before the
@@ -381,23 +353,6 @@ export interface RevisionFeedbackWindowConfig {
   previousChapterCarryEnabled: boolean
   lookbackChapterCount: number
   lookbackIncludeMustFixOnly: boolean
-}
-
-interface MultimodalConfig {
-  enabled: boolean
-  /** Reuse `llmConfig` for caption calls. When true, the fields
-   *  below are ignored. */
-  useMainLlm: boolean
-  provider: LlmConfig["provider"]
-  apiKey: string
-  model: string
-  ollamaUrl: string
-  customEndpoint: string
-  azureApiVersion?: string
-  azureModelFamily?: AzureModelFamily
-  apiMode?: CustomApiMode
-  /** Max parallel caption requests during ingest. >=1. */
-  concurrency: number
 }
 
 /**
@@ -628,7 +583,6 @@ interface WikiState {
   searchApiConfig: SearchApiConfig
   jevConfig: JevConfig | null
   jevConfigLoadError: string | null
-  multimodalConfig: MultimodalConfig
   outputLanguage: OutputLanguage
   proxyConfig: ProxyConfig
   scheduledImportConfig: ScheduledImportConfig
@@ -702,7 +656,6 @@ interface WikiState {
   setProviderConfigs: (configs: ProviderConfigs) => void
   setActivePresetId: (id: string | null) => void
   setSearchApiConfig: (config: SearchApiConfig) => void
-  setMultimodalConfig: (config: MultimodalConfig) => void
   setOutputLanguage: (lang: OutputLanguage) => void
   setProxyConfig: (config: ProxyConfig) => void
   setScheduledImportConfig: (config: ScheduledImportConfig) => void
@@ -896,25 +849,6 @@ export const useWikiStore = create<WikiState>((set, get) => ({
 
   jevConfig: null,
   jevConfigLoadError: null,
-  multimodalConfig: {
-    // Off by default — captioning is a non-trivial token spend
-    // (one VLM call per extracted image), and silently turning it
-    // on for every user the first time they import a PDF would be
-    // a budget surprise. Users who want it flip the toggle in
-    // Settings → Image captioning.
-    enabled: false,
-    useMainLlm: true,
-    provider: "custom",
-    apiKey: "",
-    model: "",
-    ollamaUrl: "http://localhost:11434",
-    customEndpoint: "",
-    azureApiVersion: "2024-10-21",
-    azureModelFamily: "auto",
-    apiMode: "chat_completions",
-    concurrency: 4,
-  },
-
   outputLanguage: "Chinese",
 
   proxyConfig: {
@@ -978,7 +912,6 @@ export const useWikiStore = create<WikiState>((set, get) => ({
   }),
   setActivePresetId: (activePresetId) => set({ activePresetId }),
   setSearchApiConfig: (searchApiConfig) => set({ searchApiConfig }),
-  setMultimodalConfig: (multimodalConfig) => set({ multimodalConfig }),
   setOutputLanguage: (outputLanguage) => set({ outputLanguage }),
   setProxyConfig: (proxyConfig) => set({ proxyConfig }),
   setScheduledImportConfig: (scheduledImportConfig) => set({ scheduledImportConfig }),
@@ -1083,4 +1016,4 @@ export const useWikiStore = create<WikiState>((set, get) => ({
   bumpDataVersion: () => set((state) => ({ dataVersion: state.dataVersion + 1 })),
 }))
 
-export type { WikiState, LlmConfig, SearchApiConfig, MultimodalConfig, OutputLanguage, ProxyConfig, SourceWatchConfig }
+export type { WikiState, LlmConfig, SearchApiConfig, OutputLanguage, ProxyConfig, SourceWatchConfig }

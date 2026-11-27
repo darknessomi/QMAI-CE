@@ -1,7 +1,6 @@
 import { invoke } from "@tauri-apps/api/core"
-import { serializeDocx } from "./docx-exporter"
 import { sanitizeExportFileName, serializeTxt } from "./txt-exporter"
-import type { ExportDocument, ExportFormat } from "./types"
+import type { ExportDocument } from "./types"
 
 interface SaveOptions {
   defaultPath: string
@@ -58,22 +57,18 @@ const defaultDeps: ExportServiceDeps = {
 
 export async function exportDocuments(
   documents: ExportDocument[],
-  format: ExportFormat,
   deps: ExportServiceDeps = defaultDeps,
   shouldContinue: () => boolean = () => true,
 ): Promise<ExportRunResult> {
   let exportedCount = 0
-  const filter = format === "txt"
-    ? { name: "UTF-8 文本", extensions: ["txt"] }
-    : { name: "Word 文档", extensions: ["docx"] }
 
   for (const document of documents) {
     if (!shouldContinue()) return { status: "cancelled", exportedCount }
-    const defaultPath = `${sanitizeExportFileName(document.title)}.${format}`
-    const path = await deps.saveFile({ defaultPath, filters: [filter] })
+    const defaultPath = `${sanitizeExportFileName(document.title)}.txt`
+    const path = await deps.saveFile({ defaultPath, filters: [{ name: "UTF-8 文本", extensions: ["txt"] }] })
     if (!path) return { status: "cancelled", exportedCount }
 
-    const bytes = format === "txt" ? serializeTxt(document) : serializeDocx(document)
+    const bytes = serializeTxt(document)
     assertExportByteLength(bytes.byteLength)
     try {
       await deps.writeBinary(path, bytes)

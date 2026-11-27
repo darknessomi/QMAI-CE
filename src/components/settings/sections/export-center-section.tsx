@@ -3,7 +3,7 @@ import { Download, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { collectAllProjectSources, EXPORT_SOURCES } from "@/lib/export-center/collectors"
 import { exportDocuments } from "@/lib/export-center/export-service"
-import type { ExportDocument, ExportFormat, ExportSource } from "@/lib/export-center/types"
+import type { ExportDocument, ExportSource } from "@/lib/export-center/types"
 import { loadRegistry } from "@/lib/project-identity"
 import type { WikiProject } from "@/types/wiki"
 
@@ -34,7 +34,6 @@ export function ExportCenterSection({ currentProject }: ExportCenterSectionProps
   const [selectedProjectId, setSelectedProjectId] = useState(currentProject?.id ?? "")
   const [documentsBySource, setDocumentsBySource] = useState(emptySources)
   const [selectedSources, setSelectedSources] = useState<Set<ExportSource>>(new Set())
-  const [format, setFormat] = useState<ExportFormat>("txt")
   const [isLoading, setIsLoading] = useState(false)
   const [isExporting, setIsExporting] = useState(false)
   const [message, setMessage] = useState("")
@@ -110,7 +109,7 @@ export function ExportCenterSection({ currentProject }: ExportCenterSectionProps
     setIsExporting(true)
     setMessage("")
     try {
-      const result = await exportDocuments(documents, format, undefined, () => mountedRef.current)
+      const result = await exportDocuments(documents, undefined, () => mountedRef.current)
       if (!mountedRef.current) return
       setMessage(result.status === "cancelled"
         ? "已取消导出，未继续写入文件。"
@@ -138,7 +137,7 @@ export function ExportCenterSection({ currentProject }: ExportCenterSectionProps
           <h2 className="text-xl font-semibold">统一导出中心</h2>
         </div>
         <p className="mt-1 text-sm text-muted-foreground">
-          只读汇总项目内容，导出为 UTF-8 TXT 或真实 Word DOCX，不会修改源文件。
+          将所选内容导出为 UTF-8 TXT 文件。
         </p>
       </div>
 
@@ -181,20 +180,6 @@ export function ExportCenterSection({ currentProject }: ExportCenterSectionProps
               </label>
             )
           })}
-        </div>
-      </fieldset>
-
-      <fieldset className="space-y-3 rounded-md border bg-card p-4">
-        <legend className="px-1 text-sm font-medium">导出格式</legend>
-        <div className="grid gap-2 sm:grid-cols-2">
-          <label className="flex cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-sm hover:bg-accent/50">
-            <input type="radio" name="export-format" value="txt" checked={format === "txt"} onChange={() => setFormat("txt")} disabled={controlsDisabled} />
-            UTF-8 TXT
-          </label>
-          <label className="flex cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-sm hover:bg-accent/50">
-            <input type="radio" name="export-format" value="docx" checked={format === "docx"} onChange={() => setFormat("docx")} disabled={controlsDisabled} />
-            Word DOCX
-          </label>
         </div>
       </fieldset>
 

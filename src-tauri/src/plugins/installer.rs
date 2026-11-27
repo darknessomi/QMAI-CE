@@ -412,7 +412,10 @@ pub fn extract_zip(bytes: &[u8], dest: &Path) -> Result<(), String> {
             continue;
         }
         // 先把名字克隆出来：下面要用可变借用去读内容，借用期间不能再调 file.name()
-        let name = file.name().to_string();
+        let name = file
+            .name()
+            .map_err(|e| format!("读取插件包条目名失败：{e}"))?
+            .into_owned();
         // 符号链接必须最先拒：它的内容是一段指向包外的路径，落盘后就被当成普通文件，
         // 后续任何「路径校验」都看不见它，等于允许往任意位置写
         if file.is_symlink() {
@@ -1367,7 +1370,8 @@ mod tests {
         }
 
         let err = extract_zip(&bytes, &dest).unwrap_err();
-        assert!(err.contains("64 MB"), "少报大小不应绕过上限，实际：{err}");
+        // zip 9 可能在 QMAI 的总量检查前就拒绝声明大小不符的条目。
+        assert!(err.contains("repo-main/big.bin"), "应指出被拒绝的条目，实际：{err}");
         assert!(
             !dest.join("repo-main/big.bin").exists(),
             "被拒的条目不该落盘"
@@ -1378,7 +1382,7 @@ mod tests {
     #[test]
     fn extract_rejects_entry_whose_declared_size_mismatches_actual() {
         let dest = temp_dir("size-mismatch");
-        // 真实内容 11 字节、声明 3 字节：不走体积上限，走「声明与实际不一致」这条拒绝分支
+        // 真实内容 11 字节、声明 3 字节，验证体积上限以内的条目也会被拒绝。
         let mut bytes = zip_with(&[("repo-main/a.txt", b"hello world")]);
         underreport_central_size(&mut bytes, 3);
         {
@@ -1388,8 +1392,8 @@ mod tests {
 
         let err = extract_zip(&bytes, &dest).unwrap_err();
         assert!(
-            err.contains("不一致"),
-            "声明大小与实际不符应被拒，实际：{err}"
+            err.contains("repo-main/a.txt"),
+            "应指出声明大小不符的条目，实际：{err}"
         );
         assert!(!dest.join("repo-main/a.txt").exists(), "被拒的条目不该落盘");
         let _ = std::fs::remove_dir_all(&dest);
@@ -1398,7 +1402,7 @@ mod tests {
     #[test]
     fn extract_rejects_symlink_entries() {
         let dest = temp_dir("symlink");
-        // 不能用 `SimpleFileOptions::unix_permissions(0o120777)` 手搓：zip 2.x 的
+        // 不能用 `SimpleFileOptions::unix_permissions(0o120777)` 手搓：zip 的
         // `unix_permissions()` 会 `mode & 0o777` 丢掉高位，条目会退化成普通文件、
         // 测试就假绿了。必须走 `add_symlink`，它内部把 S_IFLNK 直接或进权限位。
         let mut w = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));

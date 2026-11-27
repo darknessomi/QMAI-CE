@@ -62,7 +62,6 @@ describe("同人正典端到端注入", () => {
       createDirectory: vi.fn(),
       deleteFile: vi.fn(),
       listDirectory: vi.fn(async () => []),
-      readFileAsBase64: vi.fn(),
     }))
     // 默认所有模糊检索都返回空，确保正典只可能来自固定路径直读。
     vi.doMock("@/lib/search", () => ({

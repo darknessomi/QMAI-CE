@@ -360,7 +360,6 @@ beforeEach(() => {
     messages: [],
     activeConversationId: null,
     mode: "chat",
-    ingestSource: null,
     streamingContents: {},
   })
 })

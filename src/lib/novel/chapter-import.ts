@@ -3,7 +3,7 @@ import { getFileName, getFileStem, normalizePath } from "@/lib/path-utils"
 import { makeSafeFileSlug } from "@/lib/wiki-filename"
 import type { FileNode } from "@/types/wiki"
 
-export const CHAPTER_IMPORT_EXTENSIONS = ["txt", "md", "mdx", "doc", "docx"] as const
+export const CHAPTER_IMPORT_EXTENSIONS = ["txt", "md", "mdx"] as const
 
 const CHAPTER_IMPORT_EXTENSION_SET = new Set<string>(CHAPTER_IMPORT_EXTENSIONS)
 
@@ -181,7 +181,7 @@ function stripChapterPrefix(title: string): string {
 
 function cleanImportedChapterTitleSuffix(title: string): string {
   return title
-    .replace(/\.(txt|mdx?|docx?|rtf)$/i, "")
+    .replace(/\.(txt|mdx?)$/i, "")
     .replace(/^[-_—–\s:：，、.。]+/, "")
     .trim()
 }

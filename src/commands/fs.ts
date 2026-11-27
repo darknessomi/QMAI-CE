@@ -160,15 +160,6 @@ export async function getFileMd5(path: string): Promise<string> {
   return invoke<string>("get_file_md5", { path })
 }
 
-interface FileBase64 {
-  base64: string
-  mimeType: string
-}
-
-export async function readFileAsBase64(path: string): Promise<FileBase64> {
-  return invoke<FileBase64>("read_file_as_base64", { path })
-}
-
 export async function createProject(
   name: string,
   path: string,

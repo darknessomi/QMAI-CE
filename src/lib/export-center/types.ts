@@ -2,8 +2,6 @@ export type ExportSource =
   | "chapters"
   | "outlines"
 
-export type ExportFormat = "txt" | "docx"
-
 export interface ExportDocumentBlock {
   title: string
   paragraphs: string[]

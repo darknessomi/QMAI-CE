@@ -139,6 +139,7 @@ pub struct HostApiState {
     /// 当前项目根。生产路径用进程级单例（[`shared_project_context`]），
     /// 这样「前端调 `plugins_set_project`」与「早已起着的 HTTP 服务」看到的是同一份。
     pub project: Arc<project_context::ProjectContext>,
+    credential_app_data_dir: PathBuf,
 }
 
 #[derive(Deserialize)]
@@ -202,6 +203,7 @@ impl HostApiState {
             sessions: Arc::new(Mutex::new(HashMap::new())),
             log_sink: Arc::new(Mutex::new(Vec::new())),
             project: Arc::new(project_context::ProjectContext::new()),
+            credential_app_data_dir: crate::mcp::paths::app_data_dir(),
         }
     }
 
@@ -320,6 +322,7 @@ pub fn shared_state() -> HostApiState {
         sessions: session_store().clone(),
         log_sink: Arc::new(Mutex::new(Vec::new())),
         project: shared_project_context(),
+        credential_app_data_dir: crate::mcp::paths::app_data_dir(),
     }
 }
 
@@ -722,7 +725,7 @@ async fn credential_put(
     if let Err(permission) = require(&session.granted, "net:credential-vault") {
         return forbidden(&permission);
     }
-    let vault = super::credential_vault::CredentialVault::new(&crate::mcp::paths::app_data_dir());
+    let vault = super::credential_vault::CredentialVault::new(&state.credential_app_data_dir);
     match vault.put(&session.plugin_id, &body.secret) {
         // 只回报字节数，绝不回报内容
         Ok(bytes) => Json(serde_json::json!({ "ok": true, "bytes": bytes })).into_response(),
@@ -738,7 +741,7 @@ async fn credential_get(State(state): State<HostApiState>, headers: HeaderMap) -
     if let Err(permission) = require(&session.granted, "net:credential-vault") {
         return forbidden(&permission);
     }
-    let vault = super::credential_vault::CredentialVault::new(&crate::mcp::paths::app_data_dir());
+    let vault = super::credential_vault::CredentialVault::new(&state.credential_app_data_dir);
     match vault.get(&session.plugin_id) {
         Ok(Some(secret)) => Json(serde_json::json!({ "secret": secret })).into_response(),
         Ok(None) => StatusCode::NO_CONTENT.into_response(),
@@ -754,7 +757,7 @@ async fn credential_delete(State(state): State<HostApiState>, headers: HeaderMap
     if let Err(permission) = require(&session.granted, "net:credential-vault") {
         return forbidden(&permission);
     }
-    let vault = super::credential_vault::CredentialVault::new(&crate::mcp::paths::app_data_dir());
+    let vault = super::credential_vault::CredentialVault::new(&state.credential_app_data_dir);
     match vault.clear(&session.plugin_id) {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(error) => error_response(&error),
@@ -1054,6 +1057,15 @@ mod tests {
      * 凭证等价于用户的登录态，串一个就等于冒充。
      */
 
+    fn credential_test_state() -> (tempfile::TempDir, HostApiState) {
+        let app_data = tempfile::tempdir().expect("创建凭证测试目录");
+        let state = HostApiState {
+            credential_app_data_dir: app_data.path().to_path_buf(),
+            ..HostApiState::new()
+        };
+        (app_data, state)
+    }
+
     fn session_for(plugin_id: &str, perms: &[&str]) -> PluginSession {
         PluginSession {
             plugin_id: plugin_id.to_string(),
@@ -1065,7 +1077,8 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn credential_roundtrip_through_http() {
-        let state = HostApiState::new();
+        let (app_data, state) = credential_test_state();
+        let vault = crate::plugins::credential_vault::CredentialVault::new(app_data.path());
         state
             .sessions
             .lock()
@@ -1097,6 +1110,7 @@ mod tests {
         // 只回报字节数，不含内容
         assert!(body["bytes"].as_u64().unwrap() > 0);
         assert!(body.get("secret").is_none());
+        assert!(vault.has("vault-demo"));
 
         // 读回
         let response = client
@@ -1117,6 +1131,7 @@ mod tests {
             .await
             .expect("请求");
         assert_eq!(response.status(), 204);
+        assert!(!vault.has("vault-demo"));
 
         let response = client
             .get(format!("{base}/host/credential"))
@@ -1129,7 +1144,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn credential_requires_the_vault_permission() {
-        let state = HostApiState::new();
+        let (_app_data, state) = credential_test_state();
         // 只给 data:write，没有 net:credential-vault
         state
             .sessions
@@ -1159,7 +1174,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn one_plugin_cannot_read_anothers_credential() {
-        let state = HostApiState::new();
+        let (_app_data, state) = credential_test_state();
         {
             let mut sessions = state.sessions.lock().expect("会话表");
             sessions.insert(
@@ -1175,13 +1190,14 @@ mod tests {
         let client = test_client();
 
         // A 存自己的
-        client
+        let response = client
             .post(format!("{base}/host/credential"))
             .bearer_auth("tok-a")
             .json(&serde_json::json!({ "secret": "token-of-a" }))
             .send()
             .await
             .expect("请求");
+        assert_eq!(response.status(), 200, "A 应先成功写入凭证");
 
         // B 读到的必须是**自己那份**（没存过 → 204），绝不能是 A 的
         let response = client
@@ -1200,7 +1216,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn credential_endpoints_are_registered() {
         // 与书架那条同一条教训：handler 写了但没注册，插件只会看到 404
-        let state = HostApiState::new();
+        let (_app_data, state) = credential_test_state();
         state.sessions.lock().expect("会话表").insert(
             "tok-r".to_string(),
             session_for("registered", &["data:write", "net:credential-vault"]),

@@ -4,14 +4,10 @@ use std::path::Path;
 use std::thread;
 use std::time::Duration;
 
-use calamine::{Reader, open_workbook_auto, Data};
-
 use crate::commands::file_sync;
 use crate::panic_guard::run_guarded;
 use crate::types::wiki::FileNode;
 
-/// Known binary formats that need special extraction
-const OFFICE_EXTS: &[&str] = &["docx", "pptx", "xlsx", "odt", "ods", "odp"];
 const IMAGE_EXTS: &[&str] = &[
     "png", "jpg", "jpeg", "gif", "webp", "bmp", "ico", "tiff", "tif", "avif", "heic", "heif", "svg",
 ];
@@ -19,7 +15,8 @@ const MEDIA_EXTS: &[&str] = &[
     "mp4", "webm", "mov", "avi", "mkv", "flv", "wmv", "m4v",
     "mp3", "wav", "ogg", "flac", "aac", "m4a", "wma",
 ];
-const LEGACY_DOC_EXTS: &[&str] = &["pdf", "doc", "xls", "ppt", "pages", "numbers", "key", "epub"];
+const LEGACY_DOC_EXTS: &[&str] = &["pdf", "pages", "numbers", "key", "epub"];
+const UNSUPPORTED_OFFICE_FILE: &str = "不支持读取 Office 文档。";
 const KNOWLEDGE_DIR: &str = "QM";
 const LEGACY_KNOWLEDGE_DIR: &str = "wiki";
 const META_DIR: &str = ".qmai";
@@ -109,13 +106,15 @@ pub fn do_read_file(path: &str) -> Result<String, String> {
             .unwrap_or("")
             .to_lowercase();
 
+        if is_unsupported_office_ext(&ext) {
+            return Err(UNSUPPORTED_OFFICE_FILE.to_string());
+        }
+
         if let Some(cached) = read_cache(p) {
             return Ok(cached);
         }
 
         match ext.as_str() {
-            e if OFFICE_EXTS.contains(&e) => extract_office_text(&path, e),
-            "doc" => extract_legacy_doc_text(&path),
             e if IMAGE_EXTS.contains(&e) => {
                 let size = fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
                 Ok(format!("[Image: {} ({:.1} KB)]", p.file_name().unwrap_or_default().to_string_lossy(), size as f64 / 1024.0))
@@ -174,39 +173,12 @@ pub async fn read_markdown_batch(paths: Vec<String>) -> Result<Vec<Option<String
     .map_err(|e| format!("批量读取 Markdown 失败：{e}"))?
 }
 
-/// Core logic for `preprocess_file`, callable from both Tauri commands and Axum handlers.
-pub fn do_preprocess_file(path: &str) -> Result<String, String> {
-    run_guarded("preprocess_file", || {
-        let path = resolve_project_storage_path(path);
-        let p = Path::new(&path);
-        let ext = p
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("")
-            .to_lowercase();
-
-        let text = match ext.as_str() {
-            e if OFFICE_EXTS.contains(&e) => extract_office_text(&path, e)?,
-            e if is_plain_text_ext(e) => read_plain_text_file(&path)?,
-            _ => return Ok("no preprocessing needed".to_string()),
-        };
-
-        write_cache(p, &text)?;
-        Ok(text)
-    })
-}
-
-/// Pre-process a file and cache the extracted text.
-#[tauri::command]
-pub async fn preprocess_file(path: String) -> Result<String, String> {
-    let p = path.clone();
-    tauri::async_runtime::spawn_blocking(move || do_preprocess_file(&p))
-        .await
-        .map_err(|e| format!("preprocess_file blocking task join error: {e}"))?
-}
-
 fn is_plain_text_ext(ext: &str) -> bool {
     matches!(ext, "txt" | "md" | "mdx")
+}
+
+pub(super) fn is_unsupported_office_ext(ext: &str) -> bool {
+    matches!(ext, "doc" | "docx" | "xls" | "xlsx" | "ppt" | "pptx" | "odt" | "ods" | "odp" | "rtf")
 }
 
 fn read_plain_text_file(path: &str) -> Result<String, String> {
@@ -263,648 +235,6 @@ fn read_cache(original: &Path) -> Option<String> {
         fs::read_to_string(&cache_path).ok()
     } else {
         None
-    }
-}
-
-fn write_cache(original: &Path, text: &str) -> Result<(), String> {
-    let preferred_path = cache_path_for(original);
-    let cache_path = match preferred_path.parent() {
-        Some(parent) if fs::create_dir_all(parent).is_ok() => preferred_path,
-        _ => {
-            let fallback_path = fallback_cache_path(original);
-            if let Some(parent) = fallback_path.parent() {
-                fs::create_dir_all(parent)
-                    .map_err(|e| format!("Failed to create fallback cache directory: {e}"))?;
-            }
-            fallback_path
-        }
-    };
-    crate::commands::file_sync::mark_app_write_path(&cache_path);
-    fs::write(&cache_path, text)
-        .map_err(|e| format!("Failed to write cache: {}", e))
-}
-
-/// Extract text from Office Open XML formats, converting to Markdown.
-fn extract_office_text(path: &str, ext: &str) -> Result<String, String> {
-    // Spreadsheets: use calamine (supports xlsx, xls, ods)
-    if matches!(ext, "xlsx" | "xls" | "ods") {
-        return extract_spreadsheet(path);
-    }
-
-    // DOCX: use docx-rs library for proper parsing
-    if ext == "docx" {
-        return extract_docx_with_library(path);
-    }
-
-    // PPTX and ODF: use ZIP-based parsing
-    let file = fs::File::open(path)
-        .map_err(|e| format!("Failed to open '{}': {}", path, e))?;
-    let mut archive = zip::ZipArchive::new(file)
-        .map_err(|e| format!("Failed to read ZIP archive '{}': {}", path, e))?;
-
-    match ext {
-        "pptx" => extract_pptx_markdown(&mut archive),
-        "odt" | "odp" => extract_odf_text(&mut archive),
-        _ => Ok("[Unsupported format]".to_string()),
-    }
-}
-
-fn extract_legacy_doc_text(path: &str) -> Result<String, String> {
-    let bytes = read_legacy_doc_payload(path)?;
-    extract_legacy_doc_text_from_bytes(&bytes)
-        .map_err(|e| format!("旧版 .doc 文本提取失败 '{}': {}", path, e))
-}
-
-fn read_legacy_doc_payload(path: &str) -> Result<Vec<u8>, String> {
-    let mut payload = Vec::new();
-
-    if let Ok(mut compound) = cfb::open(path) {
-        for stream_name in ["WordDocument", "0Table", "1Table"] {
-            if let Ok(mut stream) = compound.open_stream(stream_name) {
-                let mut bytes = Vec::new();
-                stream
-                    .read_to_end(&mut bytes)
-                    .map_err(|e| format!("Failed to read .doc stream '{}': {}", stream_name, e))?;
-                payload.extend_from_slice(&bytes);
-                payload.push(b'\n');
-            }
-        }
-        if !payload.is_empty() {
-            return Ok(payload);
-        }
-    }
-
-    fs::read(path).map_err(|e| format!("Failed to read legacy .doc '{}': {}", path, e))
-}
-
-fn extract_legacy_doc_text_from_bytes(bytes: &[u8]) -> Result<String, String> {
-    if bytes.is_empty() {
-        return Err("文件内容为空".to_string());
-    }
-
-    let utf16_le_units: Vec<u16> = bytes
-        .chunks_exact(2)
-        .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
-        .collect();
-    let utf16_be_units: Vec<u16> = bytes
-        .chunks_exact(2)
-        .map(|chunk| u16::from_be_bytes([chunk[0], chunk[1]]))
-        .collect();
-    let (gbk_text, _, _) = encoding_rs::GBK.decode(bytes);
-    let utf8_text = String::from_utf8_lossy(bytes);
-
-    let candidates = [
-        String::from_utf16_lossy(&utf16_le_units),
-        String::from_utf16_lossy(&utf16_be_units),
-        gbk_text.into_owned(),
-        utf8_text.into_owned(),
-    ];
-
-    let mut best = String::new();
-    let mut best_score = 0usize;
-
-    for candidate in candidates {
-        let cleaned = clean_legacy_doc_text(&candidate);
-        let score = legacy_doc_text_score(&cleaned);
-        if score > best_score {
-            best_score = score;
-            best = cleaned;
-        }
-    }
-
-    if best_score == 0 || best.trim().is_empty() {
-        return Err("无法从旧版 .doc 中提取可读文本".to_string());
-    }
-
-    Ok(best)
-}
-
-fn clean_legacy_doc_text(input: &str) -> String {
-    let mut normalized = String::with_capacity(input.len());
-    for ch in input.chars() {
-        if ch == '\r' {
-            normalized.push('\n');
-        } else if ch == '\n' || ch == '\t' {
-            normalized.push(ch);
-        } else if ch.is_control() || ch == '\0' {
-            normalized.push(' ');
-        } else {
-            normalized.push(ch);
-        }
-    }
-
-    let lines: Vec<String> = normalized
-        .lines()
-        .map(|line| line.split_whitespace().collect::<Vec<_>>().join(" "))
-        .map(|line| line.trim().to_string())
-        .filter(|line| !line.is_empty())
-        .collect();
-
-    lines.join("\n")
-}
-
-fn legacy_doc_text_score(input: &str) -> usize {
-    let total = input.chars().count();
-    if total == 0 {
-        return 0;
-    }
-
-    let readable = input
-        .chars()
-        .filter(|ch| {
-            matches!(ch, '\n' | '\t')
-                || ch.is_ascii_alphanumeric()
-                || ('\u{4e00}'..='\u{9fff}').contains(ch)
-                || "，。！？；：、“”‘’（）《》【】—…,.!?;:-_()[] ".contains(*ch)
-        })
-        .count();
-    let replacement_penalty = input.chars().filter(|ch| *ch == '\u{fffd}').count() * 100;
-    let keyword_bonus = ["第", "章", "主角", "正文", "目录", "卷"]
-        .iter()
-        .filter(|keyword| input.contains(**keyword))
-        .count() * 50;
-    let ratio_score = (readable * 1000) / total;
-    ratio_score
-        .saturating_add(readable * 4)
-        .saturating_add(keyword_bonus)
-        .saturating_sub(replacement_penalty)
-}
-
-/// Extract DOCX using docx-rs library for proper structural parsing.
-fn extract_docx_with_library(path: &str) -> Result<String, String> {
-    let bytes = fs::read(path).map_err(|e| format!("Failed to read DOCX '{}': {}", path, e))?;
-    let docx = docx_rs::read_docx(&bytes)
-        .map_err(|e| format!("Failed to parse DOCX '{}': {:?}", path, e))?;
-
-    let mut result = String::new();
-
-    for child in docx.document.children {
-        match child {
-            docx_rs::DocumentChild::Paragraph(para) => {
-                let mut para_text = String::new();
-                let mut is_heading = false;
-                let mut heading_level: u8 = 1;
-
-                // Check paragraph style for headings
-                if let Some(style) = &para.property.style {
-                    let style_val = &style.val;
-                    if style_val.contains("Heading") || style_val.contains("heading") {
-                        is_heading = true;
-                        // Extract level number
-                        for ch in style_val.chars() {
-                            if ch.is_ascii_digit() {
-                                heading_level = ch.to_digit(10).unwrap_or(1) as u8;
-                                break;
-                            }
-                        }
-                    }
-                }
-
-                // Check for list (numbering)
-                let is_list = para.property.numbering_property.is_some();
-
-                // Extract text from runs
-                for child in &para.children {
-                    if let docx_rs::ParagraphChild::Run(run) = child {
-                        let is_bold = run.run_property.bold.is_some();
-                        let is_italic = run.run_property.italic.is_some();
-
-                        for run_child in &run.children {
-                            if let docx_rs::RunChild::Text(text) = run_child {
-                                let t = &text.text;
-                                if is_bold && is_italic {
-                                    para_text.push_str(&format!("***{}***", t));
-                                } else if is_bold {
-                                    para_text.push_str(&format!("**{}**", t));
-                                } else if is_italic {
-                                    para_text.push_str(&format!("*{}*", t));
-                                } else {
-                                    para_text.push_str(t);
-                                }
-                            }
-                        }
-                    }
-                }
-
-                let text = para_text.trim().to_string();
-                if text.is_empty() { continue; }
-
-                if is_heading {
-                    let prefix = "#".repeat(heading_level as usize);
-                    result.push_str(&format!("{} {}\n\n", prefix, text));
-                } else if is_list {
-                    result.push_str(&format!("- {}\n", text));
-                } else {
-                    result.push_str(&text);
-                    result.push_str("\n\n");
-                }
-            }
-            docx_rs::DocumentChild::Table(table) => {
-                let mut rows: Vec<Vec<String>> = Vec::new();
-                for row in &table.rows {
-                    let docx_rs::TableChild::TableRow(tr) = row;
-                    let mut cells: Vec<String> = Vec::new();
-                    for cell in &tr.cells {
-                        let docx_rs::TableRowChild::TableCell(tc) = cell;
-                        let mut cell_text = String::new();
-                        for child in &tc.children {
-                            if let docx_rs::TableCellContent::Paragraph(para) = child {
-                                for pchild in &para.children {
-                                    if let docx_rs::ParagraphChild::Run(run) = pchild {
-                                        for rc in &run.children {
-                                            if let docx_rs::RunChild::Text(t) = rc {
-                                                cell_text.push_str(&t.text);
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        cells.push(cell_text.trim().replace('|', "\\|"));
-                    }
-                    rows.push(cells);
-                }
-                if !rows.is_empty() {
-                    let max_cols = rows.iter().map(|r| r.len()).max().unwrap_or(0);
-                    for (i, row) in rows.iter().enumerate() {
-                        let mut padded = row.clone();
-                        padded.resize(max_cols, String::new());
-                        result.push_str("| ");
-                        result.push_str(&padded.join(" | "));
-                        result.push_str(" |\n");
-                        if i == 0 {
-                            result.push('|');
-                            for _ in 0..max_cols { result.push_str(" --- |"); }
-                            result.push('\n');
-                        }
-                    }
-                    result.push('\n');
-                }
-            }
-            _ => {}
-        }
-    }
-
-    if result.trim().is_empty() {
-        // Fallback to ZIP-based extraction
-        let file = fs::File::open(path).map_err(|e| e.to_string())?;
-        let mut archive = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
-        extract_docx_markdown(&mut archive)
-    } else {
-        Ok(result)
-    }
-}
-
-fn read_zip_file(archive: &mut zip::ZipArchive<fs::File>, name: &str) -> Option<String> {
-    let mut file = archive.by_name(name).ok()?;
-    let mut content = String::new();
-    file.read_to_string(&mut content).ok()?;
-    Some(content)
-}
-
-fn decode_xml_entities(text: &str) -> String {
-    text.replace("&amp;", "&")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&quot;", "\"")
-        .replace("&apos;", "'")
-        .replace("&#10;", "\n")
-        .replace("&#13;", "")
-}
-
-/// Extract DOCX to Markdown preserving headings, paragraphs, lists, tables, bold/italic.
-fn extract_docx_markdown(archive: &mut zip::ZipArchive<fs::File>) -> Result<String, String> {
-    let xml = read_zip_file(archive, "word/document.xml")
-        .ok_or_else(|| "No document.xml found".to_string())?;
-
-    let mut result = String::new();
-    let mut i = 0;
-    let chars: Vec<char> = xml.chars().collect();
-    let len = chars.len();
-
-    let mut paragraph_text = String::new();
-    let mut is_heading = false;
-    let mut heading_level: u8 = 1;
-    let mut is_bold = false;
-    let mut is_italic = false;
-    let mut in_table = false;
-    let mut table_row: Vec<String> = Vec::new();
-    let mut table_cell_text = String::new();
-    let mut in_cell = false;
-    let mut is_first_table_row = true;
-    let mut in_list_item = false;
-
-    while i < len {
-        if chars[i] == '<' {
-            // Read tag name
-            i += 1;
-            let is_closing = i < len && chars[i] == '/';
-            if is_closing { i += 1; }
-
-            let mut tag_name = String::new();
-            while i < len && chars[i] != '>' && chars[i] != ' ' && chars[i] != '/' {
-                tag_name.push(chars[i]);
-                i += 1;
-            }
-
-            // Read rest of tag to find attributes
-            let mut tag_content = String::new();
-            while i < len && chars[i] != '>' {
-                tag_content.push(chars[i]);
-                i += 1;
-            }
-            if i < len { i += 1; } // skip >
-
-            match tag_name.as_str() {
-                // Paragraph start
-                "w:p" if !is_closing => {
-                    paragraph_text.clear();
-                    is_heading = false;
-                    in_list_item = false;
-                }
-                // Paragraph end — flush
-                "w:p" if is_closing => {
-                    let text = paragraph_text.trim().to_string();
-                    if !text.is_empty() {
-                        if in_table && in_cell {
-                            table_cell_text = text;
-                        } else if is_heading {
-                            let prefix = "#".repeat(heading_level as usize);
-                            result.push_str(&format!("{} {}\n\n", prefix, text));
-                        } else if in_list_item {
-                            result.push_str(&format!("- {}\n", text));
-                        } else {
-                            result.push_str(&text);
-                            result.push_str("\n\n");
-                        }
-                    }
-                    paragraph_text.clear();
-                }
-                // Heading style detection
-                "w:pStyle" if !is_closing => {
-                    if tag_content.contains("Heading") || tag_content.contains("heading") {
-                        is_heading = true;
-                        // Try to extract heading level from val="Heading1" etc.
-                        if let Some(pos) = tag_content.find("Heading") {
-                            let after = &tag_content[pos + 7..];
-                            if let Some(ch) = after.chars().next() {
-                                if ch.is_ascii_digit() {
-                                    heading_level = ch.to_digit(10).unwrap_or(1) as u8;
-                                }
-                            }
-                        }
-                    }
-                    if tag_content.contains("ListParagraph") || tag_content.contains("listParagraph") {
-                        in_list_item = true;
-                    }
-                }
-                // Bold
-                "w:b" if !is_closing && !tag_content.contains("w:val=\"0\"") && !tag_content.contains("w:val=\"false\"") => {
-                    is_bold = true;
-                }
-                // Italic
-                "w:i" if !is_closing && !tag_content.contains("w:val=\"0\"") && !tag_content.contains("w:val=\"false\"") => {
-                    is_italic = true;
-                }
-                // Run end — apply formatting
-                "w:r" if is_closing => {
-                    is_bold = false;
-                    is_italic = false;
-                }
-                // Text content
-                "w:t" if !is_closing => {
-                    // Read text until </w:t>
-                    let mut text = String::new();
-                    while i < len {
-                        if chars[i] == '<' {
-                            break;
-                        }
-                        text.push(chars[i]);
-                        i += 1;
-                    }
-                    let decoded = decode_xml_entities(&text);
-                    if is_bold && is_italic {
-                        paragraph_text.push_str(&format!("***{}***", decoded));
-                    } else if is_bold {
-                        paragraph_text.push_str(&format!("**{}**", decoded));
-                    } else if is_italic {
-                        paragraph_text.push_str(&format!("*{}*", decoded));
-                    } else {
-                        paragraph_text.push_str(&decoded);
-                    }
-                }
-                // Table handling
-                "w:tbl" if !is_closing => {
-                    in_table = true;
-                    is_first_table_row = true;
-                }
-                "w:tbl" if is_closing => {
-                    in_table = false;
-                    result.push('\n');
-                }
-                "w:tr" if !is_closing => {
-                    table_row.clear();
-                }
-                "w:tr" if is_closing => {
-                    if !table_row.is_empty() {
-                        result.push_str("| ");
-                        result.push_str(&table_row.join(" | "));
-                        result.push_str(" |\n");
-                        if is_first_table_row {
-                            result.push_str("|");
-                            for _ in &table_row {
-                                result.push_str(" --- |");
-                            }
-                            result.push('\n');
-                            is_first_table_row = false;
-                        }
-                    }
-                }
-                "w:tc" if !is_closing => {
-                    in_cell = true;
-                    table_cell_text.clear();
-                }
-                "w:tc" if is_closing => {
-                    table_row.push(table_cell_text.trim().to_string());
-                    in_cell = false;
-                    table_cell_text.clear();
-                }
-                _ => {}
-            }
-        } else {
-            i += 1;
-        }
-    }
-
-    if result.trim().is_empty() {
-        Ok("[Could not extract structured text from DOCX]".to_string())
-    } else {
-        Ok(result)
-    }
-}
-
-/// Extract PPTX to Markdown with slide numbers and structure.
-fn extract_pptx_markdown(archive: &mut zip::ZipArchive<fs::File>) -> Result<String, String> {
-    let mut slide_names: Vec<String> = (0..archive.len())
-        .filter_map(|i| archive.by_index(i).ok().map(|f| f.name().to_string()))
-        .filter(|n| n.starts_with("ppt/slides/slide") && n.ends_with(".xml"))
-        .collect();
-
-    // Sort by slide number
-    slide_names.sort_by(|a, b| {
-        let num_a = a.trim_start_matches("ppt/slides/slide").trim_end_matches(".xml").parse::<u32>().unwrap_or(0);
-        let num_b = b.trim_start_matches("ppt/slides/slide").trim_end_matches(".xml").parse::<u32>().unwrap_or(0);
-        num_a.cmp(&num_b)
-    });
-
-    let mut result = String::new();
-
-    for (idx, slide_name) in slide_names.iter().enumerate() {
-        let xml = match read_zip_file(archive, slide_name) {
-            Some(x) => x,
-            None => continue,
-        };
-
-        result.push_str(&format!("## Slide {}\n\n", idx + 1));
-
-        // Extract text from <a:t>...</a:t> tags, group by <a:p>...</a:p> paragraphs
-        // Use string split approach to avoid byte/char index mismatch with CJK characters
-        let mut paragraphs: Vec<String> = Vec::new();
-
-        for para_part in xml.split("<a:p") {
-            let mut para_text = String::new();
-            for t_part in para_part.split("<a:t") {
-                if let Some(close_pos) = t_part.find("</a:t>") {
-                    if let Some(gt_pos) = t_part.find('>') {
-                        if gt_pos < close_pos {
-                            let text = &t_part[gt_pos + 1..close_pos];
-                            para_text.push_str(&decode_xml_entities(text));
-                        }
-                    }
-                }
-            }
-            let trimmed = para_text.trim().to_string();
-            if !trimmed.is_empty() {
-                paragraphs.push(trimmed);
-            }
-        }
-
-        // First paragraph is usually the slide title
-        if let Some(title) = paragraphs.first() {
-            result.push_str(&format!("**{}**\n\n", title));
-            for para in paragraphs.iter().skip(1) {
-                result.push_str(&format!("- {}\n", para));
-            }
-        }
-        result.push('\n');
-    }
-
-    if result.trim().is_empty() {
-        Ok("[Could not extract text from PPTX]".to_string())
-    } else {
-        Ok(result)
-    }
-}
-
-/// Extract spreadsheet to Markdown using calamine (supports xlsx, xls, ods).
-fn extract_spreadsheet(path: &str) -> Result<String, String> {
-    let mut workbook = open_workbook_auto(path)
-        .map_err(|e| format!("Failed to open spreadsheet '{}': {}", path, e))?;
-
-    let mut result = String::new();
-    let sheet_names = workbook.sheet_names().to_vec();
-
-    for sheet_name in &sheet_names {
-        if let Ok(range) = workbook.worksheet_range(sheet_name) {
-            if range.is_empty() { continue; }
-
-            if sheet_names.len() > 1 {
-                result.push_str(&format!("## {}\n\n", sheet_name));
-            }
-
-            let mut rows: Vec<Vec<String>> = Vec::new();
-            let mut max_cols = 0;
-
-            for row in range.rows() {
-                let cells: Vec<String> = row.iter().map(|cell| {
-                    match cell {
-                        Data::Empty => String::new(),
-                        Data::String(s) => s.clone(),
-                        Data::Float(f) => {
-                            if *f == (*f as i64) as f64 {
-                                format!("{}", *f as i64)
-                            } else {
-                                format!("{:.2}", f)
-                            }
-                        }
-                        Data::Int(i) => i.to_string(),
-                        Data::Bool(b) => b.to_string(),
-                        Data::DateTime(dt) => format!("{}", dt),
-                        Data::DateTimeIso(s) => s.clone(),
-                        Data::DurationIso(s) => s.clone(),
-                        Data::Error(e) => format!("ERR:{:?}", e),
-                    }
-                }).collect();
-                if cells.len() > max_cols { max_cols = cells.len(); }
-                rows.push(cells);
-            }
-
-            // Skip empty sheets
-            if rows.is_empty() || max_cols == 0 { continue; }
-
-            for (i, row) in rows.iter().enumerate() {
-                let mut padded = row.clone();
-                padded.resize(max_cols, String::new());
-                // Escape pipe characters in cell values
-                let escaped: Vec<String> = padded.iter().map(|c| c.replace('|', "\\|")).collect();
-                result.push_str("| ");
-                result.push_str(&escaped.join(" | "));
-                result.push_str(" |\n");
-
-                if i == 0 {
-                    result.push('|');
-                    for _ in 0..max_cols { result.push_str(" --- |"); }
-                    result.push('\n');
-                }
-            }
-            result.push('\n');
-        }
-    }
-
-    if result.trim().is_empty() {
-        Ok("[Could not extract data from spreadsheet]".to_string())
-    } else {
-        Ok(result)
-    }
-}
-
-/// Extract OpenDocument format text (basic).
-fn extract_odf_text(archive: &mut zip::ZipArchive<fs::File>) -> Result<String, String> {
-    let xml = read_zip_file(archive, "content.xml")
-        .ok_or_else(|| "No content.xml found".to_string())?;
-
-    let mut result = String::new();
-    let mut in_tag = false;
-
-    for ch in xml.chars() {
-        match ch {
-            '<' => in_tag = true,
-            '>' => {
-                in_tag = false;
-                result.push(' ');
-            }
-            _ if !in_tag => result.push(ch),
-            _ => {}
-        }
-    }
-
-    let cleaned = decode_xml_entities(&result);
-    let lines: Vec<&str> = cleaned.lines().map(|l| l.trim()).filter(|l| !l.is_empty()).collect();
-
-    if lines.is_empty() {
-        Ok("[Could not extract text from this file]".to_string())
-    } else {
-        Ok(lines.join("\n\n"))
     }
 }
 
@@ -1050,7 +380,7 @@ where
     })
 }
 
-/// Write export payloads as exact bytes so ZIP-based DOCX files are not UTF-8 re-encoded.
+/// Write export payloads as exact bytes.
 pub fn do_write_export_file(path: &str, bytes: &[u8]) -> Result<(), String> {
     do_write_export_file_with_replace(path, bytes, replace_export_file_atomically)
 }
@@ -1602,64 +932,6 @@ pub async fn create_directory(path: String) -> Result<(), String> {
         .map_err(|e| format!("create_directory blocking task join error: {e}"))?
 }
 
-/// Read any file as base64 + a guessed mime type. Used by the
-/// vision-caption pipeline to slurp extracted image bytes off disk
-/// without round-tripping them through the JS string-as-UTF8 path
-/// (`read_file` would corrupt PNG bytes — they aren't valid UTF-8).
-///
-/// Mime detection is by extension only — the caption helper doesn't
-/// care about exact accuracy (vision models accept any common
-/// raster format), and the alternative (sniffing magic bytes via
-/// `infer` or similar) adds a dependency for marginal benefit.
-/// Unknown extensions fall back to `application/octet-stream`,
-/// which all major vision endpoints accept (Anthropic / OpenAI both
-/// also support that as a generic fallback).
-#[derive(serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct FileBase64 {
-    pub base64: String,
-    pub mime_type: String,
-}
-
-/// Core logic for `read_file_as_base64`, callable from both Tauri commands and Axum handlers.
-pub fn do_read_file_as_base64(path: &str) -> Result<FileBase64, String> {
-    use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
-    run_guarded("read_file_as_base64", || {
-        let path = resolve_project_storage_path(path);
-        let bytes = fs::read(&path)
-            .map_err(|e| format!("Failed to read '{}': {}", path, e))?;
-        let p = Path::new(&path);
-        let ext = p
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("")
-            .to_ascii_lowercase();
-        let mime_type = match ext.as_str() {
-            "png" => "image/png",
-            "jpg" | "jpeg" => "image/jpeg",
-            "gif" => "image/gif",
-            "webp" => "image/webp",
-            "bmp" => "image/bmp",
-            "tiff" | "tif" => "image/tiff",
-            "svg" => "image/svg+xml",
-            _ => "application/octet-stream",
-        }
-        .to_string();
-        Ok(FileBase64 {
-            base64: B64.encode(&bytes),
-            mime_type,
-        })
-    })
-}
-
-#[tauri::command]
-pub async fn read_file_as_base64(path: String) -> Result<FileBase64, String> {
-    let p = path.clone();
-    tauri::async_runtime::spawn_blocking(move || do_read_file_as_base64(&p))
-        .await
-        .map_err(|e| format!("read_file_as_base64 blocking task join error: {e}"))?
-}
-
 /// Core logic for `file_exists`, callable from both Tauri commands and Axum handlers.
 /// Cheap existence check without reading or classifying the file.
 /// Returns true iff `path` refers to something on disk right now.
@@ -1885,13 +1157,13 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         ));
-        let path = root.join("wiki").join(LEGACY_META_DIR).join("export.docx");
+        let path = root.join("wiki").join(LEGACY_META_DIR).join("export.txt");
         fs::create_dir_all(path.parent().unwrap()).unwrap();
 
         do_write_export_file(&path.to_string_lossy(), b"exact-path").unwrap();
 
         assert_eq!(fs::read(&path).unwrap(), b"exact-path");
-        assert!(!root.join("QM").join(".qmai").join("export.docx").exists());
+        assert!(!root.join("QM").join(".qmai").join("export.txt").exists());
         let _ = fs::remove_dir_all(root);
     }
 
@@ -1905,7 +1177,7 @@ mod tests {
                 .as_nanos()
         ));
         fs::create_dir_all(&root).unwrap();
-        let path = root.join("export.docx");
+        let path = root.join("export.txt");
         fs::write(&path, b"old-content").unwrap();
 
         do_write_export_file(&path.to_string_lossy(), b"new-content").unwrap();
@@ -1930,7 +1202,7 @@ mod tests {
                 .as_nanos()
         ));
         fs::create_dir_all(&root).unwrap();
-        let path = root.join("export.docx");
+        let path = root.join("export.txt");
         fs::write(&path, b"old-content").unwrap();
 
         let result = do_write_export_file_with_replace(
@@ -1953,7 +1225,7 @@ mod tests {
     #[test]
     fn write_export_file_preserves_binary_bytes() {
         let path = std::env::temp_dir().join(format!(
-            "qmai-export-center-{}.docx",
+            "qmai-export-center-{}.bin",
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
@@ -1977,7 +1249,7 @@ mod tests {
     #[test]
     fn write_export_file_decodes_base64_before_writing() {
         let path = std::env::temp_dir().join(format!(
-            "qmai-export-center-base64-{}.docx",
+            "qmai-export-center-base64-{}.bin",
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
@@ -1998,16 +1270,6 @@ mod tests {
 
         assert!(decoded.contains("第1章 税银案"));
         assert!(decoded.contains("许七安醒来"));
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn preprocess_file_returns_text_content_for_txt_books() {
-        let path = tmp_text_with_bytes("txt", "第1章 税银案\n正文".as_bytes());
-        let result = preprocess_file(path.clone()).await.unwrap();
-        let _ = fs::remove_file(&path);
-
-        assert!(result.contains("第1章 税银案"));
-        assert_ne!(result, "no preprocessing needed");
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -2387,17 +1649,44 @@ mod tests {
     }
 
     #[test]
-    fn legacy_doc_best_effort_extracts_utf16_text() {
-        let mut bytes = Vec::new();
-        for unit in "第一章 危机降临\n主角立刻行动".encode_utf16() {
-            bytes.extend_from_slice(&unit.to_le_bytes());
+    fn read_file_uses_fresh_legacy_text_cache_and_ignores_stale_cache() {
+        let root = tempfile::tempdir().unwrap();
+        let source = tempfile::Builder::new().suffix(".txt").tempfile_in(root.path()).unwrap();
+        let path = source.path();
+        let (gbk, _, _) = encoding_rs::GBK.encode("原文");
+        fs::write(path, gbk).unwrap();
+        let read = || do_read_file(path.to_str().unwrap()).unwrap();
+        assert_eq!(read(), "原文");
+
+        let cache_dir = root.path().join(".cache");
+        assert!(!cache_dir.exists());
+        fs::create_dir(&cache_dir).unwrap();
+        let cache = cache_dir.join(format!("{}.txt", path.file_name().unwrap().to_str().unwrap()));
+        fs::write(&cache, "历史缓存").unwrap();
+        assert_eq!(read(), "历史缓存");
+
+        fs::File::options().write(true).open(&cache).unwrap()
+            .set_modified(std::time::UNIX_EPOCH + Duration::from_secs(86_400)).unwrap();
+        assert_eq!(read(), "原文");
+    }
+
+    #[test]
+    fn office_files_are_rejected_even_with_previously_cached_text() {
+        let root = tempfile::tempdir().unwrap();
+        let cache_dir = root.path().join(".cache");
+        fs::create_dir(&cache_dir).unwrap();
+        for filename in [
+            "chapter.DOC", "chapter.docx", "sheet.xls", "sheet.xlsx", "slides.ppt",
+            "slides.pptx", "outline.odt", "sheet.ods", "slides.odp", "outline.rtf",
+        ] {
+            let path = root.path().join(filename);
+            fs::write(&path, b"old document").unwrap();
+            fs::write(cache_dir.join(format!("{filename}.txt")), "旧版提取的正文").unwrap();
+            assert_eq!(read_cache(&path).as_deref(), Some("旧版提取的正文"));
+
+            let path = path.to_str().unwrap();
+            assert_eq!(do_read_file(path).unwrap_err(), UNSUPPORTED_OFFICE_FILE);
         }
-
-        let extracted = extract_legacy_doc_text_from_bytes(&bytes)
-            .expect("legacy doc text should be extracted");
-
-        assert!(extracted.contains("第一章 危机降临"), "{extracted}");
-        assert!(extracted.contains("主角立刻行动"), "{extracted}");
     }
 }
 

@@ -283,6 +283,7 @@ fn filter_app_state(
     let object = value
         .as_object_mut()
         .ok_or_else(|| "app-state.json 格式错误，应为 JSON 对象".to_string())?;
+    object.remove(app_state::LEGACY_IMAGE_CAPTION_KEY);
     object.retain(|key, _| {
         if UI_PREFERENCE_KEYS.contains(&key.as_str()) {
             include_ui_preferences
@@ -410,16 +411,20 @@ fn merge_app_state_file(
     imported: serde_json::Value,
     replace: bool,
 ) -> Result<serde_json::Value, String> {
-    if replace || !app_state_path.exists() {
-        return Ok(imported);
+    let mut merged = if replace || !app_state_path.exists() {
+        imported
+    } else {
+        let existing_content = fs::read_to_string(app_state_path)
+            .map_err(|error| format!("读取当前 app-state.json 失败: {error}"))?;
+        let mut existing = serde_json::from_str(&existing_content)
+            .map_err(|error| format!("解析当前 app-state.json 失败: {error}"))?;
+        deep_merge_json(&mut existing, imported);
+        existing
+    };
+    if let Some(object) = merged.as_object_mut() {
+        object.remove(app_state::LEGACY_IMAGE_CAPTION_KEY);
     }
-
-    let existing_content = fs::read_to_string(app_state_path)
-        .map_err(|error| format!("读取当前 app-state.json 失败: {error}"))?;
-    let mut existing: serde_json::Value = serde_json::from_str(&existing_content)
-        .map_err(|error| format!("解析当前 app-state.json 失败: {error}"))?;
-    deep_merge_json(&mut existing, imported);
-    Ok(existing)
+    Ok(merged)
 }
 
 fn emit_progress(
@@ -729,17 +734,23 @@ fn parse_project_registry(value: &serde_json::Value) -> Vec<RegistryProject> {
     entries
 }
 
+fn backup_entry_names(archive: &zip::ZipArchive<fs::File>) -> Result<Vec<String>, String> {
+    archive
+        .file_names()
+        .map(|name| name.map(String::from))
+        .collect::<Result<_, _>>()
+        .map_err(|e| format!("读取备份文件条目名失败: {e}"))
+}
+
 /// zip 里**确实带数据**的项目 id 集合（看 `projects/<id>/...` 条目）。
 ///
 /// 用途与必要性：备份可能只带了某个项目的部分数据，甚至完全没带它的文件。
 /// 若照着 registry 去恢复一个 zip 里根本没有的项目，`extract_dir_from_zip`
 /// 会"成功恢复 0 个文件"却建出一个空项目目录，书架随后显示一个打不开的书。
 /// 所以只有出现在这个集合里的 id 才允许被纳入恢复计划。
-fn project_ids_in_archive(
-    archive: &zip::ZipArchive<fs::File>,
-) -> std::collections::HashSet<String> {
-    archive
-        .file_names()
+fn project_ids_in_archive(entry_names: &[String]) -> std::collections::HashSet<String> {
+    entry_names
+        .iter()
         .filter_map(|name| name.strip_prefix("projects/"))
         .filter_map(|rest| rest.split('/').next())
         .filter(|id| !id.is_empty())
@@ -765,22 +776,18 @@ fn extract_file_from_zip(
 
 fn extract_dir_from_zip(
     archive: &mut zip::ZipArchive<fs::File>,
+    entry_names: &[String],
     zip_prefix: &str,
     target_dir: &Path,
 ) -> Result<usize, String> {
     let mut count = 0;
-    let names: Vec<String> = archive
-        .file_names()
-        .filter(|n| n.starts_with(zip_prefix))
-        .map(|n| n.to_string())
-        .collect();
 
     // Zip Slip 防护：在循环外只调用一次 canonicalize，避免性能开销和 TOCTOU 风险
     let canonical_target = target_dir
         .canonicalize()
         .map_err(|e| format!("无法解析目标目录: {e}"))?;
 
-    for name in names {
+    for name in entry_names.iter().filter(|name| name.starts_with(zip_prefix)) {
         let relative = &name[zip_prefix.len()..];
         let relative = relative.trim_start_matches('/');
         if relative.is_empty() || is_retired_project_entry(relative) {
@@ -827,7 +834,7 @@ fn extract_dir_from_zip(
         }
 
         let mut file = archive
-            .by_name(&name)
+            .by_name(name)
             .map_err(|e| format!("打开 zip 内文件 {} 失败: {e}", name))?;
         let mut buf = Vec::new();
         std::io::Read::read_to_end(&mut file, &mut buf)
@@ -1348,6 +1355,7 @@ pub fn do_import_backup<F: Fn(&BackupProgressPayload)>(
     let file = fs::File::open(zip_path).map_err(|e| format!("打开备份文件失败: {e}"))?;
     let mut archive =
         zip::ZipArchive::new(file).map_err(|e| format!("读取备份文件失败，可能已损坏: {e}"))?;
+    let entry_names = backup_entry_names(&archive)?;
 
     let mut warnings: Vec<String> = Vec::new();
     let mut app_state: Option<serde_json::Value> = None;
@@ -1509,7 +1517,7 @@ pub fn do_import_backup<F: Fn(&BackupProgressPayload)>(
                  *
                  * 同时保留 manifest 优先：它带 sections，知道哪些数据该恢复。
                  */
-                let archive_ids = project_ids_in_archive(&archive);
+                let archive_ids = project_ids_in_archive(&entry_names);
                 for entry in &registry_projects {
                     if planned.iter().any(|(id, _, _)| id == &entry.id) {
                         continue;
@@ -1599,7 +1607,7 @@ pub fn do_import_backup<F: Fn(&BackupProgressPayload)>(
             fs::create_dir_all(target)
                 .map_err(|e| format!("创建项目目录失败 {}: {e}", target.display()))?;
 
-            match extract_dir_from_zip(&mut archive, &zip_prefix, target) {
+            match extract_dir_from_zip(&mut archive, &entry_names, &zip_prefix, target) {
                 Ok(_count) => {
                     project_results.push(ProjectRestoreResult {
                         id: project_id.clone(),
@@ -1684,6 +1692,7 @@ pub fn do_read_backup_manifest(zip_path: &Path) -> Result<BackupManifestPreview,
     let file = fs::File::open(zip_path).map_err(|e| format!("打开备份文件失败: {e}"))?;
     let mut archive =
         zip::ZipArchive::new(file).map_err(|e| format!("读取备份文件失败，可能已损坏: {e}"))?;
+    let entry_names = backup_entry_names(&archive)?;
 
     let manifest_bytes = extract_file_from_zip(&mut archive, "manifest.json")?
         .ok_or_else(|| "备份文件缺少 manifest.json".to_string())?;
@@ -1713,7 +1722,7 @@ pub fn do_read_backup_manifest(zip_path: &Path) -> Result<BackupManifestPreview,
     // 与导入端同源：registry 里记录、zip 里确有数据、但清单未列出的项目要补进来。
     if let Some(bytes) = extract_file_from_zip(&mut archive, "project-registry.json")? {
         if let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) {
-            let archive_ids = project_ids_in_archive(&archive);
+            let archive_ids = project_ids_in_archive(&entry_names);
             for entry in parse_project_registry(&value) {
                 if projects.iter().any(|p| p.id == entry.id) || !archive_ids.contains(&entry.id) {
                     continue;
@@ -1917,6 +1926,7 @@ mod tests {
             assert_eq!(result.file_count, archive.len());
             assert!(archive
                 .file_names()
+                .map(Result::unwrap)
                 .all(|n| !n.ends_with(".bin") && !n.ends_with(".enc")));
             drop(archive);
             let entry: serde_json::Value =
@@ -1961,6 +1971,7 @@ mod tests {
         assert!(!zip::ZipArchive::new(fs::File::open(&zip).unwrap())
             .unwrap()
             .file_names()
+            .map(Result::unwrap)
             .any(|n| n == JEV_ENTRY));
         assert!(!import(ImportStrategy::Full).jev_config_restored);
     }
@@ -2034,7 +2045,10 @@ mod tests {
             &mut count, &mut Vec::new()).unwrap();
         zip.finish().unwrap();
         let mut reader = zip::ZipArchive::new(fs::File::open(&bundle).unwrap()).unwrap();
-        assert!(reader.file_names().all(|name| !name.ends_with("-wal") && !name.ends_with("-shm")));
+        assert!(reader
+            .file_names()
+            .map(Result::unwrap)
+            .all(|name| !name.ends_with("-wal") && !name.ends_with("-shm")));
         let mut entry = reader.by_name(".qmai/sag/index-v10.sqlite").unwrap();
         let snapshot = temp.path().join("restored.sqlite");
         std::io::copy(&mut entry, &mut fs::File::create(&snapshot).unwrap()).unwrap();
@@ -2120,7 +2134,7 @@ mod tests {
 
         let file = std::fs::File::open(&zip_path).unwrap();
         let archive = zip::ZipArchive::new(file).unwrap();
-        let names: Vec<String> = archive.file_names().map(str::to_string).collect();
+        let names = backup_entry_names(&archive).unwrap();
         assert!(names
             .iter()
             .any(|name| name == "projects/p1/QM/chapters/chapter-1.md"));
@@ -2181,7 +2195,7 @@ mod tests {
 
         let file = std::fs::File::open(&zip_path).unwrap();
         let archive = zip::ZipArchive::new(file).unwrap();
-        let names: Vec<String> = archive.file_names().map(str::to_string).collect();
+        let names = backup_entry_names(&archive).unwrap();
         assert!(names
             .iter()
             .any(|name| name == "projects/p1/QM/memory/canon-facts.md"));
@@ -2274,8 +2288,8 @@ mod tests {
         assert!(rerank.get("apiKey").is_none());
 
         let archive = zip::ZipArchive::new(std::fs::File::open(&zip_path).unwrap()).unwrap();
-        let names: Vec<_> = archive.file_names().collect();
-        assert!(names.contains(&"projects/p1/.qmai/chat.json"));
+        let names = backup_entry_names(&archive).unwrap();
+        assert!(names.iter().any(|name| name == "projects/p1/.qmai/chat.json"));
         assert!(!names.iter().any(|name| name.contains("/simulations/")));
         assert!(!names.iter().any(|name| name.ends_with("/character-aura.json")));
         assert!(!names.iter().any(|name| name.contains("/book-analysis/")));
@@ -2559,6 +2573,7 @@ mod tests {
         let archive = zip::ZipArchive::new(file).unwrap();
         let total_entries = archive
             .file_names()
+            .map(Result::unwrap)
             .filter(|name| !name.ends_with('/'))
             .count();
         assert_eq!(
@@ -2625,7 +2640,7 @@ mod tests {
         let names: Vec<String> = {
             let file = std::fs::File::open(&target).unwrap();
             let archive = zip::ZipArchive::new(file).unwrap();
-            archive.file_names().map(str::to_string).collect()
+            backup_entry_names(&archive).unwrap()
         };
         for name in EXPECTED_OWNED_FILES {
             let expected = format!("projects/p1/.qmai/{name}");
@@ -2932,12 +2947,24 @@ mod tests {
         let names: Vec<String> = {
             let file = std::fs::File::open(&target).unwrap();
             let archive = zip::ZipArchive::new(file).unwrap();
-            archive.file_names().map(str::to_string).collect()
+            backup_entry_names(&archive).unwrap()
         };
         assert!(
             names.iter().any(|n| n.ends_with("/chapter.md")),
             "同一本书里能读的文件必须照常备份：{names:?}"
         );
+    }
+
+    #[test]
+    fn backups_omit_retired_image_caption_settings_on_export_and_restore() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("app-state.json");
+        let legacy = serde_json::json!({"theme": "dark", "multimodalConfig": {"__qmaiEnc": "old"}});
+        let current = serde_json::json!({"theme": "dark"});
+        assert_eq!(filter_app_state(legacy.clone(), true, true, true).unwrap(), current);
+        fs::write(&path, legacy.to_string()).unwrap();
+        assert_eq!(merge_app_state_file(&path, current.clone(), false).unwrap(), current);
+        assert_eq!(merge_app_state_file(&path, legacy, true).unwrap(), current);
     }
 
     /// D4：正文字体与排版属于「界面与软件偏好」，不属于「模型与 AI 配置」。
@@ -3177,7 +3204,8 @@ mod tests {
         let target = tmp.join("target");
         std::fs::create_dir_all(&target).unwrap();
         let mut archive = zip::ZipArchive::new(std::fs::File::open(&zip_path).unwrap()).unwrap();
-        let result = extract_dir_from_zip(&mut archive, "prefix/", &target);
+        let entry_names = backup_entry_names(&archive).unwrap();
+        let result = extract_dir_from_zip(&mut archive, &entry_names, "prefix/", &target);
         assert!(result.is_err(), "应拒绝路径遍历条目");
         let err = result.unwrap_err();
         assert!(err.contains("安全拦截"), "错误信息应包含安全拦截: {}", err);
@@ -3214,7 +3242,8 @@ mod tests {
         let target = tmp.join("target");
         std::fs::create_dir_all(&target).unwrap();
         let mut archive = zip::ZipArchive::new(std::fs::File::open(&zip_path).unwrap()).unwrap();
-        let count = extract_dir_from_zip(&mut archive, "prefix/", &target).unwrap();
+        let entry_names = backup_entry_names(&archive).unwrap();
+        let count = extract_dir_from_zip(&mut archive, &entry_names, "prefix/", &target).unwrap();
         assert_eq!(count, 2);
         assert!(target.join("chapter1.md").exists());
         assert!(target.join("sub/chapter2.md").exists());
@@ -3256,6 +3285,7 @@ mod tests {
         let archive = zip::ZipArchive::new(file).unwrap();
         assert!(archive
             .file_names()
+            .map(Result::unwrap)
             .any(|name| name == "projects/p1/.trash/deleted.md"));
     }
 

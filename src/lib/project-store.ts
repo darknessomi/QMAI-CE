@@ -2,7 +2,7 @@ import { getStore } from "@/lib/web-store"
 import { loadModelConfigsEncrypted, saveModelConfigsEncrypted } from "@/lib/local-secret"
 import { normalizeUiTestSkin, readUiTestSkin, writeUiTestSkin, type UiTestSkin } from "@/lib/ui-test"
 import type { WikiProject } from "@/types/wiki"
-import type { LlmConfig, SearchApiConfig, MultimodalConfig, OutputLanguage, ProviderConfigs, ProxyConfig, SourceWatchConfig, NovelConfig } from "@/stores/wiki-store"
+import type { LlmConfig, SearchApiConfig, OutputLanguage, ProviderConfigs, ProxyConfig, SourceWatchConfig, NovelConfig } from "@/stores/wiki-store"
 import { DEFAULT_NOVEL_CONFIG } from "@/stores/wiki-store"
 import { normalizeSourceWatchConfig } from "@/lib/source-watch-config"
 import {
@@ -432,13 +432,6 @@ export async function saveSearchApiConfig(config: SearchApiConfig): Promise<void
 export async function loadSearchApiConfig(): Promise<SearchApiConfig | null> {
   const store = await getStore()
   return (await store.get<SearchApiConfig>(SEARCH_API_KEY)) ?? null
-}
-
-const MULTIMODAL_KEY = "multimodalConfig"
-
-export async function saveMultimodalConfig(config: MultimodalConfig): Promise<void> {
-  const store = await getStore()
-  await store.set(MULTIMODAL_KEY, config)
 }
 
 // IMPORTANT: Keep this key in sync with the Rust setup hook

@@ -341,7 +341,7 @@ export function SearchView({ onClose, onOpenFile }: SearchViewProps) {
 
   /**
    * Lightbox jump-to-source: open the ORIGINAL raw source file
-   * (the DOCX / PPTX in `raw/sources/`), not the LLM-
+   * (a file in `raw/sources/`), not the LLM-
    * summarized `wiki/sources/<slug>.md`. The wiki summary is
    * abbreviated by design 鈥?the user's mental model when they
    * click a search-result image is "show me where this came

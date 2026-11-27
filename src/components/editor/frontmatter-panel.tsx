@@ -284,11 +284,8 @@ function RelatedChip({
 function iconForSource(name: string) {
   const ext = name.split(".").pop()?.toLowerCase() ?? ""
   switch (ext) {
-    case "xlsx":
-    case "xls":
     case "csv":
     case "tsv":
-    case "ods":
       return FileSpreadsheet
     case "json":
     case "jsonl":
@@ -332,14 +329,9 @@ function iconForSource(name: string) {
     case "md":
     case "mdx":
     case "txt":
-    case "rtf":
     case "html":
     case "htm":
     case "xml":
-    case "docx":
-    case "doc":
-    case "pptx":
-    case "ppt":
       return FileTextIcon
     default:
       return FileIcon

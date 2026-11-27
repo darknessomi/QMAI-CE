@@ -15,7 +15,6 @@ beforeEach(() => {
     pendingReferenceTokens: [],
     pendingComposerSend: null,
     mode: "chat",
-    ingestSource: null,
     maxHistoryMessages: 20,
   })
 

@@ -106,7 +106,6 @@ describe("出场物品进入写作提示词", () => {
           .filter((path) => path.startsWith(`${normalized}/`))
           .map((path) => ({ name: path.slice(normalized.length + 1), path, isDirectory: false }))
       }),
-      readFileAsBase64: vi.fn(),
     }))
     // 其它检索类数据源会经过这个模块；给出空结果，避免无关源报缺失导出。
     vi.doMock("@/lib/search", () => ({

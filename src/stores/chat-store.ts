@@ -104,7 +104,6 @@ interface ChatState {
   /** 待 AI 对话自取的发送请求（见 PendingComposerSend）。只存内存，不落盘。 */
   pendingComposerSend: PendingComposerSend | null
   mode: "chat" | "ingest"
-  ingestSource: string | null
   maxHistoryMessages: number
 
   // Conversation management
@@ -146,7 +145,6 @@ interface ChatState {
   /** 停止指定会话的流式生成（不保存内容，仅清理状态） */
   clearStreaming: (conversationId: string) => void
   setMode: (mode: ChatState["mode"]) => void
-  setIngestSource: (path: string | null) => void
   clearMessages: () => void
   setMaxHistoryMessages: (n: number) => void
   removeLastAssistantMessage: () => void  // for regenerate: remove last assistant reply
@@ -186,7 +184,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
   pendingReferenceTokens: [],
   pendingComposerSend: null,
   mode: "chat",
-  ingestSource: null,
   maxHistoryMessages: 20,
 
   createConversation: () => {
@@ -446,7 +443,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   setMode: (mode) => set({ mode }),
 
-  setIngestSource: (ingestSource) => set({ ingestSource }),
 
   clearMessages: () =>
     set((state) => ({

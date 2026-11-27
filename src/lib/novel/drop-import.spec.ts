@@ -90,24 +90,21 @@ describe("isDropInsideList", () => {
 describe("filterDroppablePaths", () => {
   it("章节只接受章节文档扩展名", () => {
     expect(filterDroppablePaths(
-      ["E:/a/第1章.md", "E:/a/第2章.txt", "E:/a/封面.png", "E:/a/资料.pdf"],
+      ["E:/a/第1章.md", "E:/a/第2章.txt", "E:/a/第3章.doc", "E:/a/第4章.docx", "E:/a/封面.png", "E:/a/资料.pdf"],
       "chapter",
     )).toEqual(["E:/a/第1章.md", "E:/a/第2章.txt"])
   })
 
-  it("大纲接受大纲的文档扩展名", () => {
-    const kept = filterDroppablePaths(
-      ["E:/a/主线.md", "E:/a/设定.docx", "E:/a/图.png", "E:/a/表.xlsx"],
+  it("大纲保留文本格式并过滤 Office 文件", () => {
+    expect(filterDroppablePaths(
+      ["E:/a/主线.md", "E:/a/设定.docx", "E:/a/图.png", "E:/a/表.xlsx", "E:/a/幻灯片.pptx", "E:/a/大纲.odt", "E:/a/时间表.csv"],
       "outline",
-    )
-    expect(kept).toContain("E:/a/主线.md")
-    expect(kept).toContain("E:/a/设定.docx")
-    expect(kept).not.toContain("E:/a/图.png")
+    )).toEqual(["E:/a/主线.md", "E:/a/时间表.csv"])
   })
 
   it("扩展名大小写不敏感", () => {
-    expect(filterDroppablePaths(["E:/a/第1章.MD", "E:/a/第2章.DocX"], "chapter"))
-      .toEqual(["E:/a/第1章.MD", "E:/a/第2章.DocX"])
+    expect(filterDroppablePaths(["E:/a/第1章.MD", "E:/a/第2章.Txt", "E:/a/第3章.DocX"], "chapter"))
+      .toEqual(["E:/a/第1章.MD", "E:/a/第2章.Txt"])
   })
 
   it("点开头的隐藏文件被挡掉", () => {

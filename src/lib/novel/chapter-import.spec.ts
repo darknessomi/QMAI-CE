@@ -33,15 +33,15 @@ describe("chapter import", () => {
 
   it("extracts Arabic and Chinese chapter numbers from file names", () => {
     expect(extractImportedChapterNumber("第1章 开局.txt")).toBe(1)
-    expect(extractImportedChapterNumber("第十章 真相.docx")).toBe(10)
+    expect(extractImportedChapterNumber("第十章 真相.txt")).toBe(10)
     expect(extractImportedChapterNumber("chapter-002.md")).toBe(2)
     expect(extractImportedChapterNumber("番外.txt")).toBeNull()
   })
 
   it("matches chapter numbers after book and volume prefixes without treating volume as the chapter", () => {
-    expect(extractImportedChapterNumber("万古逍遥游-第一卷-第1章 前言.docx")).toBe(1)
-    expect(extractImportedChapterNumber("万古逍遥游-第一卷-第2章 浮生苍穹为寒.docx")).toBe(2)
-    expect(extractImportedChapterNumber("万古逍遥游-第一卷-第3章 十又五载.docx")).toBe(3)
+    expect(extractImportedChapterNumber("万古逍遥游-第一卷-第1章 前言.txt")).toBe(1)
+    expect(extractImportedChapterNumber("万古逍遥游-第一卷-第2章 浮生苍穹为寒.txt")).toBe(2)
+    expect(extractImportedChapterNumber("万古逍遥游-第一卷-第3章 十又五载.txt")).toBe(3)
   })
 
   it("sorts imported chapters by detected chapter number before unknown files", () => {
@@ -107,9 +107,9 @@ describe("chapter import", () => {
     fsMocks.readFile.mockImplementation(async (path: string) => `正文 ${path}`)
 
     await importChapterFiles("E:/Novel", [
-      "E:/book/万古逍遥游-第一卷-第3章 十又五载.docx",
-      "E:/book/万古逍遥游-第一卷-第1章 前言.docx",
-      "E:/book/万古逍遥游-第一卷-第2章 浮生苍穹为寒.docx",
+      "E:/book/万古逍遥游-第一卷-第3章 十又五载.txt",
+      "E:/book/万古逍遥游-第一卷-第1章 前言.txt",
+      "E:/book/万古逍遥游-第一卷-第2章 浮生苍穹为寒.txt",
     ], { finalForMemoryExtraction: false })
 
     const written = fsMocks.writeFile.mock.calls.map(([path, content]) => ({

@@ -22,7 +22,6 @@ export function resetProjectStores(): void {
     messages: [],
     activeConversationId: null,
     mode: "chat",
-    ingestSource: null,
     streamingContents: {},
   })
 

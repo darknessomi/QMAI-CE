@@ -689,11 +689,7 @@ function getRefType(path: string): string {
 /**
  * Markdown image-reference regex used to count `![](url)` occurrences
  * in cited pages AND extract the first URL (so the image-badge
- * jump button knows where to send the user). Same shape as the
- * search/pipeline regex elsewhere (kept duplicated to avoid
- * coupling — this module never wants to pull caption-pipeline
- * imports for a 3-character count).
- *
+ * jump button knows where to send the user).
  * Group 1 captures the URL (everything inside `(...)` of the
  * markdown image syntax, no whitespace).
  */

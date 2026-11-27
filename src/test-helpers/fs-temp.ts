@@ -93,9 +93,6 @@ export const realFs = {
     await copyRecursive(source, destination)
     return copied
   },
-  preprocessFile: async (p: string): Promise<string> => {
-    return fs.readFile(p, "utf-8")
-  },
   deleteFile: async (p: string): Promise<void> => {
     // 真实 delete_file 命令对文件与目录均支持递归删除；fs.rm 可同时覆盖两者
     await fs.rm(p, { recursive: true, force: true }).catch(() => {})

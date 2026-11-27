@@ -6,10 +6,6 @@
  * doesn't re-suggest it. Stored as a JSON array-of-arrays where
  * each inner array is one whitelisted group of slugs (lowercased,
  * sorted — see the canonical key logic in `dedup.ts`).
- *
- * Lives next to ingest-cache.json / image-caption-cache.json /
- * lexical-graph.json (when added) — same `.qmai/` directory,
- * same JSON-on-disk pattern.
  */
 import { readFile, writeFile, fileExists } from "@/commands/fs"
 import { normalizePath } from "@/lib/path-utils"

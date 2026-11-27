@@ -831,8 +831,8 @@ fn should_watch_rel(rel: &str, rules: &SourceWatchRules) -> bool {
     }
     if rel.starts_with("raw/sources/") {
         let ext = extension_of(name);
-        if !ext.is_empty()
-            && rules.exclude_extensions.contains(ext)
+        if super::fs::is_unsupported_office_ext(ext)
+            || (!ext.is_empty() && rules.exclude_extensions.contains(ext))
         {
             return false;
         }
@@ -1313,7 +1313,7 @@ mod tests {
     fn watch_rules_exclude_temporary_and_app_dirs() {
         let config = default_watch_config();
         let rules = SourceWatchRules::new(&config);
-        assert!(should_watch_rel("raw/sources/document.docx", &rules));
+        assert!(should_watch_rel("raw/sources/document.txt", &rules));
         assert!(should_watch_rel("wiki/concepts/topic.md", &rules));
         assert!(!should_watch_rel(
             &format!("{LEGACY_META_DIR}/file-change-queue.json"),
@@ -1331,7 +1331,7 @@ mod tests {
     #[test]
     fn source_watch_config_filters_raw_source_extensions_and_dirs() {
         let config = SourceWatchConfig {
-            include_extensions: vec!["md".into(), "docx".into()],
+            include_extensions: vec!["md".into(), "doc".into(), "docx".into(), "xlsx".into()],
             exclude_dirs: vec!["drafts".into(), "subdir/drafts".into()],
             exclude_globs: vec!["*.private.*".into()],
             ..SourceWatchConfig::default()
@@ -1340,6 +1340,9 @@ mod tests {
         let rules = SourceWatchRules::new(&config);
 
         assert!(should_watch_rel("raw/sources/final.md", &rules));
+        assert!(!should_watch_rel("raw/sources/document.DOCX", &rules));
+        assert!(!should_watch_rel("raw/sources/document.doc", &rules));
+        assert!(!should_watch_rel("raw/sources/sheet.xlsx", &rules));
         assert!(!should_watch_rel("raw/sources/data.json", &rules));
         assert!(!should_watch_rel("raw/sources/drafts/final.md", &rules));
         assert!(!should_watch_rel("raw/sources/subdir/drafts/final.md", &rules));

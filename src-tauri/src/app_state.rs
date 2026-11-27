@@ -11,6 +11,7 @@ use crate::atomic_file::write_bytes_atomically;
 
 pub const PRIMARY_FILE_NAME: &str = "app-state.json";
 pub const BAK_FILE_NAME: &str = "app-state.json.bak";
+pub(crate) const LEGACY_IMAGE_CAPTION_KEY: &str = "multimodalConfig";
 
 const LEGACY_RETRIEVAL_KEYS: [&str; 3] = ["embeddingConfig", "rerankConfig", "projectRerankConfigs"];
 // 同步桌面各窗口的延迟写盘、退出前保存和手动清理。
@@ -272,6 +273,11 @@ pub fn prepare_app_state_store<R: Runtime>(app: &AppHandle<R>) {
     };
     let report = recover_app_state_file(&dir);
     eprintln!("[app-state] {}", report.message);
+    for name in [BAK_FILE_NAME, PRIMARY_FILE_NAME] {
+        if let Err(error) = scrub_legacy_file(&dir.join(name), &[LEGACY_IMAGE_CAPTION_KEY]) {
+            eprintln!("[app-state] 清理 {name} 中的旧图片描述配置失败：{error}");
+        }
+    }
     if let Err(error) = open_app_state_store(app) {
         eprintln!("[app-state] 打开存储失败: {error}");
     }
@@ -302,7 +308,7 @@ pub async fn write_app_state_atomic(
         .map_err(|error| format!("write_app_state_atomic join error: {error}"))?
 }
 
-fn scrub_legacy_file(path: &Path) -> Result<bool, String> {
+fn scrub_legacy_file(path: &Path, keys: &[&str]) -> Result<bool, String> {
     use std::io::Write;
     let meta = match fs::symlink_metadata(path) {
         Ok(value) => value,
@@ -316,7 +322,7 @@ fn scrub_legacy_file(path: &Path) -> Result<bool, String> {
     let mut entries: Map<String, Value> = serde_json::from_slice(&bytes)
         .map_err(|_| "应用配置格式异常，已保留原文件".to_string())?;
     let before = entries.len();
-    for key in LEGACY_RETRIEVAL_KEYS {
+    for &key in keys {
         entries.remove(key);
     }
     if entries.len() == before {
@@ -342,7 +348,7 @@ pub async fn clear_legacy_retrieval_credentials(app: AppHandle) -> Result<bool, 
         let mut changed = false;
         // 先清恢复副本，再清主文件；重试时只处理剩余项。
         for name in [BAK_FILE_NAME, PRIMARY_FILE_NAME] {
-            changed |= scrub_legacy_file(&dir.join(name))
+            changed |= scrub_legacy_file(&dir.join(name), &LEGACY_RETRIEVAL_KEYS)
                 .map_err(|e| format!("清理 {name} 失败：{e}。可重试。"))?;
         }
         for key in LEGACY_RETRIEVAL_KEYS {
@@ -360,6 +366,23 @@ mod tests {
     use crate::atomic_file::write_bytes_atomically_with_replace;
 
     #[test]
+    fn scrub_image_caption_settings_preserves_other_credentials() {
+        let dir = tempfile::tempdir().unwrap();
+        let keep = serde_json::json!({"llmConfig": {"__qmaiEnc": "active"}, "rerankConfig": {"model": "old"}});
+        for (name, old_value) in [
+            (PRIMARY_FILE_NAME, serde_json::json!({"apiKey": "old"})),
+            (BAK_FILE_NAME, serde_json::json!({"__qmaiEnc": "old"})),
+        ] {
+            let path = dir.path().join(name);
+            let mut old = keep.clone();
+            old["multimodalConfig"] = old_value;
+            write_value(&path, &old).unwrap();
+            assert!(scrub_legacy_file(&path, &[LEGACY_IMAGE_CAPTION_KEY]).unwrap());
+            assert_eq!(serde_json::from_slice::<Value>(&fs::read(&path).unwrap()).unwrap(), keep);
+        }
+    }
+
+    #[test]
     fn scrub_only_retired_keys_without_decrypting_or_replacing_other_settings() {
         let dir = tempfile::tempdir().unwrap();
         for name in [PRIMARY_FILE_NAME, BAK_FILE_NAME] {
@@ -370,11 +393,11 @@ mod tests {
             old["rerankConfig"] = Value::Null;
             old["projectRerankConfigs"] = serde_json::json!({"__qmaiEnc":"unreadable"});
             write_value(&path, &old).unwrap();
-            assert!(scrub_legacy_file(&path).unwrap());
+            assert!(scrub_legacy_file(&path, &LEGACY_RETRIEVAL_KEYS).unwrap());
             assert_eq!(serde_json::from_slice::<Value>(&fs::read(&path).unwrap()).unwrap(), keep);
-            assert!(!scrub_legacy_file(&path).unwrap());
+            assert!(!scrub_legacy_file(&path, &LEGACY_RETRIEVAL_KEYS).unwrap());
             fs::write(&path, b"broken").unwrap();
-            assert!(scrub_legacy_file(&path).is_err());
+            assert!(scrub_legacy_file(&path, &LEGACY_RETRIEVAL_KEYS).is_err());
             assert_eq!(fs::read(&path).unwrap(), b"broken");
         }
     }

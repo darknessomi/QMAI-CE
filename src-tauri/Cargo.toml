@@ -37,10 +37,7 @@ chrono = { version = "0.4", features = ["clock"] }
 tauri-plugin-dialog = "2.8.4"
 tauri-plugin-store = "2.5.0"
 tauri-plugin-http = { version = "2.8.3", features = ["unsafe-headers"] }
-zip = "2"
-calamine = "0.36.1"
-docx-rs = "0.4.22"
-cfb = "0.7.3"
+zip = "9.0.5"
 encoding_rs = "0.8.44"
 # Embedded SAG2 search, per-project SQLite cache and Chinese full-text terms.
 rusqlite = { version = "0.37", features = ["bundled", "backup"] }
@@ -69,15 +66,6 @@ uuid = { version = "1", features = ["v4"] }
 # 版本已在 lock 里（reqwest/cookie_store 传递依赖），显式声明不引入新的下载。
 url = "2"
 toml = "0.9"
-# Multimodal image extraction (Office docs):
-#   `image` decodes embedded PPTX/DOCX raster bytes so we can apply
-#   the size filter before writing them to disk.
-#   `base64` serializes binary image data for Tauri IPC, which is
-#   JSON-only — Vec<u8> roundtrips ~1.33× larger than raw bytes but
-#   that's acceptable for our ~MB-scale per-image payloads.
-#   `sha2` is for the dedup cache (Phase 3) — same image hash =
-#   same caption, no redundant VLM calls. Pulled in here so the
-#   extraction layer can also expose the hash if a caller wants it.
 image = { version = "0.25", default-features = false, features = ["png"] }
 base64 = "0.22"
 sha2 = "0.10"

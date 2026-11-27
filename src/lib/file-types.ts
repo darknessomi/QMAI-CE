@@ -16,7 +16,6 @@ const EXT_MAP: Record<string, FileCategory> = {
 
   // Text
   txt: "text",
-  rtf: "text",
   log: "text",
 
   // Code
@@ -94,15 +93,6 @@ const EXT_MAP: Record<string, FileCategory> = {
 
   // Documents (binary, not directly previewable)
   pdf: "document",
-  doc: "document",
-  docx: "document",
-  xls: "document",
-  xlsx: "document",
-  ppt: "document",
-  pptx: "document",
-  odt: "document",
-  ods: "document",
-  odp: "document",
   pages: "document",
   numbers: "document",
   key: "document",
@@ -121,6 +111,10 @@ const EXT_MAP: Record<string, FileCategory> = {
 export function getFileCategory(filePath: string): FileCategory {
   const ext = filePath.split(".").pop()?.toLowerCase() ?? ""
   return EXT_MAP[ext] ?? "unknown"
+}
+
+export function isUnsupportedOfficePath(filePath: string): boolean {
+  return /\.(?:docx?|xlsx?|pptx?|odt|ods|odp|rtf)$/i.test(filePath)
 }
 
 export function isBinary(category: FileCategory): boolean {

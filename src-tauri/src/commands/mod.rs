@@ -7,7 +7,6 @@ pub mod claude_cli;
 pub(crate) mod cli_resolver;
 pub mod codex_cli;
 pub mod cursor_cli;
-pub mod extract_images;
 pub mod file_sync;
 pub mod fs;
 pub mod legacy_retrieval;

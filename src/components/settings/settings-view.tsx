@@ -165,7 +165,6 @@ export function UiTestModelSettingsSection({ draft, setDraft }: { draft: Setting
 
 function initialDraft(
   llm: ReturnType<typeof useWikiStore.getState>["llmConfig"],
-  multimodal: ReturnType<typeof useWikiStore.getState>["multimodalConfig"],
   outputLanguage: ReturnType<typeof useWikiStore.getState>["outputLanguage"],
   proxy: ReturnType<typeof useWikiStore.getState>["proxyConfig"],
   revisionFeedbackWindowConfig: ReturnType<typeof useWikiStore.getState>["revisionFeedbackWindowConfig"],
@@ -193,17 +192,6 @@ function initialDraft(
     apiMode: llm.apiMode,
     reasoning: llm.reasoning,
     localCliIsolation: llm.localCliIsolation === true,
-    multimodalEnabled: multimodal.enabled,
-    multimodalUseMainLlm: multimodal.useMainLlm,
-    multimodalProvider: multimodal.provider,
-    multimodalApiKey: multimodal.apiKey,
-    multimodalModel: multimodal.model,
-    multimodalOllamaUrl: multimodal.ollamaUrl,
-    multimodalCustomEndpoint: multimodal.customEndpoint,
-    multimodalAzureApiVersion: multimodal.azureApiVersion ?? "2024-10-21",
-    multimodalAzureModelFamily: multimodal.azureModelFamily ?? "auto",
-    multimodalApiMode: multimodal.apiMode,
-    multimodalConcurrency: multimodal.concurrency,
     outputLanguage,
     maxHistoryMessages,
     proxyEnabled: proxy.enabled,
@@ -231,8 +219,6 @@ export function SettingsView() {
   const setActiveSettingsCategory = useWikiStore((s) => s.setActiveSettingsCategory)
   const llmConfig = useWikiStore((s) => s.llmConfig)
   const setLlmConfig = useWikiStore((s) => s.setLlmConfig)
-  const multimodalConfig = useWikiStore((s) => s.multimodalConfig)
-  const setMultimodalConfig = useWikiStore((s) => s.setMultimodalConfig)
   const outputLanguage = useWikiStore((s) => s.outputLanguage)
   const setOutputLanguage = useWikiStore((s) => s.setOutputLanguage)
   const proxyConfig = useWikiStore((s) => s.proxyConfig)
@@ -266,7 +252,6 @@ export function SettingsView() {
   const [draft, setDraftState] = useState<SettingsDraft>(() =>
     initialDraft(
       llmConfig,
-      multimodalConfig,
       outputLanguage,
       proxyConfig,
       revisionFeedbackWindowConfig,
@@ -322,7 +307,6 @@ export function SettingsView() {
     setDraftState((prev) =>
       initialDraft(
         llmConfig,
-        multimodalConfig,
         outputLanguage,
         proxyConfig,
         revisionFeedbackWindowConfig,
@@ -341,7 +325,6 @@ export function SettingsView() {
     )
   }, [
     llmConfig,
-    multimodalConfig,
     outputLanguage,
     proxyConfig,
     revisionFeedbackWindowConfig,
@@ -364,7 +347,6 @@ export function SettingsView() {
   const handleSave = useCallback(async () => {
     const {
       saveLlmConfig,
-      saveMultimodalConfig,
       saveProxyConfig,
       saveRevisionFeedbackWindowConfig,
       saveNovelConfig,
@@ -393,26 +375,6 @@ export function SettingsView() {
       reasoning: draft.reasoning,
       localCliIsolation: draft.localCliIsolation,
     }
-    const newMultimodal = {
-      enabled: draft.multimodalEnabled,
-      useMainLlm: draft.multimodalUseMainLlm,
-      provider: draft.multimodalProvider,
-      apiKey: draft.multimodalApiKey,
-      model: draft.multimodalModel,
-      ollamaUrl: draft.multimodalOllamaUrl,
-      customEndpoint: draft.multimodalCustomEndpoint,
-      azureApiVersion: draft.multimodalProvider === "azure" ? draft.multimodalAzureApiVersion.trim() : undefined,
-      azureModelFamily: draft.multimodalProvider === "azure" ? draft.multimodalAzureModelFamily : undefined,
-      apiMode: draft.multimodalProvider === "custom" ? draft.multimodalApiMode : undefined,
-      // Clamp at save time so a hand-edited persisted store with a
-      // ridiculous concurrency value (e.g. someone setting 1000 in
-      // the JSON) doesn't blow up the captioning pipeline. Caption
-      // calls already share the LLM endpoint with everything else;
-      // going wider than ~16 just queues behind the server's batch
-      // slot.
-      concurrency: Math.max(1, Math.min(16, draft.multimodalConcurrency || 4)),
-    }
-
     const newProxy = {
       enabled: draft.proxyEnabled,
       url: draft.proxyUrl.trim(),
@@ -421,8 +383,6 @@ export function SettingsView() {
 
     setLlmConfig(newLlm)
     await saveLlmConfig(newLlm)
-    setMultimodalConfig(newMultimodal)
-    await saveMultimodalConfig(newMultimodal)
     setProxyConfig(newProxy)
     await saveProxyConfig(newProxy)
     // Apply the proxy env vars LIVE so the next outbound request

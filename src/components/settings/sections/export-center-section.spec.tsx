@@ -61,7 +61,7 @@ describe("设置中的统一导出中心", () => {
     vi.clearAllMocks()
   })
 
-  it("提供项目、章节与大纲来源和格式选择，缺失来源禁用且内容区可滚动", () => {
+  it("提供项目、章节与大纲来源及 TXT 导出，缺失来源禁用且内容区可滚动", () => {
     expect(host.textContent).toContain("统一导出中心")
     expect(host.querySelectorAll("select option")).toHaveLength(2)
     expect(host.textContent).toContain("章节")
@@ -70,31 +70,26 @@ describe("设置中的统一导出中心", () => {
     expect(host.textContent).not.toContain("剧情推演室")
     expect(host.textContent).not.toContain("灵魂作品")
     expect(host.textContent).toContain("UTF-8 TXT")
-    expect(host.textContent).toContain("Word DOCX")
+    expect(host.querySelector('input[name="export-format"]')).toBeNull()
     expect((host.querySelector('input[value="outlines"]') as HTMLInputElement).disabled).toBe(true)
     expect(host.querySelector("[data-export-center-scroll]")?.className).toContain("overflow-y-auto")
-    expect(host.querySelectorAll("fieldset")).toHaveLength(2)
-    expect(Array.from(host.querySelectorAll("legend")).map((legend) => legend.textContent)).toEqual(["选择导出内容", "导出格式"])
+    expect(Array.from(host.querySelectorAll("legend")).map((legend) => legend.textContent)).toEqual(["选择导出内容"])
   })
 
   it("导出期间禁用操作并显示中文成功反馈", async () => {
     let finish: ((value: { status: "success"; exportedCount: number }) => void) | undefined
     exportMock.mockReturnValueOnce(new Promise((resolvePromise) => { finish = resolvePromise }))
     const chapter = host.querySelector('input[value="chapters"]') as HTMLInputElement
-    const docx = host.querySelector('input[value="docx"]') as HTMLInputElement
     const button = Array.from(host.querySelectorAll("button")).find((item) => item.textContent === "开始导出") as HTMLButtonElement
 
-    await act(async () => {
-      chapter.click()
-      docx.click()
-    })
+    await act(async () => { chapter.click() })
     await act(async () => { button.click() })
 
     expect(host.textContent).toContain("正在导出…")
     expect((Array.from(host.querySelectorAll("button")).find((item) => item.textContent === "正在导出…") as HTMLButtonElement).disabled).toBe(true)
 
     await act(async () => { finish?.({ status: "success", exportedCount: 1 }) })
-    expect(exportMock).toHaveBeenCalledWith([chapterDocument], "docx", undefined, expect.any(Function))
+    expect(exportMock).toHaveBeenCalledWith([chapterDocument], undefined, expect.any(Function))
     expect(host.textContent).toContain("已成功导出 1 个文件。")
   })
 
@@ -105,7 +100,7 @@ describe("设置中的统一导出中心", () => {
     await act(async () => { chapter.click() })
     const button = Array.from(host.querySelectorAll("button")).find((item) => item.textContent === "开始导出") as HTMLButtonElement
     await act(async () => { button.click() })
-    const guard = exportMock.mock.calls[0][3] as () => boolean
+    const guard = exportMock.mock.calls[0][2] as () => boolean
     expect(guard()).toBe(true)
 
     await act(async () => root.unmount())

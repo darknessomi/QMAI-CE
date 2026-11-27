@@ -96,7 +96,6 @@ describe("app-state 敏感字段加密", () => {
     expect([...ENCRYPTED_STATE_KEYS].sort()).toEqual(
       [
         "llmConfig",
-        "multimodalConfig",
         "searchApiConfig",
         "sync.webdav",
       ].sort(),

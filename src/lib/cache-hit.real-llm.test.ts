@@ -1,6 +1,6 @@
-import { describe, it } from "vitest"
-import fs from "node:fs"
+import { afterAll, beforeAll, describe, it } from "vitest"
 import path from "node:path"
+import { createTempProject, readFileRaw, writeFileRaw } from "@/test-helpers/fs-temp"
 import {
   buildStableContextPrefix,
   buildDeepChapterBriefPrompt,
@@ -11,37 +11,14 @@ import { buildContextHubPromptParts, withContextHubTaskContent } from "@/lib/con
 import type { ChatMessage } from "@/lib/llm-providers"
 
 /**
- * 真机缓存实测：用**真实项目内容 + 真实提示词构造器**，打到硅基流动的
- * DeepSeek-V4.1，读 response.usage 里的 cached_tokens。
- *
- * 只回答四个问题：
- *   1 章节多阶段（现状兄弟请求 / 修后单会话追加）
- *   2 大纲两轮
- *   3 灵魂 + 技能库 + 推演资料：现状（全塞尾部）vs 修后（资料前移）
- *   4 技能库内容到底有没有进可命中前缀
- *
- * 名字带 .real-llm. 所以不会进快速测试套件。运行：
- *   node_modules/vitest/vitest.mjs run src/lib/cache-hit.real-llm.test.ts --no-file-parallelism
+ * 在环境变量或 .env.test.local 中配置 CACHE_PROBE_BASE_URL（OpenAI 兼容 API 根地址）
+ * 和 CACHE_PROBE_MODEL。需要鉴权的服务另设 CACHE_PROBE_API_KEY。
+ * 运行 pnpm run test:llm 可查看各轮请求的缓存命中率。
  */
-
-const APP_STATE = "C:\\Users\\Administrator\\AppData\\Roaming\\com.qingmuai.writer.ce\\app-state.json"
-const PROJECT = "C:\\QM-BOOK\\黑雨之下"
-const PROVIDER_LABEL = process.env.CACHE_PROBE_PROVIDER ?? "硅基流动"
-
-interface Provider { baseUrl: string; apiKey: string; model: string }
-
-function loadProvider(): Provider {
-  const state = JSON.parse(fs.readFileSync(APP_STATE, "utf-8"))
-  const table = (state.state ?? state).providerConfigs as Record<string, Record<string, string>>
-  for (const config of Object.values(table)) {
-    if (config.label === PROVIDER_LABEL) {
-      return { baseUrl: (config.baseUrl ?? "").replace(/\/$/, ""), apiKey: config.apiKey ?? "", model: config.model ?? "" }
-    }
-  }
-  throw new Error(`provider not found: ${PROVIDER_LABEL}`)
-}
-
-const provider = loadProvider()
+const baseUrl = process.env.CACHE_PROBE_BASE_URL?.trim().replace(/\/+$/, "")
+const model = process.env.CACHE_PROBE_MODEL?.trim()
+const apiKey = process.env.CACHE_PROBE_API_KEY?.trim()
+const configured = Boolean(baseUrl && model)
 const rows: Array<{ tag: string; prompt: number; cached: number; hit: number }> = []
 
 function flatten(content: ChatMessage["content"]): string {
@@ -51,7 +28,7 @@ function flatten(content: ChatMessage["content"]): string {
 
 async function send(tag: string, messages: ChatMessage[], maxTokens = 8): Promise<number> {
   const body = {
-    model: provider.model,
+    model,
     messages: messages.map((message) => ({ role: message.role, content: flatten(message.content) })),
     max_tokens: maxTokens,
     stream: false,
@@ -59,9 +36,12 @@ async function send(tag: string, messages: ChatMessage[], maxTokens = 8): Promis
   let payload: any = null
   for (let attempt = 0; attempt < 5; attempt += 1) {
     try {
-      const response = await fetch(`${provider.baseUrl}/chat/completions`, {
+      const response = await fetch(`${baseUrl}/chat/completions`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${provider.apiKey}` },
+        headers: {
+          "Content-Type": "application/json",
+          ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+        },
         body: JSON.stringify(body),
       })
       if (!response.ok) throw new Error(`HTTP ${response.status} ${(await response.text()).slice(0, 160)}`)
@@ -82,42 +62,51 @@ async function send(tag: string, messages: ChatMessage[], maxTokens = 8): Promis
   return hit
 }
 
-function read(relative: string, limit = 4000): string {
-  try {
-    return fs.readFileSync(path.join(PROJECT, relative), "utf-8").slice(0, limit)
-  } catch {
-    return ""
+async function prepareProjectMaterial(projectPath: string) {
+  // 校准要有足够长、在多轮间稳定的前缀，所有记录都由测试生成。
+  const outline = Array.from({ length: 120 }, (_, i) =>
+    `场景 ${i + 1}：记录员在码头核对第 ${i + 1} 箱货物的封条，值班人递交签收单。两份编号相差一位，记录员把单据留下，等下一班船进港时复核。`,
+  ).join("\n")
+  const skills = Array.from({ length: 80 }, (_, i) => ({
+    scene: i + 1,
+    instruction: `用角色观察到的动作引出第 ${i + 1} 号封条，在交接对话中交代谁最后签过字。`,
+  }))
+  const files = {
+    "purpose.md": "缓存测试作品。记录员必须在轮船离港前查清错发的货物。",
+    "schema.md": "故事发生在渡口，以交接班记录和货物清单作为线索。",
+    "wiki/outlines/码头.md": outline,
+    "wiki/memory/当班记录.md": "值班人持有签收单，记录员保管封条。两人约定天亮复核。",
+    "writing-skills.json": JSON.stringify(skills),
+    "wiki/chapters/chapter-019.md": "雨水沿篷布边缘落下。记录员把两张签收单摊在灯下，等着下一班船。",
   }
+  await Promise.all(Object.entries(files).map(([name, content]) =>
+    writeFileRaw(path.join(projectPath, name), content),
+  ))
+  const read = (name: keyof typeof files) => readFileRaw(path.join(projectPath, name))
+  const [purpose, schema, plan, context, skillText, chapter] = await Promise.all([
+    read("purpose.md"), read("schema.md"), read("wiki/outlines/码头.md"),
+    read("wiki/memory/当班记录.md"), read("writing-skills.json"), read("wiki/chapters/chapter-019.md"),
+  ])
+  return { purpose, schema, outline: [purpose, plan, schema].join("\n\n"), context, skills: skillText, chapter }
 }
 
-/** 真实项目素材：大纲、设定、灵魂、记忆、技能库。 */
-function loadProjectMaterial() {
-  const outlineDir = path.join(PROJECT, "wiki", "outlines")
-  const outlineFiles = fs.existsSync(outlineDir) ? fs.readdirSync(outlineDir).slice(0, 3) : []
-  const outline = [
-    read("purpose.md", 1200),
-    ...outlineFiles.map((file) => read(path.join("wiki", "outlines", file), 2500)),
-    read("schema.md", 1200),
-  ].filter(Boolean).join("\n\n")
-
-  const context = [
-    read("wiki/index.md", 800),
-    read("wiki/overview.md", 1500),
-    read("wiki/memory", 2000),
-  ].filter(Boolean).join("\n\n")
-
-  const skillsJson = read("writing-skills.json", 6000)
-  const deAiJson = read("de-ai-skills.json", 3000)
-  const chapter = read("wiki/chapters/chapter-019.md", 3000) || read("wiki/chapters/chapter-018.md", 3000)
-
-  return { outline, context, skills: `${skillsJson}\n\n${deAiJson}`, chapter }
-}
-
-const material = loadProjectMaterial()
 const user = (text: string): ChatMessage => ({ role: "user", content: text })
 const assistant = (text: string): ChatMessage => ({ role: "assistant", content: text })
 
-describe("真机缓存实测（硅基流动 DeepSeek-V4.1）", () => {
+const suiteName = configured
+  ? "真实模型缓存实测"
+  : "真实模型缓存实测（已跳过：需要配置 CACHE_PROBE_BASE_URL 和 CACHE_PROBE_MODEL）"
+
+describe.skipIf(!configured)(suiteName, () => {
+  let project: Awaited<ReturnType<typeof createTempProject>>
+  let material: Awaited<ReturnType<typeof prepareProjectMaterial>>
+
+  beforeAll(async () => {
+    project = await createTempProject("cache-probe")
+    material = await prepareProjectMaterial(project.path)
+  })
+  afterAll(async () => { await project?.cleanup() })
+
   it("场景0：校准——大 prompt 重复两次，确认缓存生效", async () => {
     const calibration: ChatMessage[] = [
       { role: "system", content: "## 校准\n" + material.outline.slice(0, 6000) },
@@ -186,8 +175,8 @@ describe("真机缓存实测（硅基流动 DeepSeek-V4.1）", () => {
   it("场景3/4：灵魂+技能库+推演资料——现状（尾部注入）vs 修后（资料前移）", async () => {
     const softwareRules = "## 软件规则\n你是专业小说写作助手。所有面向用户的回复必须使用中文。\n必须遵守角色人格与记忆库。"
     const stableCore = [
-      "### 作品灵魂\n" + read("purpose.md", 2000),
-      "### 核心设定\n" + read("schema.md", 2000),
+      "### 作品灵魂\n" + material.purpose,
+      "### 核心设定\n" + material.schema,
       "### 写作风格与技能库\n" + material.skills.slice(0, 4000),
       "### 大纲骨架\n" + material.outline.slice(0, 4000),
     ].join("\n\n")
@@ -275,13 +264,15 @@ describe("真机缓存实测（硅基流动 DeepSeek-V4.1）", () => {
     ])
   }, 600_000)
 
-  it("汇总", () => {
+  it("汇总", async ({ annotate }) => {
     // eslint-disable-next-line no-console
     console.log("\n===== 汇总 =====")
     for (const row of rows) {
       // eslint-disable-next-line no-console
       console.log(`${row.tag.padEnd(38)} prompt=${String(row.prompt).padStart(6)} cached=${String(row.cached).padStart(6)} 命中=${(row.hit * 100).toFixed(1)}%`)
     }
-    fs.writeFileSync("C:\\QMAI_C\\QMAI-main\\.codex-temp\\cache-probe-app.json", JSON.stringify(rows, null, 2), "utf-8")
+    const report = path.join(project.path, "cache-probe-app.json")
+    await writeFileRaw(report, JSON.stringify(rows, null, 2))
+    await annotate("缓存命中统计", { path: report })
   })
 })
