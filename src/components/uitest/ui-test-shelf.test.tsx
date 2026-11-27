@@ -79,7 +79,9 @@ import { removeProjectRecords } from "@/lib/project-store"
 import { UiTestShelf } from "./ui-test-shelf"
 import { CreateProjectDialog } from "@/components/project/create-project-dialog"
 
-const project: WikiProject = { id: "novel-1", name: "真实小说", path: "C:/已打开的小说/真实小说" }
+const authorHome = "/Users/作者"
+const defaultNovelDir = `${authorHome}/QM-BOOK`
+const project: WikiProject = { id: "novel-1", name: "真实小说", path: `${defaultNovelDir}/真实小说` }
 let host: HTMLDivElement
 let root: Root
 
@@ -88,7 +90,8 @@ beforeEach(() => {
   vi.resetAllMocks()
   mocks.uiTest = true
   localStorage.clear()
-  mocks.getExecutableDir.mockResolvedValue("C:/QMAI")
+  mocks.isMacOS.mockReturnValue(true)
+  mocks.homeDir.mockResolvedValue(authorHome)
   mocks.fileExists.mockResolvedValue(false)
   mocks.getRecentProjects.mockResolvedValue([project])
   mocks.loadRegisteredProjects.mockResolvedValue([])
@@ -159,7 +162,7 @@ describe("独立 UI 书架", () => {
   })
 
   it("读取完整独立书库而不是最近十条", async () => {
-    const projects = Array.from({ length: 15 }, (_, n) => ({ id: `book-${n}`, name: `小说${n}`, path: `C:/登记目录/${n}` }))
+    const projects = Array.from({ length: 15 }, (_, n) => ({ id: `book-${n}`, name: `小说${n}`, path: `/Volumes/登记目录/${n}` }))
     localStorage.setItem("qm-uitest-library", JSON.stringify({ schemaVersion: 1, projects }))
     mocks.getRecentProjects.mockResolvedValue(projects.slice(5))
     await renderShelf()
@@ -167,29 +170,43 @@ describe("独立 UI 书架", () => {
     expect(host.textContent).toContain("小说0")
   })
 
-  it("只读发现默认小说目录，不调用会迁移或登记正式配置的打开函数", async () => {
+  it.each([
+    {
+      platform: "macOS",
+      defaultDir: defaultNovelDir,
+      bookPath: `${defaultNovelDir}/默认小说`,
+      outsidePath: "/Volumes/其他目录",
+    },
+    {
+      platform: "Windows",
+      defaultDir: "C:\\QM-BOOK",
+      bookPath: "C:/QM-BOOK/默认小说",
+      outsidePath: "D:/其他目录",
+    },
+  ])("$platform 只读扫描默认小说目录", async ({ platform, defaultDir, bookPath, outsidePath }) => {
+    mocks.isMacOS.mockReturnValue(platform === "macOS")
+    mocks.getExecutableDir.mockResolvedValue("C:/QMAI")
     mocks.getRecentProjects.mockResolvedValue([])
     mocks.fileExists.mockResolvedValue(true)
-    mocks.listDirectory.mockImplementation(async (path: string) => path.replace(/\\/g, "/") === "C:/QM-BOOK"
+    mocks.listDirectory.mockImplementation(async (path: string) => path === defaultDir
       ? [
-        { name: "默认小说", path: "C:/QM-BOOK/默认小说", is_dir: true },
-        { name: "外部目录", path: "D:/其他目录", is_dir: true },
+        { name: "默认小说", path: bookPath, is_dir: true },
+        { name: "外部目录", path: outsidePath, is_dir: true },
       ]
       : [])
     mocks.readFile.mockResolvedValue(JSON.stringify({ id: "existing-id" }))
-    mocks.openProject.mockResolvedValue({ id: "existing-id", name: "默认小说", path: "C:/QM-BOOK/默认小说" })
     await renderShelf()
     expect(mocks.openProject).not.toHaveBeenCalled()
     expect(mocks.writeFile).not.toHaveBeenCalled()
-    expect(mocks.listDirectory).toHaveBeenCalledWith(expect.stringMatching(/C:[\\/]QM-BOOK$/), { maxDepth: 1 })
-    expect(mocks.readFile).toHaveBeenCalledWith("C:/QM-BOOK/默认小说/.qmai/project.json")
-    expect(mocks.readFile.mock.calls.some(([path]) => String(path).startsWith("D:"))).toBe(false)
+    expect(mocks.listDirectory).toHaveBeenCalledWith(defaultDir, { maxDepth: 1 })
+    expect(mocks.readFile).toHaveBeenCalledWith(`${bookPath}/.qmai/project.json`)
+    expect(mocks.readFile).not.toHaveBeenCalledWith(`${outsidePath}/.qmai/project.json`)
     expect(host.querySelectorAll(".ui-test-book-card")).toHaveLength(1)
   })
 
   it("默认目录不存在时仍显示已登记的历史小说", async () => {
-    const historical = { id: "old-1", name: "历史小说", path: "D:/QM-BOOK/历史小说" }
-    const recentOnly = { id: "recent-1", name: "最近小说", path: "E:/作品/最近小说" }
+    const historical = { id: "old-1", name: "历史小说", path: `${defaultNovelDir}/历史小说` }
+    const recentOnly = { id: "recent-1", name: "最近小说", path: "/Volumes/作品/最近小说" }
     mocks.getRecentProjects.mockResolvedValue([recentOnly])
     mocks.loadRegisteredProjects.mockResolvedValue([historical])
     mocks.fileExists.mockResolvedValue(false)
@@ -197,7 +214,7 @@ describe("独立 UI 书架", () => {
     expect(host.textContent).toContain("历史小说")
     expect(host.textContent).toContain("最近小说")
     expect(host.querySelector('[role="alert"]')).toBeNull()
-    expect(mocks.listDirectory.mock.calls.some(([path]) => String(path).replace(/\\/g, "/").toLowerCase() === "c:/qm-book")).toBe(false)
+    expect(mocks.listDirectory.mock.calls.map(([path]) => path)).not.toContain(defaultNovelDir)
   })
 
   it("标题去书名号仅用于展示，键盘聚焦不再弹黑色浮层，开书仍传原项目", async () => {
@@ -362,7 +379,7 @@ describe("独立 UI 书架", () => {
   })
 
   it("封面八色取自参考图，筛选后同一本书不换色", async () => {
-    const projects = Array.from({ length: 8 }, (_, n) => ({ id: `color-${n}`, name: `配色小说${n}`, path: `C:/书/${n}` }))
+    const projects = Array.from({ length: 8 }, (_, n) => ({ id: `color-${n}`, name: `配色小说${n}`, path: `${defaultNovelDir}/${n}` }))
     mocks.getRecentProjects.mockResolvedValue(projects)
     await renderShelf()
     const backgrounds = Array.from(host.querySelectorAll<HTMLElement>(".ui-test-cover")).map((cover) => cover.style.backgroundColor)
@@ -373,21 +390,17 @@ describe("独立 UI 书架", () => {
 
 describe("书架新建小说弹窗", () => {
   it("macOS 书架扫描、弹窗预览和创建使用同一主目录", async () => {
-    mocks.isMacOS.mockReturnValue(true)
-    mocks.homeDir.mockResolvedValue("/Users/作者")
-    const expected = "/Users/作者/QM-BOOK"
     await renderShelf()
-    expect(mocks.fileExists).toHaveBeenCalledWith(expected)
+    expect(mocks.fileExists).toHaveBeenCalledWith(defaultNovelDir)
     await act(async () => root.render(<CreateProjectDialog open onOpenChange={vi.fn()} onCreated={vi.fn()} />))
     const dialog = document.body.querySelector<HTMLElement>('[data-ui-test-dialog="create-project"]')!
-    expect(dialog.querySelector("output")?.textContent).toBe(expected)
+    expect(dialog.querySelector("output")?.textContent).toBe(defaultNovelDir)
     await typeInto(dialog.querySelector("input")!, "新书")
     await act(async () => button("创建并写大纲", dialog).click())
-    expect(mocks.createProject).toHaveBeenCalledWith("新书", expected)
+    expect(mocks.createProject).toHaveBeenCalledWith("新书", defaultNovelDir)
   })
 
   it("macOS 主目录读取失败时仍可选择目录创建", async () => {
-    mocks.isMacOS.mockReturnValue(true)
     mocks.homeDir.mockRejectedValue(new Error())
     mocks.pickDirectory.mockResolvedValue("/Volumes/小说")
     await act(async () => root.render(<CreateProjectDialog open onOpenChange={vi.fn()} onCreated={vi.fn()} />))
@@ -403,6 +416,7 @@ describe("书架新建小说弹窗", () => {
   it("测试版提供两主字段、目录选择和创建并写大纲，保留原创建链", async () => {
     const onCreated = vi.fn()
     const onOpenChange = vi.fn()
+    const selectedDir = "/Volumes/小说/用户指定目录"
     await act(async () => root.render(<CreateProjectDialog open onOpenChange={onOpenChange} onCreated={onCreated} />))
     const dialog = document.body.querySelector<HTMLElement>('[data-ui-test-dialog="create-project"]')
     expect(dialog).not.toBeNull()
@@ -413,12 +427,12 @@ describe("书架新建小说弹窗", () => {
     const name = dialog!.querySelector<HTMLInputElement>("input")!
     expect(name.id).toBe(dialog!.querySelector("label")!.htmlFor)
     await typeInto(name, "  用户小说  ")
-    mocks.pickDirectory.mockResolvedValue("D:/用户指定目录")
+    mocks.pickDirectory.mockResolvedValue(selectedDir)
     await act(async () => button("选择目录", dialog!).click())
-    expect(dialog!.textContent).toContain("D:/用户指定目录")
+    expect(dialog!.textContent).toContain(selectedDir)
     await act(async () => dialog!.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })))
-    expect(mocks.createDirectory).toHaveBeenCalledWith("D:/用户指定目录")
-    expect(mocks.createProject).toHaveBeenCalledWith("用户小说", "D:/用户指定目录")
+    expect(mocks.createDirectory).toHaveBeenCalledWith(selectedDir)
+    expect(mocks.createProject).toHaveBeenCalledWith("用户小说", selectedDir)
     expect(mocks.writeFile).toHaveBeenCalledWith(`${project.path}/schema.md`, "原有结构")
     expect(mocks.writeFile).toHaveBeenCalledWith(`${project.path}/purpose.md`, "原有用途")
     expect(mocks.createDirectory).toHaveBeenCalledWith(`${project.path}/wiki/outlines`)
@@ -429,19 +443,20 @@ describe("书架新建小说弹窗", () => {
   })
 
   it("异步解析默认目录后展示真实位置，不一直停留在读取中", async () => {
-    let resolveDirectory!: (path: string) => void
-    mocks.getExecutableDir.mockReturnValue(new Promise<string>((resolve) => { resolveDirectory = resolve }))
+    let resolveHome!: (path: string) => void
+    mocks.homeDir.mockReturnValue(new Promise<string>((resolve) => { resolveHome = resolve }))
     await act(async () => root.render(<CreateProjectDialog open onOpenChange={vi.fn()} onCreated={vi.fn()} />))
-    await act(async () => { resolveDirectory("E:/程序安装位置") })
+    await act(async () => { resolveHome("/Volumes/资料盘/作者") })
     const output = document.body.querySelector(".ui-test-create-path")
-    expect(output?.textContent).toBe("E:\\QM-BOOK")
+    expect(output?.textContent).toBe("/Volumes/资料盘/作者/QM-BOOK")
   })
 
   it("创建失败保留合法长名称与所选目录，实际错误中文可见", async () => {
     const onCreated = vi.fn()
     const onOpenChange = vi.fn()
+    const selectedDir = "/Volumes/小说/用户保留目录"
     mocks.createProject.mockRejectedValue(new Error("目录已存在：用户小说"))
-    mocks.pickDirectory.mockResolvedValue("D:/用户保留目录")
+    mocks.pickDirectory.mockResolvedValue(selectedDir)
     await act(async () => root.render(<CreateProjectDialog open onOpenChange={onOpenChange} onCreated={onCreated} />))
     const dialog = document.body.querySelector<HTMLElement>('[data-ui-test-dialog="create-project"]')!
     const input = dialog.querySelector<HTMLInputElement>("input")!
@@ -450,9 +465,9 @@ describe("书架新建小说弹窗", () => {
     await act(async () => button("选择目录", dialog).click())
     await act(async () => dialog.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })))
     expect(input.value).toBe(name)
-    expect(dialog.textContent).toContain("D:/用户保留目录")
+    expect(dialog.textContent).toContain(selectedDir)
     expect(dialog.querySelector('[role="alert"]')?.textContent).toContain("目录已存在")
-    expect(mocks.createProject).toHaveBeenCalledWith(name, "D:/用户保留目录")
+    expect(mocks.createProject).toHaveBeenCalledWith(name, selectedDir)
     expect(mocks.writeFile).not.toHaveBeenCalled()
     expect(onCreated).not.toHaveBeenCalled()
     expect(onOpenChange).not.toHaveBeenCalledWith(false)
@@ -524,7 +539,7 @@ describe("书架新建小说弹窗", () => {
     const dialog = document.body.querySelector<HTMLElement>('[data-ui-test-dialog="create-project"]')!
     expect(dialog.textContent).toContain("让一个新故事开始")
     expect(dialog.textContent).toContain("创建并写大纲")
-    expect(dialog.textContent).toContain("C:\\QM-BOOK")
+    expect(dialog.textContent).toContain(defaultNovelDir)
   })
 })
 

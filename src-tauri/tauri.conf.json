@@ -44,10 +44,6 @@
   },
   "bundle": {
     "active": true,
-    "targets": [
-      "nsis",
-      "app"
-    ],
     "resources": {
       "../skills/**/*": "skills/",
       "migration/runtime/": "migration/runtime/",

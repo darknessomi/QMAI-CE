@@ -1,52 +1,20 @@
 name: CI
 
 on:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
   workflow_dispatch:
 
 jobs:
-  changes:
-    name: Detect changes
-    runs-on: ubuntu-22.04
-    outputs:
-      rust: ${{ github.event_name == 'workflow_dispatch' && 'true' || steps.filter.outputs.rust }}
-    steps:
-      - name: Checkout
-        if: github.event_name != 'workflow_dispatch'
-        uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-
-      - name: Filter paths
-        if: github.event_name != 'workflow_dispatch'
-        uses: dorny/paths-filter@v4
-        id: filter
-        with:
-          filters: |
-            rust:
-              - 'src-tauri/**'
-
-  # PR / manual only. Merge to main already passed this on the PR;
-  # do not compile the same debug tree again.
   check:
-    name: Check Ubuntu
-    needs: changes
-    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-22.04
+    name: Check macOS (Apple Silicon)
+    runs-on: macos-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v5
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y curl libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
 
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
@@ -67,32 +35,18 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Check frontend build
-        run: pnpm exec vite build
+        run: pnpm run build
+
+      - name: Run frontend tests
+        run: pnpm run test:mocks
+
+      - name: Prepare macOS migration runtime
+        run: node scripts/prepare-migration-worker.mjs
 
       - name: Check Rust build
         working-directory: src-tauri
-        run: cargo build
+        run: cargo build --locked
 
-  check-windows:
-    name: Check Windows (Rust)
-    needs: changes
-    if: >-
-      (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch') &&
-      needs.changes.outputs.rust == 'true'
-    runs-on: windows-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Rust cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
-          cache-on-failure: true
-
-      - name: Check Rust build
+      - name: Run Rust tests
         working-directory: src-tauri
-        run: cargo build
+        run: cargo test --locked --lib

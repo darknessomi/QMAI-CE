@@ -14,8 +14,8 @@
     "build": "pnpm run typecheck && vite build",
     "preview": "vite preview",
     "test": "pnpm run test:mocks && pnpm run test:llm",
-    "test:mocks": "vitest run --exclude='**/*.real-llm.test.ts' --exclude='**/.worktrees/**' --exclude='**/.claude/**' --exclude='**/.codex-temp/**' --exclude='**/superpowers-main/**' --exclude='**/SKILL/**' --exclude='**/superpowers/**' --exclude='**/nul' && node --test \"sdk/test/**/*.test.mjs\" \"samples/plugins/**/*.test.mjs\"",
-    "test:llm": "vitest run real-llm --no-file-parallelism --reporter=verbose --exclude='**/.claude/**' --exclude='**/.worktrees/**' --exclude='**/.codex-temp/**'",
+    "test:mocks": "vitest run --exclude \"**/*.real-llm.test.ts\" && node --test \"sdk/test/**/*.test.mjs\" \"samples/plugins/**/*.test.mjs\"",
+    "test:llm": "vitest run real-llm --no-file-parallelism --reporter=verbose",
     "tauri": "tauri"
   },
   "dependencies": {
